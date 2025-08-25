@@ -1,9 +1,29 @@
+import { RNG } from "./core/rng.js";
+import { Timers } from "./core/timers.js";
+import { ensureLayers } from "./render/layers.js";
+import { runSelfTests, renderSelfTestBadge } from "./selftest.js";
+
+// Global state object for seed management
+const state = {
+  seed: Math.floor(Math.random() * 1000000) // Random seed for initial generation
+};
+
+// Seeded RNG + Timers singletons
+const rng = new RNG(state.seed);
+const timers = new Timers();
+
 console.time('generate');
 generate(5); // Generate a random map with 5 features on initial load
 console.timeEnd('generate');
 
-// genaral function; run onload of to start from scratch
+// general function; run onload of to start from scratch
 function generate(count) {
+  timers.clear();
+  timers.mark('generate');
+
+  // make RNG deterministic for this generation
+  rng.reseed(state.seed);
+
   // Add general elements
   var svg = d3.select("svg")
     .on("touchmove mousemove", moved),
@@ -103,7 +123,7 @@ function generate(count) {
       }
       polygons[queue[i]].neighbors.forEach(function(e) {
         if (used.indexOf(e) < 0) {
-          var mod = Math.random() * sharpness + 1.1 - sharpness;
+          var mod = rng.random() * sharpness + 1.1 - sharpness;
           if (sharpness == 0) {
             mod = 1;
           }
@@ -162,7 +182,7 @@ function generate(count) {
     if (polygons[start].featureType) {
       name = polygons[start].featureName;
     } else {
-      name = adjectives[Math.floor(Math.random() * adjectives.length)];
+      name = rng.pick(adjectives);
     }
     polygons[start].featureType = type;
     polygons[start].featureName = name;
@@ -201,7 +221,7 @@ function generate(count) {
         greater = -100; // just to omit exclusion
         less = 0.2;
       }
-      name = adjectives[Math.floor(Math.random() * adjectives.length)];
+      name = rng.pick(adjectives);
       start = unmarked[0].index;
       polygons[start].featureType = type;
       polygons[start].featureName = name;
@@ -397,8 +417,8 @@ function generate(count) {
     for (var c = 0; c < count; c++) {
       // Big blob first
       if (c == 0) {
-        var x = Math.random() * mapWidth / 4 + mapWidth / 2;
-        var y = Math.random() * mapHeight / 4 + mapHeight / 2;
+        var x = rng.random() * mapWidth / 4 + mapWidth / 2;
+        var y = rng.random() * mapHeight / 4 + mapHeight / 2;
         var rnd = diagram.find(x, y).index;
         circles.append("circle")
           .attr("r", 3)
@@ -412,11 +432,11 @@ function generate(count) {
       } else { // Then small blobs
         var limit = 0; // limit while iterations
         do {
-          rnd = Math.floor(Math.random() * polygons.length);
+          rnd = rng.int(0, polygons.length - 1);
           limit++;
         } while ((polygons[rnd].height > 0.25 || polygons[rnd].data[0] < mapWidth * 0.25 || polygons[rnd].data[0] > mapWidth * 0.75 || polygons[rnd].data[1] < mapHeight * 0.2 || polygons[rnd].data[1] > mapHeight * 0.75) &&
           limit < 50)
-        heightInput.value = Math.random() * 0.4 + 0.1;
+        heightInput.value = rng.random() * 0.4 + 0.1;
         circles.append("circle")
           .attr("r", 3)
           .attr("cx", polygons[rnd].data[0])
@@ -426,7 +446,7 @@ function generate(count) {
         add(rnd, "hill");
       }
     }
-    heightInput.value = Math.random() * 0.4 + 0.1;
+    heightInput.value = rng.random() * 0.4 + 0.1;
     heightOutput.value = heightInput.valueAsNumber;
     // process the calculations
     markFeatures();
@@ -437,6 +457,22 @@ function generate(count) {
     // reset hover cache after (re)generation
     lastNearest = -1;
   }
+
+  // Add timing and self-tests at the end of generation
+  timers.lap('generate', 'Generate() – total');
+  
+  // Create cache object for self-tests
+  const cache = {
+    graph: { cells: polygons },
+    height: polygons.map(p => p.height),
+    rivers: [] // No rivers data yet
+  };
+  
+  const results = runSelfTests(cache, { svg: svg.node() });
+  renderSelfTestBadge(results);
+  
+  // Log timing summary
+  console.table(timers.summary());
 
   // redraw all polygons on SeaInput change 
   $("#seaInput").change(function() {
@@ -508,17 +544,17 @@ function generate(count) {
       sampleSize = 0;
 
     return function() {
-      if (!sampleSize) return sample(Math.random() * width, Math.random() * height);
+      if (!sampleSize) return sample(rng.random() * width, rng.random() * height);
 
       // Pick a random existing sample and remove it from the queue.
       while (queueSize) {
-        var i = Math.random() * queueSize | 0,
+        var i = rng.int(0, queueSize - 1),
           s = queue[i];
 
         // Make a new candidate between [radius, 2 * radius] from the existing sample.
         for (var j = 0; j < k; ++j) {
-          var a = 2 * Math.PI * Math.random(),
-            r = Math.sqrt(Math.random() * R + radius2),
+          var a = 2 * Math.PI * rng.random(),
+            r = Math.sqrt(rng.random() * R + radius2),
             x = s[0] + r * Math.cos(a),
             y = s[1] + r * Math.sin(a);
 
@@ -610,3 +646,5 @@ window.undraw = undraw;
 window.generate = generate;
 window.toggleOptions = toggleOptions;
 window.toggleBlobCenters = toggleBlobCenters;
+window.state = state; // Make state accessible globally
+window.rng = rng; // Make RNG accessible globally for debugging
