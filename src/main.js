@@ -370,37 +370,7 @@ function generate(count) {
       .attr("width", mapWidth).attr("height", mapHeight);
   }
 
-  // Add a blob on mouseclick
-  svg.on("click", function() {
-    // draw circle in center in clicked point
-    var point = d3.mouse(this),
-      nearest = diagram.find(point[0], point[1]).index;
-    circles.append("circle")
-      .attr("r", 3)
-      .attr("cx", point[0])
-      .attr("cy", point[1])
-      .attr("fill", color(1 - heightInput.valueAsNumber))
-      .attr("class", "circle");
-    if ($(".circle").length == 1) {
-      add(nearest, "island");
-      // change options to defaults for hills
-      heightInput.value = 0.2;
-      heightOutput.value = 0.2;
-      radiusInput.value = 0.99;
-      radiusOutput.value = 0.99;
-    } else {
-      add(nearest, "hill");
-      // let's make height random for hills
-      var height = (Math.random() * 0.4 + 0.1).toFixed(2);
-      heightInput.value = height;
-      heightOutput.value = height;
-    }
-    // process with calculations		
-		$("path").remove();
-		drawPolygons();
-		markFeatures();
-		drawCoastline();
-  });
+  // Click handler removed - no longer adding terrain on click
 
   function moved() {
     // update cursor and debug div on mousemove

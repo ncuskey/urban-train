@@ -5,7 +5,7 @@ A web-based procedural map generator that creates realistic terrain with islands
 ## Features
 
 - **Procedural Terrain Generation**: Creates realistic maps using Poisson-disc sampling and Voronoi diagrams
-- **Interactive Map Creation**: Click anywhere on the map to add islands and hills
+- **Interactive Map Creation**: Generate maps with islands and hills automatically
 - **Random Map Generation**: Generate maps with random terrain features
 - **Zoom and Pan**: Navigate around the generated terrain
 - **Real-time Information**: View cell data, height values, and feature names
@@ -55,7 +55,6 @@ A web-based procedural map generator that creates realistic terrain with islands
 
 ### Interactive Features
 
-- **Click on Map**: Add terrain features (first click creates an island, subsequent clicks add hills)
 - **Mouse Movement**: See real-time information about the cell under your cursor
 - **Zoom**: Use mouse wheel or pinch gestures to zoom in/out
 - **Pan**: Click and drag to move around the map
