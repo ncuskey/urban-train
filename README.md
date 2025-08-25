@@ -48,7 +48,6 @@ A web-based procedural map generator that creates realistic terrain with islands
 
 ### Basic Controls
 
-- **New Map**: Clears the current map and generates a fresh one
 - **Random Map**: Creates a map with 5 random terrain features
 - **Options**: Toggles the options panel for advanced settings
 - **Reset Zoom**: Resets the zoom level to default
