@@ -1,5 +1,5 @@
 console.time('generate');
-generate();
+generate(5); // Generate a random map with 5 features on initial load
 console.timeEnd('generate');
 
 // genaral function; run onload of to start from scratch
