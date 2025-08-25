@@ -103,13 +103,37 @@ export function renderSelfTestBadge(results, mount = document.body) {
     el.textContent = `Self‑tests: ${pass}/${total}`;
     el.title = results.map(r => `${r.pass ? "✔" : "✖"} ${r.name}${r.details ? " — " + r.details : ""}`).join("\n");
     el.onclick = () => {
-      const msg = fails.length
-        ? `Failures:\n\n${fails.map(f => `• ${f.name}${f.details ? " — " + f.details : ""}`).join("\n")}`
-        : "All tests passing ✅";
-      console.group("Self-tests");
-      console.table(results);
-      console.groupEnd();
-      alert(msg);
+      const fails = results.filter(r => !r.pass);
+      // let the click finish and a frame render before any work
+      requestAnimationFrame(() => {
+        console.group("Self-tests");
+        console.table(results);
+        console.groupEnd();
+        showToast(
+          fails.length
+            ? `Failures:\n• ` + fails.map(f => `${f.name}${f.details ? " — " + f.details : ""}`).join("\n• ")
+            : "All tests passing ✅",
+          3500
+        );
+      });
     };
   } catch (_) { /* no‑op */ }
+}
+
+// minimal toast (no layout thrash, auto-dismiss)
+function showToast(text, ms = 3000) {
+  let t = document.getElementById("selftest-toast");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "selftest-toast";
+    t.style.cssText =
+      "position:fixed;right:12px;bottom:52px;z-index:9999;max-width:320px;" +
+      "font:12px/1.35 system-ui,sans-serif;background:#111;color:#fff;" +
+      "padding:10px 12px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.25);white-space:pre-wrap";
+    document.body.appendChild(t);
+  }
+  t.textContent = text;
+  t.style.opacity = "1";
+  clearTimeout(t._hide);
+  t._hide = setTimeout(() => (t.style.opacity = "0"), ms);
 }
