@@ -143,12 +143,16 @@ urban-train/
 - Triggers map redraw
 
 #### Mouse Movement Handler (`moved()`)
-**Purpose**: Provides real-time cursor information
+**Purpose**: Provides real-time cursor information with optimized performance
 **Displays**:
 - Current cell index
 - Height value
 - Feature name and type
-- Visual cursor indicator
+**Performance Optimizations**:
+- RequestAnimationFrame throttling for smooth updates
+- Change detection to only update when cell changes
+- Vanilla DOM updates instead of jQuery for faster performance
+- Removed visual cursor indicator for better performance
 
 #### Zoom and Pan
 **Purpose**: Navigation controls
@@ -245,6 +249,9 @@ urban-train/
 - **Rendering**: Efficient D3.js updates
 - **Memory**: Polygon objects stored in memory
 - **Optimization**: Grid-based neighbor detection
+- **Hover Performance**: RequestAnimationFrame throttling and change detection
+- **DOM Updates**: Vanilla JavaScript for high-frequency UI updates
+- **Visual Effects**: Removed unnecessary cursor rendering for better performance
 
 ## Browser Compatibility
 

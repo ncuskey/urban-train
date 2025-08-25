@@ -35,9 +35,12 @@ function generate(count) {
     // Queue array  
     queue = [];
 
-  var cursor = svg.append("g").append("circle")
-    .attr("r", 1)
-    .attr("class", "cursor");
+  // Hover HUD perf helpers
+  let hoverRafId = 0;
+  let lastNearest = -1;
+  const hudCell = document.getElementById('cell');
+  const hudHeight = document.getElementById('height');
+  const hudFeature = document.getElementById('feature');
 
   // Add D3 drag and zoom behavior
   var zoom = d3.zoom()
@@ -50,8 +53,8 @@ function generate(count) {
 
   svg.call(zoom);
 
-  function zoomed() {
-    viewbox.attr("transform", d3.event.transform);
+  function zoomed(event) {
+    viewbox.attr("transform", event.transform);
   }
 
   $("#resetZoom").click(function() {
@@ -373,21 +376,21 @@ function generate(count) {
   // Click handler removed - no longer adding terrain on click
 
   function moved() {
-    // update cursor and debug div on mousemove
-    var point = d3.mouse(this),
-      nearest = diagram.find(point[0], point[1]).index,
-      radius = heightInput.value * radiusInput.value * 100;
-    $("#cell").text(nearest);
-    $("#height").text((polygons[nearest].height).toFixed(2));
-    if (polygons[nearest].featureType) {
-      $("#feature").text(polygons[nearest].featureName + " " + polygons[nearest].featureType);
-    } else {
-      $("#feature").text("no!");
-    }
-    cursor.attr("r", radius)
-      .attr("cx", point[0])
-      .attr("cy", point[1])
-      .attr("stroke", color(1 - heightInput.value));
+    if (hoverRafId) return; // throttle to animation frame
+    const point = d3.mouse(this);
+    hoverRafId = requestAnimationFrame(function () {
+      hoverRafId = 0;
+      const nearest = diagram.find(point[0], point[1]).index;
+      if (nearest === lastNearest) return; // only update when cell changes
+      lastNearest = nearest;
+      const poly = polygons[nearest];
+      // vanilla DOM updates (faster than jQuery for high-frequency UI)
+      hudCell.textContent = nearest;
+      hudHeight.textContent = poly.height.toFixed(2);
+      hudFeature.textContent = poly.featureType
+        ? (poly.featureName + " " + poly.featureType)
+        : "no!";
+    });
   }
 
   if (count != undefined) {
@@ -435,6 +438,9 @@ function generate(count) {
     drawCoastline();
     drawPolygons();
     $('.circles').hide();
+    
+    // reset hover cache after (re)generation
+    lastNearest = -1;
   }
 
   // redraw all polygons on SeaInput change 
