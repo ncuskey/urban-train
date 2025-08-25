@@ -128,7 +128,7 @@ function generate(count) {
         height = height * radius;
       }
       polygons[queue[i]].neighbors.forEach(function(e) {
-        if (used.indexOf(e) < 0) {
+        if (used.indexOf(e) < 0 && polygons[e]) {
           var mod = rng.random() * sharpness + 1.1 - sharpness;
           if (sharpness == 0) {
             mod = 1;
@@ -196,7 +196,7 @@ function generate(count) {
       var i = queue[0];
       queue.shift();
       polygons[i].neighbors.forEach(function(e) {
-        if (used.indexOf(e) < 0 && polygons[e].height < 0.2) {
+        if (used.indexOf(e) < 0 && polygons[e] && polygons[e].height < 0.2) {
           polygons[e].featureType = type;
           polygons[e].featureName = name;
           queue.push(e);
@@ -238,7 +238,7 @@ function generate(count) {
         var i = queue[0];
         queue.shift();
         polygons[i].neighbors.forEach(function(e) {
-          if (used.indexOf(e) < 0 && polygons[e].height >= greater && polygons[e].height < less) {
+          if (used.indexOf(e) < 0 && polygons[e] && polygons[e].height >= greater && polygons[e].height < less) {
             polygons[e].featureType = type;
             polygons[e].featureName = name;
             polygons[e].featureNumber = number;
@@ -266,7 +266,7 @@ function generate(count) {
             if (ea === i) {
               ea = edge.right.index;
             }
-            if (polygons[ea].height < 0.2) {
+            if (polygons[ea] && polygons[ea].height < 0.2) {
               var start = edge[0].join(" ");
               var end = edge[1].join(" ");
               if (polygons[ea].featureType === "Ocean") {
