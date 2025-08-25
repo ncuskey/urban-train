@@ -53,8 +53,8 @@ function generate(count) {
 
   svg.call(zoom);
 
-  function zoomed(event) {
-    viewbox.attr("transform", event.transform);
+  function zoomed() {
+    viewbox.attr("transform", d3.zoomTransform(svg.node()));
   }
 
   $("#resetZoom").click(function() {
