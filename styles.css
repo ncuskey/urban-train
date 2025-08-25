@@ -1,0 +1,64 @@
+input {
+  width: 100px;
+  height: 14px;
+}
+
+svg {
+  background-color: #5E4FA2;
+}
+
+.mapCell {
+  stroke-width: 0.2;
+  shape-rendering: optimizeSpeed;
+}
+
+.mapStroke {
+  stroke-width: 0.2;
+  fill: none;
+  stroke-linejoin: round;
+}
+
+.blur {
+  fill: none;
+  filter: url(#blurFilter);
+}
+
+.circle {
+  stroke: black;
+  stroke-width: 1px;
+}
+
+.cursor {
+  fill: none;
+}
+
+.islandBack {
+  fill: rgb(109, 192, 168);
+  stroke: none;
+}
+
+.coastline {
+  fill: none;
+  stroke: black;
+  stroke-width: 0.5px;
+  stroke-linejoin: round;
+}
+
+.lakecoast {
+  fill: hsl(209, 46%, 55%);
+  stroke-width: 0.3px;
+  stroke: rgb(50, 94, 130);
+  stroke-linejoin: round;
+}
+
+.oceanLayer {
+  fill: #5E4FA2;
+  mask: url(#shape);
+}
+
+.shallow {
+  fill: url(#shallowHatch);
+  mask: url(#shape);
+  stroke: none;
+  opacity: 0.8;
+}

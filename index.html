@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Urban Train - Map Generator</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <svg width="640" height="360">
+        <defs>
+            <filter id="blurFilter" x="-1" y="-1" width="100" height="100">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="1" />
+            </filter>
+            <mask id="shape">
+                <rect x="0" y="0" width="100%" height="100%" fill="white" />
+            </mask>
+            <pattern
+                id="shallowHatch"
+                width="2"
+                height="4"
+                patternTransform="rotate(90 0 0)"
+                patternUnits="userSpaceOnUse"
+            >
+                <line
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="4"
+                    style="stroke: black; stroke-width: 0.5; fill: black;"
+                />
+            </pattern>
+        </defs>
+    </svg>
+    
+    <div class="controls">
+        <button onclick="undraw(); generate();">New map</button>
+        <button onclick="undraw(); generate(5);">Random map</button>
+        <button onclick="toggleOptions()">Options</button>
+        <button id="resetZoom">Reset zoom</button>
+        <span>
+            Cell: <span id="cell">0</span>; 
+            Height: <span id="height">0</span>;
+            <span id="feature">no</span>;
+        </span>
+    </div>
+    
+    <div id="options" class="options-panel" hidden>
+        <div class="options-right">
+            <label>
+                Show grid
+                <input id="strokesInput" onchange="app.toggleStrokes()" type="checkbox" />
+            </label>
+            <br />
+            <label>Blur: </label>
+            <input
+                id="blurInput"
+                value="0"
+                type="range"
+                min="0"
+                max="2"
+                step="0.1"
+                oninput="blurOutput.value = blurInput.valueAsNumber"
+            />
+            <output id="blurOutput" title="Changes the blurred stroke-width">0</output>px
+            <br />
+            <label>
+                Draw sea polygons
+                <input id="seaInput" type="checkbox" />
+            </label>
+            <br />
+            <label>
+                Show blobs centers
+                <input onclick="toggleBlobCenters()" type="checkbox" />
+            </label>
+        </div>
+        <div class="options-left">
+            <label>Points radius:</label>
+            <input
+                id="sizeInput"
+                value="4"
+                type="range"
+                min="1"
+                max="10"
+                step="1"
+                oninput="sizeOutput.value = sizeInput.valueAsNumber"
+                title="Radius between points used for Poisson-disc sampling"
+            />
+            <output id="sizeOutput" title="Radius between points used for Poisson-disc sampling">4</output>
+            <br />
+            <label>Max Height:</label>
+            <input
+                id="heightInput"
+                value="0.9"
+                type="range"
+                min="0.1"
+                max="1"
+                step="0.01"
+                oninput="heightOutput.value = heightInput.valueAsNumber"
+            />
+            <output id="heightOutput">0.9</output>
+            <br />
+            <label>Blob Radius:</label>
+            <input
+                id="radiusInput"
+                value="0.9"
+                type="range"
+                min="0.5"
+                max="0.999"
+                step="0.001"
+                oninput="radiusOutput.value = radiusInput.valueAsNumber"
+                title="Change gently!"
+            />
+            <output id="radiusOutput" title="Change gently!">0.9</output>
+            <br />
+            <label>Blob Sharpness:</label>
+            <input
+                id="sharpnessInput"
+                value="0.2"
+                type="range"
+                min="0"
+                max="0.5"
+                step="0.1"
+                oninput="sharpnessOutput.value = sharpnessInput.valueAsNumber"
+            />
+            <output id="sharpnessOutput">0.2</output>
+        </div>
+    </div>
+
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script type="module" src="src/main.js"></script>
+</body>
+</html>
