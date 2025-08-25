@@ -5,19 +5,24 @@ A web-based procedural map generator that creates realistic terrain with islands
 ## Features
 
 - **Procedural Terrain Generation**: Creates realistic maps using Poisson-disc sampling and Voronoi diagrams
+- **Deterministic Generation**: Seeded random number generation for reproducible maps
 - **Interactive Map Creation**: Generate maps with islands and hills automatically
 - **Random Map Generation**: Generate maps with random terrain features
 - **Zoom and Pan**: Navigate around the generated terrain
 - **Real-time Information**: View cell data, height values, and feature names with optimized performance
+- **Performance Monitoring**: Built-in timing and performance analysis
+- **Self-Testing**: Automatic validation and regression testing with visual feedback
 - **Customizable Options**: Adjust various parameters like height, radius, sharpness, and more
 - **Visual Effects**: Toggle grid lines, blur effects, and sea polygon rendering
+- **Modular Architecture**: ES6 modules for maintainable code organization
 
 ## Technologies Used
 
 - **D3.js v5**: For SVG manipulation, Voronoi diagrams, and data visualization
 - **jQuery**: For DOM manipulation and event handling
 - **HTML5/CSS3**: For structure and styling
-- **ES6 Modules**: For modern JavaScript organization
+- **ES6 Modules**: For modern JavaScript organization and modular architecture
+- **Deterministic RNG**: Custom sfc32 + xmur3 implementation for seeded generation
 
 ## Getting Started
 
@@ -68,43 +73,65 @@ A web-based procedural map generator that creates realistic terrain with islands
 - **Draw Sea Polygons**: Shows/hides sea area polygons
 - **Show Blob Centers**: Toggles visibility of terrain center points
 
+### Self-Testing and Performance
+
+- **Self-Test Badge**: Click the badge in the bottom-right corner to see test results
+- **Performance Timing**: Check browser console for detailed timing information
+- **Deterministic Maps**: Same seed produces identical terrain every time
+
 ## File Structure
 
 ```
 urban-train/
-├── index.html          # Main HTML file with UI controls
-├── styles.css          # CSS styling for the application
+├── index.html              # Main HTML file with UI controls
+├── styles.css              # CSS styling for the application
 ├── src/
-│   └── main.js         # Main JavaScript application logic
-└── README.md           # This file
+│   ├── main.js             # Main JavaScript application logic
+│   ├── core/
+│   │   ├── rng.js          # Deterministic, seedable RNG
+│   │   └── timers.js       # Performance timing utilities
+│   ├── render/
+│   │   └── layers.js       # SVG layer management
+│   └── selftest.js         # Regression testing and validation
+├── PHASE0_README.md        # Phase 0 implementation details
+├── README.md               # This file
+└── CODEMAP.md              # Detailed code documentation
 ```
 
 ## Code Architecture
 
-### Main Components
+### Modular Components
 
-1. **Map Generation (`generate` function)**:
+1. **Core Modules**:
+   - **RNG (`src/core/rng.js`)**: Deterministic, seedable random number generation
+   - **Timers (`src/core/timers.js`)**: Performance monitoring and timing utilities
+   - **Layers (`src/render/layers.js`)**: SVG layer management and organization
+   - **Self-Tests (`src/selftest.js`)**: Validation and regression testing
+
+2. **Map Generation (`generate` function)**:
    - Sets up SVG canvas and D3.js elements
    - Creates Poisson-disc sampling for natural point distribution
    - Generates Voronoi diagram from sampled points
    - Initializes interactive features (zoom, pan, click handlers)
+   - Integrates modular components for timing and validation
 
-2. **Terrain Generation (`add` function)**:
+3. **Terrain Generation (`add` function)**:
    - Adds height values to polygons based on user input
    - Spreads terrain features to neighboring cells
    - Supports different terrain types (islands vs hills)
+   - Uses seeded RNG for deterministic behavior
 
-3. **Feature Detection (`markFeatures` function)**:
+4. **Feature Detection (`markFeatures` function)**:
    - Identifies oceans, islands, and lakes
    - Assigns random names to geographic features
    - Groups connected areas into coherent regions
 
-4. **Coastline Generation (`drawCoastline` function)**:
+5. **Coastline Generation (`drawCoastline` function)**:
    - Detects boundaries between land and water
    - Creates smooth coastline paths
    - Handles both island coastlines and lake shorelines
 
-5. **Visualization (`drawPolygons` function)**:
+6. **Visualization (`drawPolygons` function)**:
    - Renders terrain polygons with color-coded heights
    - Applies visual effects (blur, strokes)
    - Updates the display based on user settings
@@ -115,6 +142,8 @@ urban-train/
 - **Voronoi Diagrams**: Divides the map into cellular regions
 - **Flood Fill**: Identifies connected regions (oceans, islands, lakes)
 - **Path Finding**: Creates continuous coastline paths
+- **Deterministic RNG**: sfc32 + xmur3 algorithms for reproducible generation
+- **Performance Timing**: RequestAnimationFrame-based timing for accurate measurements
 
 ## Browser Compatibility
 
@@ -129,18 +158,30 @@ urban-train/
 
 1. Start the development server:
    ```bash
-   python3 -m http.server 8080
+   python3 -m http.server 8000
    ```
 
-2. Open `http://localhost:8080` in your browser
+2. Open `http://localhost:8000` in your browser
 
 3. Make changes to the code and refresh the page to see updates
 
 ### Debugging
 
 - Open browser developer tools (F12)
-- Check the console for any JavaScript errors
+- Check the console for any JavaScript errors and performance timing data
 - Use the network tab to verify all resources are loading
+- Click the self-test badge for validation results
+- Check console.table output for detailed timing information
+
+### Phase 0 Implementation
+
+The project has been refactored with a modular architecture:
+- **Deterministic generation** with seeded RNG
+- **Performance monitoring** with built-in timers
+- **Self-testing** with visual feedback
+- **ES6 modules** for maintainable code organization
+
+See `PHASE0_README.md` for detailed implementation information.
 
 ## Contributing
 
