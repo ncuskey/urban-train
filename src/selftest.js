@@ -6,6 +6,38 @@
 
 function ok(pass, name, details = "") { return { pass, name, details }; }
 
+// Helper functions for fixing common failures
+export function clamp01(arr) {
+  let min = Infinity, max = -Infinity;
+  for (let i = 0; i < arr.length; i++) {
+    const v = arr[i];
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  const span = max - min || 1;
+  for (let i = 0; i < arr.length; i++) {
+    let n = (arr[i] - min) / span;
+    if (n < 0) n = 0;
+    else if (n > 1) n = 1;
+    arr[i] = n;
+  }
+  return arr;
+}
+
+export function ensureReciprocalNeighbors(graph) {
+  const cells = graph.cells;
+  for (const c of cells) {
+    if (!c || !Array.isArray(c.neighbors)) continue;
+    for (const nId of c.neighbors) {
+      const n = cells[nId];
+      if (!n) continue;
+      if (!Array.isArray(n.neighbors)) n.neighbors = [];
+      if (!n.neighbors.includes(c.id)) n.neighbors.push(c.id);
+    }
+  }
+  return graph;
+}
+
 export function runSelfTests(cache = {}, dom = {}) {
   const out = [];
   const { graph, height, rivers } = cache;
@@ -59,14 +91,25 @@ export function renderSelfTestBadge(results, mount = document.body) {
   try {
     const total = results.length;
     const pass = results.filter(r => r.pass).length;
+    const fails = results.filter(r => !r.pass);
+
     let el = document.getElementById("selftest-badge");
     if (!el) {
       el = document.createElement("div");
       el.id = "selftest-badge";
-      el.style.cssText = `position: fixed; right: 10px; bottom: 10px; z-index: 9999; font: 12px/1.2 system-ui, sans-serif; background: rgba(0,0,0,0.65); color: #fff; padding: 8px 10px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.2);`;
+      el.style.cssText = `position: fixed; right: 10px; bottom: 10px; z-index: 9999; font: 12px/1.2 system-ui, sans-serif; background: rgba(0,0,0,0.65); color: #fff; padding: 8px 10px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); cursor:pointer`;
       mount.appendChild(el);
     }
     el.textContent = `Self‑tests: ${pass}/${total}`;
     el.title = results.map(r => `${r.pass ? "✔" : "✖"} ${r.name}${r.details ? " — " + r.details : ""}`).join("\n");
+    el.onclick = () => {
+      const msg = fails.length
+        ? `Failures:\n\n${fails.map(f => `• ${f.name}${f.details ? " — " + f.details : ""}`).join("\n")}`
+        : "All tests passing ✅";
+      console.group("Self-tests");
+      console.table(results);
+      console.groupEnd();
+      alert(msg);
+    };
   } catch (_) { /* no‑op */ }
 }

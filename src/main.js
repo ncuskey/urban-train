@@ -1,7 +1,7 @@
 import { RNG } from "./core/rng.js";
 import { Timers } from "./core/timers.js";
 import { ensureLayers } from "./render/layers.js";
-import { runSelfTests, renderSelfTestBadge } from "./selftest.js";
+import { runSelfTests, renderSelfTestBadge, clamp01, ensureReciprocalNeighbors } from "./selftest.js";
 
 // Global state object for seed management
 const state = {
@@ -38,6 +38,9 @@ function generate(count) {
     coastline = viewbox.append("g").attr("class", "coastline"),
 		shallow = viewbox.append("g").attr("class", "shallow"),
     lakecoast = viewbox.append("g").attr("class", "lakecoast");
+    
+  // Ensure SVG layers exist for self-tests
+  const layers = ensureLayers(svg.node());
   // Poisson-disc sampling from https://bl.ocks.org/mbostock/99049112373e12709381
   var sampler = poissonDiscSampler(mapWidth, mapHeight, sizeInput.valueAsNumber),
     samples = [],
@@ -81,6 +84,9 @@ function generate(count) {
   var adjectives = ["Ablaze", "Ablazing", "Accented", "Ashen", "Ashy", "Beaming", "Bi-Color", "Blazing", "Bleached", "Bleak", "Blended", "Blotchy", "Bold", "Brash", "Bright", "Brilliant", "Burnt", "Checkered", "Chromatic", "Classic", "Clean", "Colored", "Colorful", "Colorless", "Complementing", "Contrasting", "Cool", "Coordinating", "Crisp", "Dappled", "Dark", "Dayglo", "Deep", "Delicate", "Digital", "Dim", "Dirty", "Discolored", "Dotted", "Drab", "Dreary", "Dull", "Dusty", "Earth", "Electric", "Eye-Catching", "Faded", "Faint", "Festive", "Fiery", "Flashy", "Flattering", "Flecked", "Florescent", "Frosty", "Full-Toned", "Glistening", "Glittering", "Glowing", "Harsh", "Hazy", "Hot", "Hued", "Icy", "Illuminated", "Incandescent", "Intense", "Interwoven", "Iridescent", "Kaleidoscopic", "Lambent", "Light", "Loud", "Luminous", "Lusterless", "Lustrous", "Majestic", "Marbled", "Matte", "Medium", "Mellow", "Milky", "Mingled", "Mixed", "Monochromatic", "Motley", "Mottled", "Muddy", "Multicolored", "Multihued", "Murky", "Natural", "Neutral", "Opalescent", "Opaque", "Pale", "Pastel", "Patchwork", "Patchy", "Patterned", "Perfect", "Picturesque", "Plain", "Primary", "Prismatic", "Psychedelic", "Pure", "Radiant", "Reflective", "Rich", "Royal", "Ruddy", "Rustic", "Satiny", "Saturated", "Secondary", "Shaded", "Sheer", "Shining", "Shiny", "Shocking", "Showy", "Smoky", "Soft", "Solid", "Somber", "Soothing", "Sooty", "Sparkling", "Speckled", "Stained", "Streaked", "Streaky", "Striking", "Strong Neutral", "Subtle", "Sunny", "Swirling", "Tinged", "Tinted", "Tonal", "Toned", "Translucent", "Transparent", "Two-Tone", "Undiluted", "Uneven", "Uniform", "Vibrant", "Vivid", "Wan", "Warm", "Washed-Out", "Waxen", "Wild"];
 
   detectNeighbors();
+  
+  // Ensure reciprocal neighbors for self-tests
+  ensureReciprocalNeighbors({ cells: polygons });
 
   // for each polygon detect neibours and add their indexes
   function detectNeighbors() {
@@ -457,6 +463,11 @@ function generate(count) {
     // reset hover cache after (re)generation
     lastNearest = -1;
   }
+
+  // Clamp and normalize height values for self-tests
+  const heightArray = polygons.map(p => p.height);
+  clamp01(heightArray);
+  polygons.forEach((p, i) => { p.height = heightArray[i]; });
 
   // Add timing and self-tests at the end of generation
   timers.lap('generate', 'Generate() – total');
