@@ -54,8 +54,20 @@ export function attachInteraction({
     });
   }
 
+  function getTransform() { return d3.zoomTransform(svg.node()); }
+  function panTo([x, y], { k = getTransform().k, duration = 600 } = {}) {
+    const w = svg.attr("width")  ? +svg.attr("width")  : svg.node().clientWidth;
+    const h = svg.attr("height") ? +svg.attr("height") : svg.node().clientHeight;
+    const tx = (w / 2) - k * x;
+    const ty = (h / 2) - k * y;
+    svg.transition().duration(duration).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
+  }
+
   // Return API for potential cleanup
   return {
+    zoom,
+    getTransform,
+    panTo,
     destroy() {
       svg.on("touchmove mousemove", null);
       svg.on("zoom", null);

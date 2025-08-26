@@ -8,6 +8,7 @@ import { markFeatures } from "./modules/features.js";
 import { drawCoastline } from "./modules/coastline.js";
 import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction } from "./modules/interaction.js";
+import { fitToLand } from './modules/autofit.js';
 
 // Global state object for seed management
 const state = {
@@ -94,7 +95,7 @@ function generate(count) {
     heightEl: document.getElementById('height'),
     featureEl:document.getElementById('feature')
   };
-  attachInteraction({
+  const interact = attachInteraction({
     svg: svgSel,
     viewbox: viewSel,
     diagram,
@@ -153,6 +154,23 @@ function generate(count) {
     });
     $('.circles').hide();
   }
+
+  // Expose fitLand helper after rendering completes
+  window.fitLand = () => fitToLand({
+    svg: svgSel,
+    zoom: interact.zoom,
+    polygons,
+    width: mapWidth,
+    height: mapHeight,
+    seaLevel: 0.2,
+    preferFeatureType: true,
+    margin: 0.08,
+    duration: 600
+  });
+
+  // OPTIONAL: auto-fit after generation
+  const AUTO_FIT = true;
+  if (AUTO_FIT) window.fitLand();
 
 
 
