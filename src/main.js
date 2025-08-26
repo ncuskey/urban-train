@@ -7,6 +7,7 @@ import { randomMap } from "./modules/heightmap.js";
 import { markFeatures } from "./modules/features.js";
 import { drawCoastline } from "./modules/coastline.js";
 import { drawPolygons, toggleBlur } from "./modules/rendering.js";
+import { attachInteraction } from "./modules/interaction.js";
 
 // Global state object for seed management
 const state = {
@@ -46,10 +47,7 @@ function generate(count) {
   // make RNG deterministic for this generation
   rng.reseed(state.seed);
 
-  // Add general elements with passive event listeners to avoid warnings
-  // Note: touchmove and mousemove events are marked as passive for better performance
-  var svg = d3.select("svg")
-    .on("touchmove mousemove", moved, { passive: true }),
+  var svg = d3.select("svg"),
     mapWidth = +svg.attr("width"),
     mapHeight = +svg.attr("height"),
     defs = svg.select("defs"),
@@ -75,32 +73,7 @@ function generate(count) {
   // Queue array  
   const queue = [];
 
-  // Hover HUD perf helpers
-  let hoverRafId = 0;
-  let lastNearest = -1;
-  const hudCell = document.getElementById('cell');
-  const hudHeight = document.getElementById('height');
-  const hudFeature = document.getElementById('feature');
 
-  // Add D3 drag and zoom behavior with passive event handling
-  var zoom = d3.zoom()
-    .scaleExtent([1, 50])
-    .translateExtent([
-      [-100, -100],
-      [mapWidth + 100, mapHeight + 100]
-    ])
-    .on("zoom", zoomed);
-
-  // Apply zoom behavior
-  svg.call(zoom);
-  
-  // Suppress passive event warnings for D3 zoom (these are expected)
-  // The zoom behavior needs to prevent default on wheel events for proper zooming
-  // This is a known limitation of D3 v5 and the warnings can be safely ignored
-
-  function zoomed() {
-    viewbox.attr("transform", d3.zoomTransform(svg.node()));
-  }
 
   // array to use as names
   var adjectives = ["Ablaze", "Ablazing", "Accented", "Ashen", "Ashy", "Beaming", "Bi-Color", "Blazing", "Bleached", "Bleak", "Blended", "Blotchy", "Bold", "Brash", "Bright", "Brilliant", "Burnt", "Checkered", "Chromatic", "Classic", "Clean", "Colored", "Colorful", "Colorless", "Complementing", "Contrasting", "Cool", "Coordinating", "Crisp", "Dappled", "Dark", "Dayglo", "Deep", "Delicate", "Digital", "Dim", "Dirty", "Discolored", "Dotted", "Drab", "Dreary", "Dull", "Dusty", "Earth", "Electric", "Eye-Catching", "Faded", "Faint", "Festive", "Fiery", "Flashy", "Flattering", "Flecked", "Florescent", "Frosty", "Full-Toned", "Glistening", "Glittering", "Glowing", "Harsh", "Hazy", "Hot", "Hued", "Icy", "Illuminated", "Incandescent", "Intense", "Interwoven", "Iridescent", "Kaleidoscopic", "Lambent", "Light", "Loud", "Luminous", "Lusterless", "Lustrous", "Majestic", "Marbled", "Matte", "Medium", "Mellow", "Milky", "Mingled", "Mixed", "Monochromatic", "Motley", "Mottled", "Muddy", "Multicolored", "Multihued", "Murky", "Natural", "Neutral", "Opalescent", "Opaque", "Pale", "Pastel", "Patchwork", "Patchy", "Patterned", "Perfect", "Picturesque", "Plain", "Primary", "Prismatic", "Psychedelic", "Pure", "Radiant", "Reflective", "Rich", "Royal", "Ruddy", "Rustic", "Satiny", "Saturated", "Secondary", "Shaded", "Sheer", "Shining", "Shiny", "Shocking", "Showy", "Smoky", "Soft", "Solid", "Somber", "Soothing", "Sooty", "Sparkling", "Speckled", "Stained", "Streaked", "Streaky", "Striking", "Strong Neutral", "Subtle", "Sunny", "Swirling", "Tinged", "Tinted", "Tonal", "Toned", "Translucent", "Transparent", "Two-Tone", "Undiluted", "Uneven", "Uniform", "Vibrant", "Vivid", "Wan", "Warm", "Washed-Out", "Waxen", "Wild"];
@@ -109,6 +82,22 @@ function generate(count) {
   
   // Ensure reciprocal neighbors for self-tests
   ensureReciprocalNeighbors({ cells: polygons });
+
+  // Attach interaction handlers (zoom + hover HUD)
+  const svgSel = d3.select('svg');
+  const viewSel = d3.select('.viewbox');
+  const hudRefs = { 
+    cellEl:   document.getElementById('cell'),
+    heightEl: document.getElementById('height'),
+    featureEl:document.getElementById('feature')
+  };
+  attachInteraction({
+    svg: svgSel,
+    viewbox: viewSel,
+    diagram,
+    polygons,
+    hud: hudRefs
+  });
 
 
 
@@ -121,24 +110,6 @@ function generate(count) {
 
 
   // Click handler removed - no longer adding terrain on click
-
-  function moved() {
-    if (hoverRafId) return; // throttle to animation frame
-    const point = d3.mouse(this);
-    hoverRafId = requestAnimationFrame(function () {
-      hoverRafId = 0;
-      const nearest = diagram.find(point[0], point[1]).index;
-      if (nearest === lastNearest) return; // only update when cell changes
-      lastNearest = nearest;
-      const poly = polygons[nearest];
-      // vanilla DOM updates (faster than jQuery for high-frequency UI)
-      hudCell.textContent = nearest;
-      hudHeight.textContent = poly.height.toFixed(2);
-      hudFeature.textContent = poly.featureType
-        ? (poly.featureName + " " + poly.featureType)
-        : "no!";
-    });
-  }
 
   if (count != undefined) {
     randomMap(count, {
@@ -178,9 +149,6 @@ function generate(count) {
       svg
     });
     $('.circles').hide();
-    
-    // reset hover cache after (re)generation
-    lastNearest = -1;
   }
 
 

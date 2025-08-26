@@ -95,7 +95,8 @@ urban-train/
 │   │   ├── heightmap.js    # Terrain generation and height mapping
 │   │   ├── features.js     # Geographic feature detection and naming
 │   │   ├── coastline.js    # Coastline tracing and path generation
-│   │   └── rendering.js    # Polygon rendering and visual effects
+│   │   ├── rendering.js    # Polygon rendering and visual effects
+│   │   └── interaction.js  # Zoom and hover HUD functionality
 │   ├── render/
 │   │   └── layers.js       # SVG layer management
 │   └── selftest.js         # Regression testing and validation
@@ -119,12 +120,13 @@ urban-train/
    - **Features (`src/modules/features.js`)**: Geographic feature detection and naming
    - **Coastline (`src/modules/coastline.js`)**: Coastline tracing and path generation
    - **Rendering (`src/modules/rendering.js`)**: Polygon rendering and visual effects
+   - **Interaction (`src/modules/interaction.js`)**: Zoom and hover HUD functionality
 
 3. **Map Generation (`generate` function)**:
    - Sets up SVG canvas and D3.js elements
    - Creates Poisson-disc sampling for natural point distribution
    - Generates Voronoi diagram from sampled points
-   - Initializes interactive features (zoom, pan, click handlers)
+   - Initializes interactive features via interaction module
    - Integrates modular components for timing and validation
 
 4. **Terrain Generation (`add` function)**:
@@ -194,7 +196,7 @@ The project has been refactored with a comprehensive modular architecture:
 - **Performance monitoring** with built-in timers
 - **Self-testing** with visual feedback
 - **ES6 modules** for maintainable code organization
-- **Feature extraction** into specialized modules (geometry, heightmap, features, coastline, rendering)
+- **Feature extraction** into specialized modules (geometry, heightmap, features, coastline, rendering, interaction)
 
 ## Contributing
 
