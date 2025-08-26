@@ -15,6 +15,12 @@ const state = {
   seed: Math.floor(Math.random() * 1000000) // Random seed for initial generation
 };
 
+// Global transform tracking for coordinate space conversions
+let currentTransform = d3.zoomIdentity;
+
+// Label scaling configuration - set to true to keep labels constant pixel size
+const LABELS_NONSCALING = false;
+
 // Suppress console warnings for D3 wheel events globally
 // This prevents the expected D3 v5 wheel event warnings from cluttering the console
 // Note: These warnings are expected for D3 v5 zoom behavior and can be safely ignored
@@ -60,6 +66,10 @@ function generate(count) {
     coastline = viewbox.append("g").attr("class", "coastline"),
 		shallow = viewbox.append("g").attr("class", "shallow"),
     lakecoast = viewbox.append("g").attr("class", "lakecoast");
+    
+  // Create label and HUD layers for proper coordinate space handling
+  let gLabels = viewbox.append("g").attr("id", "labels");
+  let gHUD = svg.append("g").attr("id", "hud").style("pointer-events", "none");
     
   // Ensure SVG layers exist for self-tests
   const layers = ensureLayers(svg.node());
@@ -130,6 +140,19 @@ function generate(count) {
       rng,
       adjectives
     });
+    
+    // Add example labels for demonstration
+    const labelData = polygons
+      .filter(p => p.featureType && p.featureName)
+      .slice(0, 5) // Limit to 5 labels for demo
+      .map((p, i) => ({
+        id: `label-${i}`,
+        x: p[0] ? p[0][0] : 0, // Use first vertex as label position
+        y: p[0] ? p[0][1] : 0,
+        name: `${p.featureName} ${p.featureType}`
+      }));
+    
+    drawLabels(labelData);
     drawCoastline({
       polygons,
       diagram,
@@ -167,6 +190,9 @@ function generate(count) {
     margin: 0.08,
     duration: 600
   });
+  
+  // Expose label configuration globally
+  window.LABELS_NONSCALING = LABELS_NONSCALING;
 
   // OPTIONAL: auto-fit after generation
   const AUTO_FIT = true;
@@ -236,6 +262,25 @@ function generate(count) {
 
 
 
+// Draw labels in world coordinates - scaling/positioning handled in zoom handler
+function drawLabels(data) {
+  const gLabels = d3.select('#labels');
+  if (gLabels.empty()) return;
+  
+  const sel = gLabels.selectAll('text').data(data, d => d.id);
+  sel.enter()
+    .append('text')
+    .attr('class', 'place-label')
+    .attr('x', d => d.x)       // world coords
+    .attr('y', d => d.y)       // world coords
+    .text(d => d.name)
+    .attr('text-anchor', 'middle')
+    .attr('dy', '0.35em')
+    .attr('font-size', 12);    // pick a base size; it will scale if LABELS_NONSCALING=false
+
+  sel.exit().remove();
+}
+
 // Generate a completely new random map with a fresh seed
 function generateRandomMap(count = 5) {
   // Generate a new random seed
@@ -258,6 +303,31 @@ function toggleOptions() {
 // Toggle blob centers visibility
 function toggleBlobCenters() {
   $('.circles').toggle();
+}
+
+// Toggle label scaling mode
+function toggleLabelScaling() {
+  window.LABELS_NONSCALING = !window.LABELS_NONSCALING;
+  
+  // Re-apply current transform to update label scaling
+  const svg = d3.select('svg');
+  const zoom = svg.__zoomBehavior__ || d3.zoom();
+  if (svg.__zoomBehavior__) {
+    const t = d3.zoomTransform(svg.node());
+    const gLabels = d3.select('#labels');
+    if (!gLabels.empty()) {
+      if (window.LABELS_NONSCALING) {
+        // Switch to constant-size mode
+        gLabels.selectAll('text')
+          .attr("transform", d => `translate(${t.applyX(d.x)},${t.applyY(d.y)}) scale(${1 / t.k})`);
+      } else {
+        // Switch to scaling mode - remove individual transforms
+        gLabels.selectAll('text').attr("transform", null);
+      }
+    }
+  }
+  
+  console.log(`Labels now ${window.LABELS_NONSCALING ? 'constant-size' : 'scaling'} mode`);
 }
 
 // Change polygons stroke-width,
@@ -293,5 +363,7 @@ window.generateRandomMap = generateRandomMap;
 window.toggleOptions = toggleOptions;
 window.toggleBlobCenters = toggleBlobCenters;
 window.toggleStrokes = toggleStrokes;
+window.toggleLabelScaling = toggleLabelScaling; // Expose label scaling toggle
+window.drawLabels = drawLabels; // Expose label drawing function
 window.state = state; // Make state accessible globally
 window.rng = rng; // Make RNG accessible globally for debugging

@@ -11,6 +11,9 @@ export function attachInteraction({
   // Hover HUD perf helpers
   let hoverRafId = 0;
   let lastNearest = -1;
+  
+  // Global transform tracking (accessible from main.js)
+  window.currentTransform = d3.zoomIdentity;
 
   // Add D3 drag and zoom behavior with passive event handling
   var zoom = d3.zoom()
@@ -29,29 +32,89 @@ export function attachInteraction({
   // This is a known limitation of D3 v5 and the warnings can be safely ignored
 
   function zoomed() {
-    viewbox.attr("transform", d3.zoomTransform(svg.node()));
+    const t = d3.zoomTransform(svg.node());
+    window.currentTransform = t; // Update global transform tracking
+    
+    // Apply transform to world layers (geometry etc.)
+    viewbox.attr("transform", t);
+    
+    // Handle label scaling based on configuration
+    const gLabels = d3.select('#labels');
+    if (!gLabels.empty()) {
+      if (window.LABELS_NONSCALING) {
+        // Keep label text constant-size in pixels: counter-scale each label
+        // Assumes each datum has world coords {x, y}
+        gLabels.selectAll('text')
+          .attr("transform", d => `translate(${t.applyX(d.x)},${t.applyY(d.y)}) scale(${1 / t.k})`);
+      }
+      // If LABELS_NONSCALING is false, labels scale naturally with the map
+      // (they're already under viewbox, so no extra work needed)
+    }
   }
 
   // Add general elements with passive event listeners to avoid warnings
   // Note: touchmove and mousemove events are marked as passive for better performance
   svg.on("touchmove mousemove", moved, { passive: true });
 
-  function moved() {
+  function moved(event) {
     if (hoverRafId) return; // throttle to animation frame
-    const point = d3.mouse(this);
+    
+    // Get screen coordinates relative to SVG viewport
+    // Use d3.mouse for D3 v5 compatibility (d3.pointer is v6+)
+    const point = d3.mouse(svg.node());
+    const mx = point[0], my = point[1];
+    
+    // Convert to world coordinates under current zoom/pan
+    const [wx, wy] = window.currentTransform.invert([mx, my]);
+    
     hoverRafId = requestAnimationFrame(function () {
       hoverRafId = 0;
-      const nearest = diagram.find(point[0], point[1]).index;
+      
+      // Use world coordinates for spatial queries
+      const nearest = diagram.find(wx, wy).index;
       if (nearest === lastNearest) return; // only update when cell changes
       lastNearest = nearest;
       const poly = polygons[nearest];
+      
       // vanilla DOM updates (faster than jQuery for high-frequency UI)
       cellEl.textContent = nearest;
       heightEl.textContent = poly.height.toFixed(2);
       featureEl.textContent = poly.featureType
         ? (poly.featureName + " " + poly.featureType)
         : "no!";
+        
+      // Update HUD with screen coordinates for crisp positioning
+      updateHUD(poly, { screenX: mx, screenY: my, worldX: wx, worldY: wy, k: window.currentTransform.k });
     });
+  }
+
+  function updateHUD(cell, ctx) {
+    if (!cell) { 
+      d3.select('#hud').selectAll('*').remove(); 
+      return; 
+    }
+
+    // Example: a tiny tooltip near the cursor
+    const gHUD = d3.select('#hud');
+    const tip = gHUD.selectAll('g.tip').data([cell]);
+    const enter = tip.enter().append('g').attr('class', 'tip');
+
+    enter.append('rect').attr('rx', 4).attr('ry', 4);
+    enter.append('text').attr('class', 'hud-line');
+
+    const merged = enter.merge(tip)
+      .attr('transform', `translate(${ctx.screenX + 12},${ctx.screenY + 12})`);
+
+    merged.select('text.hud-line')
+      .text(() => `Cell ${cell.index || '—'} • h=${cell.height?.toFixed?.(2) ?? '—'}`);
+
+    const bbox = merged.select('text.hud-line').node().getBBox();
+    merged.select('rect')
+      .attr('x', bbox.x - 6).attr('y', bbox.y - 4)
+      .attr('width', bbox.width + 12).attr('height', bbox.height + 8)
+      .attr('fill', 'rgba(0,0,0,0.6)').attr('stroke', '#fff').attr('stroke-width', 0.5);
+
+    tip.exit().remove();
   }
 
   function getTransform() { return d3.zoomTransform(svg.node()); }
