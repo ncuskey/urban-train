@@ -90,10 +90,14 @@ urban-train/
 │   ├── core/
 │   │   ├── rng.js          # Deterministic, seedable RNG
 │   │   └── timers.js       # Performance timing utilities
+│   ├── modules/
+│   │   ├── geometry.js     # Voronoi diagram and neighbor detection
+│   │   ├── heightmap.js    # Terrain generation and height mapping
+│   │   ├── features.js     # Geographic feature detection and naming
+│   │   └── coastline.js    # Coastline tracing and path generation
 │   ├── render/
 │   │   └── layers.js       # SVG layer management
 │   └── selftest.js         # Regression testing and validation
-├── PHASE0_README.md        # Phase 0 implementation details
 ├── README.md               # This file
 └── CODEMAP.md              # Detailed code documentation
 ```
@@ -108,30 +112,37 @@ urban-train/
    - **Layers (`src/render/layers.js`)**: SVG layer management and organization
    - **Self-Tests (`src/selftest.js`)**: Validation and regression testing
 
-2. **Map Generation (`generate` function)**:
+2. **Feature Modules**:
+   - **Geometry (`src/modules/geometry.js`)**: Voronoi diagram generation and neighbor detection
+   - **Heightmap (`src/modules/heightmap.js`)**: Terrain generation and height mapping
+   - **Features (`src/modules/features.js`)**: Geographic feature detection and naming
+   - **Coastline (`src/modules/coastline.js`)**: Coastline tracing and path generation
+
+3. **Map Generation (`generate` function)**:
    - Sets up SVG canvas and D3.js elements
    - Creates Poisson-disc sampling for natural point distribution
    - Generates Voronoi diagram from sampled points
    - Initializes interactive features (zoom, pan, click handlers)
    - Integrates modular components for timing and validation
 
-3. **Terrain Generation (`add` function)**:
+4. **Terrain Generation (`add` function)**:
    - Adds height values to polygons based on user input
    - Spreads terrain features to neighboring cells
    - Supports different terrain types (islands vs hills)
    - Uses seeded RNG for deterministic behavior
 
-4. **Feature Detection (`markFeatures` function)**:
+5. **Feature Detection (`markFeatures` function)**:
    - Identifies oceans, islands, and lakes
    - Assigns random names to geographic features
    - Groups connected areas into coherent regions
 
-5. **Coastline Generation (`drawCoastline` function)**:
+6. **Coastline Generation (`drawCoastline` function)**:
    - Detects boundaries between land and water
    - Creates smooth coastline paths
    - Handles both island coastlines and lake shorelines
+   - Marks shallow water areas
 
-6. **Visualization (`drawPolygons` function)**:
+7. **Visualization (`drawPolygons` function)**:
    - Renders terrain polygons with color-coded heights
    - Applies visual effects (blur, strokes)
    - Updates the display based on user settings
@@ -173,15 +184,14 @@ urban-train/
 - Click the self-test badge for validation results
 - Check console.table output for detailed timing information
 
-### Phase 0 Implementation
+### Modular Architecture
 
-The project has been refactored with a modular architecture:
+The project has been refactored with a comprehensive modular architecture:
 - **Deterministic generation** with seeded RNG
 - **Performance monitoring** with built-in timers
 - **Self-testing** with visual feedback
 - **ES6 modules** for maintainable code organization
-
-See `PHASE0_README.md` for detailed implementation information.
+- **Feature extraction** into specialized modules (geometry, heightmap, features, coastline)
 
 ## Contributing
 
