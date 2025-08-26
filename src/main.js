@@ -216,31 +216,12 @@ function generate(count) {
 
 }
 
-// Clear the map on re-generation (global function)
-function undraw() {
-  // Remove all on regenerate 
-  $("g").remove();
-  $("path").remove();
-  // Set some options to defaults
-  heightInput.value = 0.9;
-  heightOutput.value = 0.9;
-  radiusInput.value = 0.9;
-  radiusOutput.value = 0.9;
-  // Reset blur and strokes
-  blurInput.value = 2;
-  blurOutput.value = 2;
-  strokesInput.checked = false;
-  // Hide circles
-  $('.circles').hide();
-}
+
 
 // Generate a completely new random map with a fresh seed
 function generateRandomMap(count = 5) {
   // Generate a new random seed
   state.seed = Math.floor(Math.random() * 1000000);
-  
-  // Clear the current map
-  undraw();
   
   // Generate new map with the new seed
   generate(count);
@@ -289,7 +270,6 @@ function toggleStrokes() {
 }
 
 // Make functions available globally for HTML onclick handlers
-window.undraw = undraw;
 window.generate = generate;
 window.generateRandomMap = generateRandomMap;
 window.toggleOptions = toggleOptions;

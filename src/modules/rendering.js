@@ -13,7 +13,7 @@ export function drawPolygons({
   svg               // d3 selection for the main svg element
 }) {
   // delete all polygons
-  svg.select(".mapCell").remove();
+  d3.selectAll(".mapCell").remove();
   // redraw the polygons based on new heights
   var grads = [],
     limit = 0.2;

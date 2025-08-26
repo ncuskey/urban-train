@@ -12,7 +12,7 @@ export function drawCoastline({
   lakecoast,
   oceanLayer
 }) {
-  d3.selectAll(".coastlines").remove();
+  d3.selectAll(".coastline").remove();
   var line = []; // array to store coasline edges
   for (var i = 0; i < polygons.length; i++) {
     if (polygons[i].height >= 0.2) {
