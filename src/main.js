@@ -3,6 +3,7 @@ import { Timers } from "./core/timers.js";
 import { ensureLayers } from "./render/layers.js";
 import { runSelfTests, renderSelfTestBadge, clamp01, ensureReciprocalNeighbors } from "./selftest.js";
 import { poissonDiscSampler, buildVoronoi, detectNeighbors } from "./modules/geometry.js";
+import { randomMap } from "./modules/heightmap.js";
 
 // Global state object for seed management
 const state = {
@@ -108,40 +109,7 @@ function generate(count) {
 
 
 
-  function add(start, type) {
-    // get options
-    var height = heightInput.valueAsNumber,
-      radius = radiusInput.valueAsNumber,
-      sharpness = sharpnessInput.valueAsNumber,
-      queue = [], // polygons to check
-      used = []; // used polygons
-    polygons[start].height += height;
-    polygons[start].featureType = undefined;
-    queue.push(start);
-    used.push(start);
-    for (var i = 0; i < queue.length && height > 0.01; i++) {
-      if (type == "island") {
-        height = polygons[queue[i]].height * radius;
-      } else {
-        height = height * radius;
-      }
-      polygons[queue[i]].neighbors.forEach(function(e) {
-        if (used.indexOf(e) < 0 && polygons[e]) {
-          var mod = rng.random() * sharpness + 1.1 - sharpness;
-          if (sharpness == 0) {
-            mod = 1;
-          }
-          polygons[e].height += height * mod;
-          if (polygons[e].height > 1) {
-            polygons[e].height = 1;
-          }
-          polygons[e].featureType = undefined;
-          queue.push(e);
-          used.push(e);
-        }
-      });
-    }
-  }
+
 
   function drawPolygons() {
     // delete all polygons
@@ -413,45 +381,13 @@ function generate(count) {
   }
 
   if (count != undefined) {
-    randomMap(count);
-  }
-
-  // Create randon map
-  function randomMap(count) {
-    for (var c = 0; c < count; c++) {
-      // Big blob first
-      if (c == 0) {
-        var x = rng.random() * mapWidth / 4 + mapWidth / 2;
-        var y = rng.random() * mapHeight / 4 + mapHeight / 2;
-        var rnd = diagram.find(x, y).index;
-        circles.append("circle")
-          .attr("r", 3)
-          .attr("cx", x)
-          .attr("cy", y)
-          .attr("fill", color(1 - heightInput.valueAsNumber))
-          .attr("class", "circle");
-        add(rnd, "island");
-        radiusInput.value = 0.99;
-        radiusOutput.value = 0.99;
-      } else { // Then small blobs
-        var limit = 0; // limit while iterations
-        do {
-          rnd = rng.int(0, polygons.length - 1);
-          limit++;
-        } while ((polygons[rnd].height > 0.25 || polygons[rnd].data[0] < mapWidth * 0.25 || polygons[rnd].data[0] > mapWidth * 0.75 || polygons[rnd].data[1] < mapHeight * 0.2 || polygons[rnd].data[1] > mapHeight * 0.75) &&
-          limit < 50)
-        heightInput.value = rng.random() * 0.4 + 0.1;
-        circles.append("circle")
-          .attr("r", 3)
-          .attr("cx", polygons[rnd].data[0])
-          .attr("cy", polygons[rnd].data[1])
-          .attr("fill", color(1 - heightInput.valueAsNumber))
-          .attr("class", "circle");
-        add(rnd, "hill");
-      }
-    }
-    heightInput.value = rng.random() * 0.4 + 0.1;
-    heightOutput.value = heightInput.valueAsNumber;
+    randomMap(count, {
+      rng, diagram, polygons,
+      heightInput, radiusInput, sharpnessInput,
+      circlesLayer: circles,
+      mapWidth, mapHeight, color, radiusOutput
+    });
+    
     // process the calculations
     markFeatures();
     drawCoastline();
@@ -461,6 +397,8 @@ function generate(count) {
     // reset hover cache after (re)generation
     lastNearest = -1;
   }
+
+
 
   // Clamp and normalize height values for self-tests
   const heightArray = polygons.map(p => p.height);
