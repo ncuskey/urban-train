@@ -6,6 +6,7 @@ import { poissonDiscSampler, buildVoronoi, detectNeighbors } from "./modules/geo
 import { randomMap } from "./modules/heightmap.js";
 import { markFeatures } from "./modules/features.js";
 import { drawCoastline } from "./modules/coastline.js";
+import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 
 // Global state object for seed management
 const state = {
@@ -113,35 +114,7 @@ function generate(count) {
 
 
 
-  function drawPolygons() {
-    // delete all polygons
-    svg.select(".mapCell").remove();
-    // redraw the polygons based on new heights
-    var grads = [],
-      limit = 0.2;
-    if (seaInput.checked == true) {
-      limit = 0;
-    }
-    polygons.map(function(i) {
-      if (i.height >= limit) {
-        mapCells.append("path")
-          .attr("d", "M" + i.join("L") + "Z")
-          .attr("class", "mapCell")
-          .attr("fill", color(1 - i.height));
-        mapCells.append("path")
-          .attr("d", "M" + i.join("L") + "Z")
-          .attr("class", "mapStroke")
-          .attr("stroke", color(1 - i.height));
-      }
-			if (i.type === "shallow") {
-				shallow.append("path")
-					.attr("d", "M" + i.join("L") + "Z");
-			}
-    });
-    if (blurInput.valueAsNumber > 0) {
-      toggleBlur();
-    }
-  }
+
 
 
 
@@ -193,7 +166,17 @@ function generate(count) {
       lakecoast,
       oceanLayer
     });
-    drawPolygons();
+    drawPolygons({
+      polygons,
+      color,
+      seaInput,
+      blurInput,
+      mapCellsLayer: mapCells,
+      oceanLayer: oceanLayer,
+      shallowLayer: shallow,
+      circlesLayer: circles,
+      svg
+    });
     $('.circles').hide();
     
     // reset hover cache after (re)generation
@@ -227,33 +210,31 @@ function generate(count) {
 
   // redraw all polygons on SeaInput change 
   $("#seaInput").change(function() {
-    drawPolygons();
+    drawPolygons({
+      polygons,
+      color,
+      seaInput,
+      blurInput,
+      mapCellsLayer: mapCells,
+      oceanLayer: oceanLayer,
+      shallowLayer: shallow,
+      circlesLayer: circles,
+      svg
+    });
   });
 
   // Draw of remove blur polygons on intup change
   $("#blurInput").change(function() {
-    toggleBlur();
+    toggleBlur({
+      polygons,
+      color,
+      seaInput,
+      blurInput,
+      mapCellsLayer: mapCells
+    });
   });
 
-  // Change blur, in case of 0 will not be drawn 
-  function toggleBlur() {
-    d3.selectAll(".blur").remove();
-    if (blurInput.valueAsNumber > 0) {
-      var limit = 0.2;
-      if (seaInput.checked == true) {
-        limit = 0;
-      }
-      polygons.map(function(i) {
-        if (i.height >= limit) {
-          mapCells.append("path")
-            .attr("d", "M" + i.join("L") + "Z")
-            .attr("class", "blur")
-            .attr("stroke-width", blurInput.valueAsNumber)
-            .attr("stroke", color(1 - i.height));
-        }
-      });
-    }
-  }
+
 
   // Draw of remove blur polygons on intup change
   $("#strokesInput").change(function() {

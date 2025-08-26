@@ -94,7 +94,8 @@ urban-train/
 │   │   ├── geometry.js     # Voronoi diagram and neighbor detection
 │   │   ├── heightmap.js    # Terrain generation and height mapping
 │   │   ├── features.js     # Geographic feature detection and naming
-│   │   └── coastline.js    # Coastline tracing and path generation
+│   │   ├── coastline.js    # Coastline tracing and path generation
+│   │   └── rendering.js    # Polygon rendering and visual effects
 │   ├── render/
 │   │   └── layers.js       # SVG layer management
 │   └── selftest.js         # Regression testing and validation
@@ -117,6 +118,7 @@ urban-train/
    - **Heightmap (`src/modules/heightmap.js`)**: Terrain generation and height mapping
    - **Features (`src/modules/features.js`)**: Geographic feature detection and naming
    - **Coastline (`src/modules/coastline.js`)**: Coastline tracing and path generation
+   - **Rendering (`src/modules/rendering.js`)**: Polygon rendering and visual effects
 
 3. **Map Generation (`generate` function)**:
    - Sets up SVG canvas and D3.js elements
@@ -142,10 +144,11 @@ urban-train/
    - Handles both island coastlines and lake shorelines
    - Marks shallow water areas
 
-7. **Visualization (`drawPolygons` function)**:
+7. **Visualization (`drawPolygons` function from `src/modules/rendering.js`)**:
    - Renders terrain polygons with color-coded heights
    - Applies visual effects (blur, strokes)
    - Updates the display based on user settings
+   - Manages sea cutoff logic and shallow water rendering
 
 ### Key Algorithms
 
@@ -191,7 +194,7 @@ The project has been refactored with a comprehensive modular architecture:
 - **Performance monitoring** with built-in timers
 - **Self-testing** with visual feedback
 - **ES6 modules** for maintainable code organization
-- **Feature extraction** into specialized modules (geometry, heightmap, features, coastline)
+- **Feature extraction** into specialized modules (geometry, heightmap, features, coastline, rendering)
 
 ## Contributing
 
