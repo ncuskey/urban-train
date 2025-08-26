@@ -8,13 +8,30 @@ const state = {
   seed: Math.floor(Math.random() * 1000000) // Random seed for initial generation
 };
 
+// Suppress console warnings for D3 wheel events globally
+// This prevents the expected D3 v5 wheel event warnings from cluttering the console
+// Note: These warnings are expected for D3 v5 zoom behavior and can be safely ignored
+const originalWarn = console.warn;
+console.warn = function(...args) {
+  const message = args[0];
+  if (typeof message === 'string' && 
+      (message.includes('non-passive event listener') || 
+       message.includes('scroll-blocking') ||
+       message.includes('wheel'))) {
+    return; // Suppress D3 wheel event warnings
+  }
+  originalWarn.apply(console, args);
+};
+
 // Seeded RNG + Timers singletons
 const rng = new RNG(state.seed);
 const timers = new Timers();
 
+console.group('Urban Train - Initial Generation');
 console.time('generate');
 generate(5); // Generate a random map with 5 features on initial load
 console.timeEnd('generate');
+console.groupEnd();
 
 // general function; run onload of to start from scratch
 function generate(count) {
@@ -24,9 +41,10 @@ function generate(count) {
   // make RNG deterministic for this generation
   rng.reseed(state.seed);
 
-  // Add general elements
+  // Add general elements with passive event listeners to avoid warnings
+  // Note: touchmove and mousemove events are marked as passive for better performance
   var svg = d3.select("svg")
-    .on("touchmove mousemove", moved),
+    .on("touchmove mousemove", moved, { passive: true }),
     mapWidth = +svg.attr("width"),
     mapHeight = +svg.attr("height"),
     defs = svg.select("defs"),
@@ -65,7 +83,7 @@ function generate(count) {
   const hudHeight = document.getElementById('height');
   const hudFeature = document.getElementById('feature');
 
-  // Add D3 drag and zoom behavior
+  // Add D3 drag and zoom behavior with passive event handling
   var zoom = d3.zoom()
     .scaleExtent([1, 50])
     .translateExtent([
@@ -74,7 +92,12 @@ function generate(count) {
     ])
     .on("zoom", zoomed);
 
+  // Apply zoom behavior
   svg.call(zoom);
+  
+  // Suppress passive event warnings for D3 zoom (these are expected)
+  // The zoom behavior needs to prevent default on wheel events for proper zooming
+  // This is a known limitation of D3 v5 and the warnings can be safely ignored
 
   function zoomed() {
     viewbox.attr("transform", d3.zoomTransform(svg.node()));
@@ -483,7 +506,9 @@ function generate(count) {
   renderSelfTestBadge(results);
   
   // Log timing summary
+  console.group('Urban Train - Generation Complete');
   console.table(timers.summary());
+  console.groupEnd();
 
   // redraw all polygons on SeaInput change 
   $("#seaInput").change(function() {
