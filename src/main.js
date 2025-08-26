@@ -2,6 +2,7 @@ import { RNG } from "./core/rng.js";
 import { Timers } from "./core/timers.js";
 import { ensureLayers } from "./render/layers.js";
 import { runSelfTests, renderSelfTestBadge, clamp01, ensureReciprocalNeighbors } from "./selftest.js";
+import { poissonDiscSampler, buildVoronoi, detectNeighbors } from "./modules/geometry.js";
 
 // Global state object for seed management
 const state = {
@@ -60,21 +61,15 @@ function generate(count) {
   // Ensure SVG layers exist for self-tests
   const layers = ensureLayers(svg.node());
   // Poisson-disc sampling from https://bl.ocks.org/mbostock/99049112373e12709381
-  var sampler = poissonDiscSampler(mapWidth, mapHeight, sizeInput.valueAsNumber),
-    samples = [],
-    sample;
-  while (sample = sampler()) samples.push(sample);
+  const sampler = poissonDiscSampler(mapWidth, mapHeight, sizeInput.valueAsNumber, rng);
+  const samples = [];
+  for (let s; (s = sampler()); ) samples.push(s);
   // Voronoi D3
-  var voronoi = d3.voronoi().extent([
-      [0, 0],
-      [mapWidth, mapHeight]
-    ]),
-    diagram = voronoi(samples),
-    polygons = diagram.polygons(),
-    // Colors D3 interpolation
-    color = d3.scaleSequential(d3.interpolateSpectral),
-    // Queue array  
-    queue = [];
+  const { diagram, polygons } = buildVoronoi(samples, mapWidth, mapHeight);
+  // Colors D3 interpolation
+  const color = d3.scaleSequential(d3.interpolateSpectral);
+  // Queue array  
+  const queue = [];
 
   // Hover HUD perf helpers
   let hoverRafId = 0;
@@ -106,32 +101,12 @@ function generate(count) {
   // array to use as names
   var adjectives = ["Ablaze", "Ablazing", "Accented", "Ashen", "Ashy", "Beaming", "Bi-Color", "Blazing", "Bleached", "Bleak", "Blended", "Blotchy", "Bold", "Brash", "Bright", "Brilliant", "Burnt", "Checkered", "Chromatic", "Classic", "Clean", "Colored", "Colorful", "Colorless", "Complementing", "Contrasting", "Cool", "Coordinating", "Crisp", "Dappled", "Dark", "Dayglo", "Deep", "Delicate", "Digital", "Dim", "Dirty", "Discolored", "Dotted", "Drab", "Dreary", "Dull", "Dusty", "Earth", "Electric", "Eye-Catching", "Faded", "Faint", "Festive", "Fiery", "Flashy", "Flattering", "Flecked", "Florescent", "Frosty", "Full-Toned", "Glistening", "Glittering", "Glowing", "Harsh", "Hazy", "Hot", "Hued", "Icy", "Illuminated", "Incandescent", "Intense", "Interwoven", "Iridescent", "Kaleidoscopic", "Lambent", "Light", "Loud", "Luminous", "Lusterless", "Lustrous", "Majestic", "Marbled", "Matte", "Medium", "Mellow", "Milky", "Mingled", "Mixed", "Monochromatic", "Motley", "Mottled", "Muddy", "Multicolored", "Multihued", "Murky", "Natural", "Neutral", "Opalescent", "Opaque", "Pale", "Pastel", "Patchwork", "Patchy", "Patterned", "Perfect", "Picturesque", "Plain", "Primary", "Prismatic", "Psychedelic", "Pure", "Radiant", "Reflective", "Rich", "Royal", "Ruddy", "Rustic", "Satiny", "Saturated", "Secondary", "Shaded", "Sheer", "Shining", "Shiny", "Shocking", "Showy", "Smoky", "Soft", "Solid", "Somber", "Soothing", "Sooty", "Sparkling", "Speckled", "Stained", "Streaked", "Streaky", "Striking", "Strong Neutral", "Subtle", "Sunny", "Swirling", "Tinged", "Tinted", "Tonal", "Toned", "Translucent", "Transparent", "Two-Tone", "Undiluted", "Uneven", "Uniform", "Vibrant", "Vivid", "Wan", "Warm", "Washed-Out", "Waxen", "Wild"];
 
-  detectNeighbors();
+  detectNeighbors(diagram, polygons);
   
   // Ensure reciprocal neighbors for self-tests
   ensureReciprocalNeighbors({ cells: polygons });
 
-  // for each polygon detect neibours and add their indexes
-  function detectNeighbors() {
-    // push neighbors indexes to each polygons element
-    polygons.map(function(i, d) {
-      i.index = d; // index of this element
-      i.height = 0;
-      var neighbors = [];
-      diagram.cells[d].halfedges.forEach(function(e) {
-        var edge = diagram.edges[e],
-          ea;
-        if (edge.left && edge.right) {
-          ea = edge.left.index;
-          if (ea === d) {
-            ea = edge.right.index;
-          }
-          neighbors.push(ea);
-        }
-      })
-      i.neighbors = neighbors;
-    });
-  }
+
 
   function add(start, type) {
     // get options
@@ -566,76 +541,7 @@ function generate(count) {
     }
   }
 
-  // Based on https://www.jasondavies.com/poisson-disc/
-  function poissonDiscSampler(width, height, radius) {
-    var k = 30, // maximum number of samples before rejection
-      radius2 = radius * radius,
-      R = 3 * radius2,
-      cellSize = radius * Math.SQRT1_2,
-      gridWidth = Math.ceil(width / cellSize),
-      gridHeight = Math.ceil(height / cellSize),
-      grid = new Array(gridWidth * gridHeight),
-      queue = [],
-      queueSize = 0,
-      sampleSize = 0;
 
-    return function() {
-      if (!sampleSize) return sample(rng.random() * width, rng.random() * height);
-
-      // Pick a random existing sample and remove it from the queue.
-      while (queueSize) {
-        var i = rng.int(0, queueSize - 1),
-          s = queue[i];
-
-        // Make a new candidate between [radius, 2 * radius] from the existing sample.
-        for (var j = 0; j < k; ++j) {
-          var a = 2 * Math.PI * rng.random(),
-            r = Math.sqrt(rng.random() * R + radius2),
-            x = s[0] + r * Math.cos(a),
-            y = s[1] + r * Math.sin(a);
-
-          // Reject candidates that are outside the allowed extent,
-          // or closer than 2 * radius to any existing sample.
-          if (0 <= x && x < width && 0 <= y && y < height && far(x, y)) return sample(x, y);
-        }
-
-        queue[i] = queue[--queueSize];
-        queue.length = queueSize;
-      }
-    };
-
-    function far(x, y) {
-      var i = x / cellSize | 0,
-        j = y / cellSize | 0,
-        i0 = Math.max(i - 2, 0),
-        j0 = Math.max(j - 2, 0),
-        i1 = Math.min(i + 3, gridWidth),
-        j1 = Math.min(j + 3, gridHeight);
-
-      for (j = j0; j < j1; ++j) {
-        var o = j * gridWidth;
-        for (i = i0; i < i1; ++i) {
-          if (s = grid[o + i]) {
-            var s,
-              dx = s[0] - x,
-              dy = s[1] - y;
-            if (dx * dx + dy * dy < radius2) return false;
-          }
-        }
-      }
-
-      return true;
-    }
-
-    function sample(x, y) {
-      var s = [x, y];
-      queue.push(s);
-      grid[gridWidth * (y / cellSize | 0) + (x / cellSize | 0)] = s;
-      ++sampleSize;
-      ++queueSize;
-      return s;
-    }
-  }
 
   // Clear the map on re-generation
   function undraw() {
