@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SVG Zoom Test</title>
+    <style>
+        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+        .test-info { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+        .console { background: #000; color: #0f0; padding: 10px; font-family: monospace; height: 200px; overflow-y: scroll; }
+    </style>
+</head>
+<body>
+    <h1>SVG-Based Zoom Verification</h1>
+    
+    <div class="test-info">
+        <h3>Implementation Summary:</h3>
+        <ul>
+            <li class="success">✅ Zoom behavior bound directly to SVG</li>
+            <li class="success">✅ Event surface is visual-only (pointer-events: none)</li>
+            <li class="success">✅ Hover bound to SVG with d3.mouse()</li>
+            <li class="success">✅ v5-safe transform access via d3.event</li>
+            <li class="success">✅ Auto-fit uses same zoom behavior</li>
+        </ul>
+    </div>
+
+    <div class="test-info">
+        <h3>Test Steps:</h3>
+        <ol>
+            <li>Open main app: <a href="http://localhost:8001" target="_blank">http://localhost:8001</a></li>
+            <li>Open DevTools console</li>
+            <li>Run these verification commands:</li>
+        </ol>
+    </div>
+
+    <div class="test-info">
+        <h3>Console Commands:</h3>
+        <ul>
+            <li><code>runZoomChecklist()</code> - Full system verification</li>
+            <li><code>forceZoomSanity()</code> - Test programmatic zoom</li>
+            <li><code>debugPick(200, 200)</code> - Test cell picking</li>
+            <li><code>hudSanity()</code> - Test HUD under cursor</li>
+        </ul>
+    </div>
+
+    <div class="test-info">
+        <h3>Manual Tests:</h3>
+        <ul>
+            <li class="success">✅ Mouse wheel should zoom the map</li>
+            <li class="success">✅ Drag should pan the map</li>
+            <li class="success">✅ Hover should show cell information</li>
+            <li class="success">✅ Auto-fit should animate smoothly</li>
+            <li class="success">✅ LOD should switch between raster/vector</li>
+        </ul>
+    </div>
+
+    <div class="test-info">
+        <h3>Key Technical Details:</h3>
+        <ul>
+            <li><strong>Zoom Binding:</strong> <code>svg.call(zoom)</code> - direct binding to SVG</li>
+            <li><strong>Event Surface:</strong> <code>pointer-events: none</code> - visual only</li>
+            <li><strong>Transform Access:</strong> <code>d3.event.transform</code> - v5-safe</li>
+            <li><strong>Mouse Coordinates:</strong> <code>d3.mouse(svg.node())</code> - v5 API</li>
+            <li><strong>Auto-fit:</strong> Uses same zoom behavior for consistency</li>
+        </ul>
+    </div>
+
+    <div class="test-info">
+        <h3>Expected Results:</h3>
+        <ul>
+            <li class="success">✅ All checklist items should pass</li>
+            <li class="success">✅ Programmatic zoom should move the map</li>
+            <li class="success">✅ Cell picking should return valid data</li>
+            <li class="success">✅ HUD should show current cell info</li>
+            <li class="success">✅ No JavaScript errors in console</li>
+        </ul>
+    </div>
+
+    <script>
+        // Auto-redirect to main app
+        setTimeout(() => {
+            window.location.href = 'http://localhost:8001';
+        }, 8000);
+    </script>
+</body>
+</html>

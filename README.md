@@ -8,8 +8,9 @@ A web-based procedural map generator that creates realistic terrain with islands
 - **Deterministic Generation**: Seeded random number generation for reproducible maps
 - **Interactive Map Creation**: Generate maps with islands and hills automatically
 - **Random Map Generation**: Generate maps with random terrain features
-- **Zoom and Pan**: Navigate around the generated terrain
+- **Smooth Zoom and Pan**: Navigate around the generated terrain with optimized performance
 - **Real-time Information**: View cell data, height values, and feature names with optimized performance
+- **Level-of-Detail (LOD)**: Automatic switching between raster and vector rendering for optimal performance
 - **Performance Monitoring**: Built-in timing and performance analysis
 - **Self-Testing**: Automatic validation and regression testing with visual feedback
 - **Customizable Options**: Adjust various parameters like height, radius, sharpness, and more
@@ -61,8 +62,10 @@ A web-based procedural map generator that creates realistic terrain with islands
 ### Interactive Features
 
 - **Mouse Movement**: See real-time information about the cell under your cursor (optimized with throttling and change detection)
-- **Zoom**: Use mouse wheel or pinch gestures to zoom in/out
+- **Zoom**: Use mouse wheel or pinch gestures to zoom in/out (0.5x to 32x scale)
 - **Pan**: Click and drag to move around the map
+- **Auto-fit**: Automatically fits the map to show all land masses
+- **Performance Optimized**: LOD system switches between raster and vector rendering based on zoom level
 
 ### Advanced Options
 
@@ -123,7 +126,7 @@ urban-train/
    - **Features (`src/modules/features.js`)**: Geographic feature detection and naming
    - **Coastline (`src/modules/coastline.js`)**: Coastline tracing and path generation
    - **Rendering (`src/modules/rendering.js`)**: Polygon rendering and visual effects
-   - **Interaction (`src/modules/interaction.js`)**: Zoom and hover HUD functionality
+   - **Interaction (`src/modules/interaction.js`)**: Zoom, pan, and hover HUD functionality with LOD optimization
 
 3. **Map Generation (`generate` function)**:
    - Sets up SVG canvas and D3.js elements
@@ -162,6 +165,13 @@ urban-train/
    - Supports both scaling and constant-size label modes
    - Uses keyed data joins to prevent label accumulation
 
+9. **Interaction System (`attachInteraction` function)**:
+   - Provides smooth zoom and pan functionality (0.5x to 32x scale)
+   - Implements real-time hover HUD with cell information
+   - Features Level-of-Detail (LOD) system for performance optimization
+   - Uses spatial picking for efficient cell selection
+   - Supports auto-fit functionality for optimal map viewing
+
 ### Key Algorithms
 
 - **Poisson-disc Sampling**: Creates evenly distributed points for natural-looking terrain
@@ -170,6 +180,8 @@ urban-train/
 - **Path Finding**: Creates continuous coastline paths
 - **Deterministic RNG**: sfc32 + xmur3 algorithms for reproducible generation
 - **Performance Timing**: RequestAnimationFrame-based timing for accurate measurements
+- **Level-of-Detail (LOD)**: Automatic switching between raster and vector rendering based on zoom level
+- **Spatial Picking**: Efficient cell selection using spatial indexing instead of DOM hit-testing
 
 ## Browser Compatibility
 

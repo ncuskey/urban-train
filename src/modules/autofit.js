@@ -39,7 +39,7 @@ export function computeLandBBox(polygons, { seaLevel = 0.2, preferFeatureType = 
 
 /**
  * Fit (pan + zoom) so the land bbox fits inside the viewport with a margin.
- * Uses the existing zoom behavior bound to the same <svg>.
+ * Uses the existing zoom behavior bound to the SVG.
  * - Keeps default behavior unchanged unless called.
  * - Respects zoom.scaleExtent() min/max.
  */
@@ -54,7 +54,7 @@ export function fitToLand({
   margin = 0.08,     // 8% padding on all sides
   duration = 600
 }) {
-  if (!svg || !zoom || !polygons || !polygons.length) return;
+  if (!svg || !polygons || !polygons.length) return;
 
   const bbox = computeLandBBox(polygons, { seaLevel, preferFeatureType });
   if (!bbox) return;
@@ -80,6 +80,7 @@ export function fitToLand({
   const tx = (width  / 2) - k * bbox.cx;
   const ty = (height / 2) - k * bbox.cy;
 
+  // Apply transform via the same zoom behavior bound to SVG, so on('zoom') fires
   svg
     .transition()
     .duration(duration)

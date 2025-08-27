@@ -1,77 +1,60 @@
 // d3 is global; do not import it.
 
+let svg, gTarget, zoom, currentTransform = d3.zoomIdentity;
+
 export function attachInteraction({
-  svg,            // d3 selection of the root <svg>
+  svg: svgParam,            // d3 selection of the root <svg>
   viewbox,        // d3 selection of the <g> that is transformed by zoomed()
   diagram,        // the current d3-voronoi diagram (for diagram.find)
   polygons,       // polygons array (read-only here)
   hud: { cellEl, heightEl, featureEl } // DOM nodes or selections used in moved()
   // any additional flags you currently read in moved(), keep the signature minimal otherwise
 }) {
-  // Lightweight zoom & hover system
-  let currentTransform = d3.zoomIdentity;
-  window.currentTransform = currentTransform; // Global transform tracking
+  svg = svgParam;
 
-  // Add D3 drag and zoom behavior with passive event handling
-  var zoom = d3.zoom()
-    .scaleExtent([1, 50])
+  // Transform target (the group that contains the whole map)
+  gTarget = d3.select('.viewbox').empty() ? d3.select('#content') : d3.select('.viewbox');
+  if (gTarget.empty()) { 
+    console.error('[zoom] no transform target found, trying fallbacks...');
+    gTarget = findZoomTarget();
+    if (gTarget.empty()) {
+      console.error('[zoom] no transform target found. Falling back to first <g> in <svg>.');
+      gTarget = svg.select('g');
+    }
+  }
+
+  // Keep overlays from stealing input
+  svg.select('#cellsRaster').style('pointer-events','none');
+  svg.select('#hud').style('pointer-events','none');
+
+  // Optional: keep a full-size rect for sizing, but DO NOT capture events
+  let surface = svg.select('#event-surface');
+  if (surface.empty()) {
+    surface = svg.append('rect').attr('id','event-surface')
+      .attr('x',0).attr('y',0).attr('fill','transparent');
+  }
+  const r = svg.node().getBoundingClientRect();
+  surface.attr('width', r.width).attr('height', r.height)
+         .style('pointer-events', 'none');   // <- IMPORTANT
+
+  // Clear any old zoom listeners and bind to SVG (v5-safe)
+  svg.on('.zoom', null);
+  zoom = d3.zoom()
+    .scaleExtent([0.5, 32])
     .translateExtent([
       [-100, -100],
-      [svg.attr("width") + 100, svg.attr("height") + 100]
+      [r.width + 100, r.height + 100]
     ])
-    .on("zoom", onZoom);
-
-  // Apply zoom behavior
-  svg.call(zoom);
-  
-  // Suppress passive event warnings for D3 zoom (these are expected)
-  // The zoom behavior needs to prevent default on wheel events for proper zooming
-  // This is a known limitation of D3 v5 and the warnings can be safely ignored
-
-  function onZoom(e) {
-    // Safety check for undefined event parameter (expected during transitions)
-    if (!e || !e.transform) {
-      return; // Silently ignore malformed zoom events during transitions
-    }
-    
-    // Use global Perf object from main.js
-    if (window.Perf) {
-      window.Perf.time('zoom', () => {
-        currentTransform = e.transform;
-        window.currentTransform = currentTransform;
-        
-        // Apply transform to world layers (geometry etc.)
-        viewbox.attr("transform", currentTransform);
-        
-        // Update LOD based on zoom level (just flips display/classes)
-        if (window.updateCellsLOD) {
-          window.updateCellsLOD(currentTransform.k);
-        }
-        
-        // Handle label scaling based on configuration
-        const gLabels = d3.select('#labels');
-        if (!gLabels.empty()) {
-          if (window.LABELS_NONSCALING) {
-            // Keep label text constant-size in pixels: counter-scale each label
-            // Assumes each datum has world coords {x, y}
-            gLabels.selectAll('text')
-              .attr("transform", d => `translate(${currentTransform.applyX(d.x)},${currentTransform.applyY(d.y)}) scale(${1 / currentTransform.k})`);
-          }
-          // If LABELS_NONSCALING is false, labels scale naturally with the map
-          // (they're already under viewbox, so no extra work needed)
-        }
-      });
-    } else {
-      // Fallback if profiler not available
-      currentTransform = e.transform;
-      window.currentTransform = currentTransform;
+    .on('zoom', function() {                 // v5: use d3.event
+      const t = (d3.event && d3.event.transform) ? d3.event.transform
+                                                 : d3.zoomTransform(svg.node());
+      currentTransform = t;
+      window.currentTransform = currentTransform; // Global transform tracking
+      gTarget.attr('transform', t);          // do NOT do anything else here
       
-      // Apply transform to world layers (geometry etc.)
-      viewbox.attr("transform", currentTransform);
-      
-      // Update LOD based on zoom level (just flips display/classes)
-      if (window.updateCellsLOD) {
-        window.updateCellsLOD(currentTransform.k);
+      // LOD flip: make sure this exists and is cheap
+      if (typeof updateCellsLOD === 'function') {
+        updateCellsLOD(t.k);
       }
       
       // Handle label scaling based on configuration
@@ -81,42 +64,44 @@ export function attachInteraction({
           // Keep label text constant-size in pixels: counter-scale each label
           // Assumes each datum has world coords {x, y}
           gLabels.selectAll('text')
-            .attr("transform", d => `translate(${currentTransform.applyX(d.x)},${currentTransform.applyY(d.y)}) scale(${1 / currentTransform.k})`);
+            .attr("transform", d => `translate(${t.applyX(d.x)},${t.applyY(d.y)}) scale(${1 / t.k})`);
         }
         // If LABELS_NONSCALING is false, labels scale naturally with the map
         // (they're already under viewbox, so no extra work needed)
       }
-    }
-  }
+    });
 
-  // Lightweight hover system
-  let rafHover = false, lastCellId = -1, lastXY;
-  
-  svg.on('mousemove', (ev) => {
+  svg.call(zoom).style('cursor','grab');     // bind zoom to svg
+  svg.node().__ZOOM__ = zoom;                // expose for auto-fit/tests
+  svg.node().__ZOOM_TARGET__ = gTarget.node();
+
+  // Keep the surface sized with the SVG
+  window.addEventListener('resize', () => {
+    const rr = svg.node().getBoundingClientRect();
+    svg.select('#event-surface').attr('width', rr.width).attr('height', rr.height);
+  });
+
+  svg.style('touch-action','none');          // prevent browser gestures
+
+  // ===== HUD hover binding (bind to svg) =====
+  let rafHover = false, lastCellId = -1;
+
+  function onHoverMove() {
     // Early return if hover is disabled
     if (window.hoverDisabled) return;
     
-    // Safety check for valid event
-    if (!ev || !ev.target) return;
-    
-    try {
-      lastXY = d3.mouse(ev);
-      if (!lastXY || lastXY.length !== 2) return;
-    } catch (error) {
-      // Silently ignore malformed mouse events
-      return;
-    }
-    
+    const [mx, my] = d3.mouse(svg.node());   // d3 v5
     if (rafHover) return;
     rafHover = true;
-    
     requestAnimationFrame(() => {
       rafHover = false;
       
       // Use global Perf object from main.js
       if (window.Perf) {
         window.Perf.time('hover', () => {
-          const [wx, wy] = currentTransform.invert(lastXY);
+          const t = getCurrentTransform();
+          const wx = (mx - t.x) / t.k;
+          const wy = (my - t.y) / t.k;
           const cell = window.pickCellAt ? window.pickCellAt(wx, wy) : diagram.find(wx, wy);
           
           if (!cell || cell.index === lastCellId) return;
@@ -130,11 +115,13 @@ export function attachInteraction({
             : "no!";
             
           // Update HUD with screen coordinates for crisp positioning
-          updateHUD(cell, { screenX: lastXY[0], screenY: lastXY[1], worldX: wx, worldY: wy, k: currentTransform.k });
+          updateHUD(cell, { screenX: mx, screenY: my, worldX: wx, worldY: wy, k: t.k });
         });
       } else {
         // Fallback if profiler not available
-        const [wx, wy] = currentTransform.invert(lastXY);
+        const t = getCurrentTransform();
+        const wx = (mx - t.x) / t.k;
+        const wy = (my - t.y) / t.k;
         const cell = window.pickCellAt ? window.pickCellAt(wx, wy) : diagram.find(wx, wy);
         
         if (!cell || cell.index === lastCellId) return;
@@ -148,10 +135,13 @@ export function attachInteraction({
           : "no!";
           
         // Update HUD with screen coordinates for crisp positioning
-        updateHUD(cell, { screenX: lastXY[0], screenY: lastXY[1], worldX: wx, worldY: wy, k: currentTransform.k });
+        updateHUD(cell, { screenX: mx, screenY: my, worldX: wx, worldY: wy, k: t.k });
       }
     });
-  });
+  }
+
+  // bind to the svg
+  svg.on('mousemove.hover', onHoverMove);
 
   function updateHUD(cell, ctx) {
     if (!cell) { 
@@ -197,11 +187,127 @@ export function attachInteraction({
     getTransform,
     panTo,
     destroy() {
-      svg.on("touchmove mousemove", null);
+      svg.on("mousemove.hover", null);
       svg.on("zoom", null);
     },
     resetHoverCache() {
-      lastNearest = -1;
+      lastCellId = -1;
     }
   };
 }
+
+// choose the first existing candidate as the zoom target group
+function findZoomTarget() {
+  const candidates = ['#content', '#viewport', '#map', 'g[data-zoom-root="true"]', '.viewbox'];
+  for (const sel of candidates) {
+    const s = d3.select(sel);
+    if (!s.empty()) return s;
+  }
+  // fallback: a top-level <g>
+  const s = d3.select('svg > g');
+  return s.empty() ? d3.select(null) : s;
+}
+
+// expose for other modules that need the current transform
+export function getCurrentTransform() { return currentTransform; }
+
+// programmatic zoom checks
+window.forceZoomSanity = function() {
+  const node = d3.select('svg').node();
+  const z = node.__ZOOM__;
+  const sel = d3.select(node);
+  if (!z) return console.error('No zoom behavior bound to svg');
+
+  console.log('scaleTo 2×...');
+  sel.transition().duration(400).call(z.scaleTo, 2.0);
+  setTimeout(() => {
+    console.log('translateTo center 400,300...');
+    sel.transition().duration(400).call(z.translateTo, 400, 300);
+  }, 450);
+};
+
+// Quick checklist verification
+window.runZoomChecklist = function() {
+  console.group('🔍 ZOOM CHECKLIST VERIFICATION');
+  
+  // 1. Check if attachInteraction() runs after layers are created
+  console.log('1️⃣ attachInteraction() timing:');
+  const viewbox = d3.select('.viewbox');
+  const mapCells = d3.select('.mapCells');
+  const labels = d3.select('#labels');
+  console.log('   ✅ Layers exist:', {
+    viewbox: !viewbox.empty(),
+    mapCells: !mapCells.empty(),
+    labels: !labels.empty()
+  });
+
+  // 2. Check if svg has zoom behavior
+  console.log('\n2️⃣ Zoom behavior binding:');
+  const svg = d3.select('svg');
+  const zoomBehavior = svg.node()?.__ZOOM__;
+  console.log('   ✅ Zoom behavior bound to svg:', !!zoomBehavior);
+
+  // 3. Check if svg.node().__ZOOM_TARGET__ points to your map group
+  console.log('\n3️⃣ Zoom target group:');
+  const zoomTarget = svg.node().__ZOOM_TARGET__;
+  console.log('   ✅ __ZOOM_TARGET__ exists:', !!zoomTarget);
+  if (zoomTarget) {
+    console.log('   🎯 Target element:', zoomTarget.tagName, zoomTarget.className);
+    console.log('   🎯 Target matches viewbox:', zoomTarget === viewbox.node());
+  }
+
+  // 4. Test forceZoomSanity() moves the map
+  console.log('\n4️⃣ Programmatic zoom test:');
+  if (typeof window.forceZoomSanity === 'function') {
+    console.log('   ✅ forceZoomSanity() function exists');
+  } else {
+    console.log('   ❌ forceZoomSanity() function not found');
+  }
+
+  // 5. Test updateCellsLOD(k) flips raster/vector as you zoom
+  console.log('\n5️⃣ LOD system test:');
+  if (typeof window.updateCellsLOD === 'function') {
+    console.log('   ✅ updateCellsLOD() function exists');
+    
+    // Test at different zoom levels
+    const testLevels = [0.5, 1.0, 2.0, 3.0];
+    testLevels.forEach(k => {
+      window.updateCellsLOD(k);
+      const cellsDisplay = d3.select('.mapCells').style('display');
+      const rasterDisplay = d3.select('#cellsRaster').style('display');
+      console.log(`   📊 Zoom ${k}: cells=${cellsDisplay}, raster=${rasterDisplay}`);
+    });
+  } else {
+    console.log('   ❌ updateCellsLOD() function not found');
+  }
+
+  console.groupEnd();
+  
+  return {
+    layersExist: !viewbox.empty() && !mapCells.empty() && !labels.empty(),
+    zoomBehaviorExists: !!zoomBehavior,
+    zoomTargetExists: !!zoomTarget,
+    forceZoomSanityExists: typeof window.forceZoomSanity === 'function',
+    updateCellsLODExists: typeof window.updateCellsLOD === 'function'
+  };
+};
+
+// Debug picker function
+window.debugPick = (sx, sy) => {
+  const [wx, wy] = getCurrentTransform().invert([sx, sy]);
+  const c = window.pickCellAt ? window.pickCellAt(wx, wy) : null;
+  console.log('pick', {sx, sy, wx, wy, id: c?.index, name: c?.featureName});
+  return c;
+};
+
+// HUD sanity check function
+window.hudSanity = function() {
+  // Should log valid cell id/name under the cursor
+  (function(){
+    const t = getCurrentTransform();
+    const [mx,my] = d3.mouse(d3.select('svg').node());
+    const wx = (mx - t.x)/t.k, wy = (my - t.y)/t.k;
+    const c = window.pickCellAt ? window.pickCellAt(wx,wy) : null;
+    console.log('pick', {id:c && c.index, name:c && c.featureName});
+  })();
+};

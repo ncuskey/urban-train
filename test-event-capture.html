@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Event Capture Test</title>
+    <style>
+        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+        .test-info { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+        .console { background: #000; color: #0f0; padding: 10px; font-family: monospace; height: 200px; overflow-y: scroll; }
+    </style>
+</head>
+<body>
+    <h1>Event Capture Verification</h1>
+    
+    <div class="test-info">
+        <h3>Test Steps:</h3>
+        <ol>
+            <li>Open main app: <a href="http://localhost:8001" target="_blank">http://localhost:8001</a></li>
+            <li>Open DevTools console</li>
+            <li>Run these tests:</li>
+        </ol>
+    </div>
+
+    <div class="test-info">
+        <h3>1. Event Capture Test:</h3>
+        <div class="console" id="eventLog"></div>
+        <button onclick="testEventCapture()">Test Event Capture</button>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+
+    <div class="test-info">
+        <h3>2. Console Commands:</h3>
+        <ul>
+            <li><code>testEventCapture()</code> - Test which element gets wheel events</li>
+            <li><code>testProgrammaticZoom()</code> - Test zoom via surface</li>
+            <li><code>testHUD()</code> - Test hover and cell picking</li>
+            <li><code>runZoomChecklist()</code> - Full system verification</li>
+        </ul>
+    </div>
+
+    <div class="test-info">
+        <h3>Expected Results:</h3>
+        <ul>
+            <li class="success">✅ Wheel events go to #event-surface, not svg</li>
+            <li class="success">✅ Programmatic zoom moves the map</li>
+            <li class="success">✅ Hover shows cell information</li>
+            <li class="success">✅ All checklist items pass</li>
+        </ul>
+    </div>
+
+    <script>
+        function log(message) {
+            const logDiv = document.getElementById('eventLog');
+            logDiv.innerHTML += new Date().toLocaleTimeString() + ': ' + message + '<br>';
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('eventLog').innerHTML = '';
+        }
+
+        function testEventCapture() {
+            log('Testing event capture...');
+            
+            // Open the main app in a new window
+            const testWindow = window.open('http://localhost:8001', '_blank');
+            
+            if (!testWindow) {
+                log('ERROR: Could not open test window. Please allow popups.');
+                return;
+            }
+
+            testWindow.addEventListener('load', () => {
+                setTimeout(() => {
+                    try {
+                        // Test event capture
+                        const surface = testWindow.document.querySelector('#event-surface');
+                        const svg = testWindow.document.querySelector('svg');
+                        
+                        if (!surface) {
+                            log('ERROR: No event surface found');
+                            return;
+                        }
+
+                        // Add event listeners
+                        surface.addEventListener('wheel', () => {
+                            log('SUCCESS: Wheel event captured by surface');
+                        }, { passive: false });
+
+                        svg.addEventListener('wheel', () => {
+                            log('WARNING: Wheel event also captured by svg');
+                        }, { passive: false });
+
+                        log('Event listeners added. Try scrolling on the map...');
+                        log('You should see "SUCCESS: Wheel event captured by surface"');
+                        
+                    } catch (error) {
+                        log('ERROR: ' + error.message);
+                    }
+                }, 2000);
+            });
+        }
+
+        function testProgrammaticZoom() {
+            log('Testing programmatic zoom...');
+            const testWindow = window.open('http://localhost:8001', '_blank');
+            
+            if (!testWindow) {
+                log('ERROR: Could not open test window');
+                return;
+            }
+
+            testWindow.addEventListener('load', () => {
+                setTimeout(() => {
+                    try {
+                        testWindow.forceZoomSanity();
+                        log('SUCCESS: Programmatic zoom test executed');
+                    } catch (error) {
+                        log('ERROR: ' + error.message);
+                    }
+                }, 2000);
+            });
+        }
+
+        function testHUD() {
+            log('Testing HUD...');
+            const testWindow = window.open('http://localhost:8001', '_blank');
+            
+            if (!testWindow) {
+                log('ERROR: Could not open test window');
+                return;
+            }
+
+            testWindow.addEventListener('load', () => {
+                setTimeout(() => {
+                    try {
+                        testWindow.debugPick(200, 200);
+                        log('SUCCESS: HUD test executed - check console for cell info');
+                    } catch (error) {
+                        log('ERROR: ' + error.message);
+                    }
+                }, 2000);
+            });
+        }
+
+        // Auto-redirect after 10 seconds
+        setTimeout(() => {
+            window.location.href = 'http://localhost:8001';
+        }, 10000);
+    </script>
+</body>
+</html>

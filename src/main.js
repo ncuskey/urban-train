@@ -155,6 +155,7 @@ function afterGenerate() {
 
 // Global transform tracking for coordinate space conversions
 let currentTransform = d3.zoomIdentity;
+window.currentTransform = currentTransform; // Global transform tracking
 
 // Label scaling configuration - set to true to keep labels constant pixel size
 const LABELS_NONSCALING = false;

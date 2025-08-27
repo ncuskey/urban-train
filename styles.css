@@ -10,6 +10,7 @@ svg {
 .mapCell {
   stroke-width: 0.2;
   shape-rendering: optimizeSpeed;
+  pointer-events: none;
 }
 
 /* LOD system CSS */
@@ -18,6 +19,7 @@ svg {
 }
 .mapCells path, .mapCells polygon { 
   shape-rendering: optimizeSpeed; 
+  pointer-events: none;
 }
 
 .mapStroke {

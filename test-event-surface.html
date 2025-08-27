@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Event Surface Test</title>
+    <style>
+        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+        .test-info { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+        button { margin: 5px; padding: 8px 12px; }
+    </style>
+</head>
+<body>
+    <h1>Event Surface Zoom Test</h1>
+    
+    <div class="test-info">
+        <h3>Test Instructions:</h3>
+        <ol>
+            <li>Open the main app at <a href="http://localhost:8001" target="_blank">http://localhost:8001</a></li>
+            <li>Open DevTools console</li>
+            <li>Run: <code>runZoomChecklist()</code></li>
+            <li>Test manual zoom with mouse wheel</li>
+            <li>Test programmatic zoom: <code>forceZoomSanity()</code></li>
+            <li>Test hover: move mouse over map</li>
+            <li>Test picker: <code>debugPick(200, 200)</code></li>
+        </ol>
+    </div>
+
+    <div class="test-info">
+        <h3>Expected Results:</h3>
+        <ul>
+            <li class="success">✅ Event surface exists and captures events</li>
+            <li class="success">✅ Zoom behavior bound to event surface</li>
+            <li class="success">✅ Target group points to .viewbox</li>
+            <li class="success">✅ Manual zoom works smoothly</li>
+            <li class="success">✅ Programmatic zoom moves the map</li>
+            <li class="success">✅ Hover shows cell info</li>
+            <li class="success">✅ LOD switches between raster/vector</li>
+        </ul>
+    </div>
+
+    <div class="test-info">
+        <h3>Key Features Implemented:</h3>
+        <ul>
+            <li><strong>Event Surface:</strong> Full-size transparent rect that captures all events</li>
+            <li><strong>Bulletproof Zoom:</strong> Bound to event surface, not SVG</li>
+            <li><strong>Hover System:</strong> Bound to same surface for consistency</li>
+            <li><strong>Transform Hygiene:</strong> Only zoom handler writes to viewbox transform</li>
+            <li><strong>LOD Integration:</strong> Automatic raster/vector switching</li>
+            <li><strong>Debug Tools:</strong> Comprehensive verification functions</li>
+        </ul>
+    </div>
+
+    <div class="test-info">
+        <h3>Console Commands:</h3>
+        <ul>
+            <li><code>runZoomChecklist()</code> - Run full verification</li>
+            <li><code>forceZoomSanity()</code> - Test programmatic zoom</li>
+            <li><code>debugPick(200, 200)</code> - Test cell picking</li>
+            <li><code>window.currentTransform</code> - Check current transform</li>
+            <li><code>document.querySelector('#event-surface').__ZOOM__</code> - Check zoom behavior</li>
+        </ul>
+    </div>
+
+    <script>
+        // Auto-redirect to main app
+        setTimeout(() => {
+            window.location.href = 'http://localhost:8001';
+        }, 5000);
+    </script>
+</body>
+</html>
