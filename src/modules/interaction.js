@@ -8,12 +8,9 @@ export function attachInteraction({
   hud: { cellEl, heightEl, featureEl } // DOM nodes or selections used in moved()
   // any additional flags you currently read in moved(), keep the signature minimal otherwise
 }) {
-  // Hover HUD perf helpers
-  let hoverRafId = 0;
-  let lastNearest = -1;
-  
-  // Global transform tracking (accessible from main.js)
-  window.currentTransform = d3.zoomIdentity;
+  // Lightweight zoom & hover system
+  let currentTransform = d3.zoomIdentity;
+  window.currentTransform = currentTransform; // Global transform tracking
 
   // Add D3 drag and zoom behavior with passive event handling
   var zoom = d3.zoom()
@@ -22,7 +19,7 @@ export function attachInteraction({
       [-100, -100],
       [svg.attr("width") + 100, svg.attr("height") + 100]
     ])
-    .on("zoom", zoomed);
+    .on("zoom", onZoom);
 
   // Apply zoom behavior
   svg.call(zoom);
@@ -31,15 +28,25 @@ export function attachInteraction({
   // The zoom behavior needs to prevent default on wheel events for proper zooming
   // This is a known limitation of D3 v5 and the warnings can be safely ignored
 
-  function zoomed() {
+  function onZoom(e) {
+    // Safety check for undefined event parameter (expected during transitions)
+    if (!e || !e.transform) {
+      return; // Silently ignore malformed zoom events during transitions
+    }
+    
     // Use global Perf object from main.js
     if (window.Perf) {
       window.Perf.time('zoom', () => {
-        const t = d3.zoomTransform(svg.node());
-        window.currentTransform = t; // Update global transform tracking
+        currentTransform = e.transform;
+        window.currentTransform = currentTransform;
         
         // Apply transform to world layers (geometry etc.)
-        viewbox.attr("transform", t);
+        viewbox.attr("transform", currentTransform);
+        
+        // Update LOD based on zoom level (just flips display/classes)
+        if (window.updateCellsLOD) {
+          window.updateCellsLOD(currentTransform.k);
+        }
         
         // Handle label scaling based on configuration
         const gLabels = d3.select('#labels');
@@ -48,7 +55,7 @@ export function attachInteraction({
             // Keep label text constant-size in pixels: counter-scale each label
             // Assumes each datum has world coords {x, y}
             gLabels.selectAll('text')
-              .attr("transform", d => `translate(${t.applyX(d.x)},${t.applyY(d.y)}) scale(${1 / t.k})`);
+              .attr("transform", d => `translate(${currentTransform.applyX(d.x)},${currentTransform.applyY(d.y)}) scale(${1 / currentTransform.k})`);
           }
           // If LABELS_NONSCALING is false, labels scale naturally with the map
           // (they're already under viewbox, so no extra work needed)
@@ -56,11 +63,16 @@ export function attachInteraction({
       });
     } else {
       // Fallback if profiler not available
-      const t = d3.zoomTransform(svg.node());
-      window.currentTransform = t; // Update global transform tracking
+      currentTransform = e.transform;
+      window.currentTransform = currentTransform;
       
       // Apply transform to world layers (geometry etc.)
-      viewbox.attr("transform", t);
+      viewbox.attr("transform", currentTransform);
+      
+      // Update LOD based on zoom level (just flips display/classes)
+      if (window.updateCellsLOD) {
+        window.updateCellsLOD(currentTransform.k);
+      }
       
       // Handle label scaling based on configuration
       const gLabels = d3.select('#labels');
@@ -69,7 +81,7 @@ export function attachInteraction({
           // Keep label text constant-size in pixels: counter-scale each label
           // Assumes each datum has world coords {x, y}
           gLabels.selectAll('text')
-            .attr("transform", d => `translate(${t.applyX(d.x)},${t.applyY(d.y)}) scale(${1 / t.k})`);
+            .attr("transform", d => `translate(${currentTransform.applyX(d.x)},${currentTransform.applyY(d.y)}) scale(${1 / currentTransform.k})`);
         }
         // If LABELS_NONSCALING is false, labels scale naturally with the map
         // (they're already under viewbox, so no extra work needed)
@@ -77,66 +89,69 @@ export function attachInteraction({
     }
   }
 
-  // Add general elements with passive event listeners to avoid warnings
-  // Note: touchmove and mousemove events are marked as passive for better performance
-  svg.on("touchmove mousemove", moved, { passive: true });
-
-  function moved(event) {
+  // Lightweight hover system
+  let rafHover = false, lastCellId = -1, lastXY;
+  
+  svg.on('mousemove', (ev) => {
     // Early return if hover is disabled
     if (window.hoverDisabled) return;
     
-    if (hoverRafId) return; // throttle to animation frame
+    // Safety check for valid event
+    if (!ev || !ev.target) return;
     
-    // Get screen coordinates relative to SVG viewport
-    // Use d3.mouse for D3 v5 compatibility (d3.pointer is v6+)
-    const point = d3.mouse(svg.node());
-    const mx = point[0], my = point[1];
+    try {
+      lastXY = d3.mouse(ev);
+      if (!lastXY || lastXY.length !== 2) return;
+    } catch (error) {
+      // Silently ignore malformed mouse events
+      return;
+    }
     
-    // Convert to world coordinates under current zoom/pan
-    const [wx, wy] = window.currentTransform.invert([mx, my]);
+    if (rafHover) return;
+    rafHover = true;
     
-    hoverRafId = requestAnimationFrame(function () {
-      hoverRafId = 0;
+    requestAnimationFrame(() => {
+      rafHover = false;
       
       // Use global Perf object from main.js
       if (window.Perf) {
         window.Perf.time('hover', () => {
-          // Use world coordinates for spatial queries
-          const nearest = diagram.find(wx, wy).index;
-          if (nearest === lastNearest) return; // only update when cell changes
-          lastNearest = nearest;
-          const poly = polygons[nearest];
+          const [wx, wy] = currentTransform.invert(lastXY);
+          const cell = window.pickCellAt ? window.pickCellAt(wx, wy) : diagram.find(wx, wy);
+          
+          if (!cell || cell.index === lastCellId) return;
+          lastCellId = cell.index;
           
           // vanilla DOM updates (faster than jQuery for high-frequency UI)
-          cellEl.textContent = nearest;
-          heightEl.textContent = poly.height.toFixed(2);
-          featureEl.textContent = poly.featureType
-            ? (poly.featureName + " " + poly.featureType)
+          cellEl.textContent = cell.index;
+          heightEl.textContent = cell.height.toFixed(2);
+          featureEl.textContent = cell.featureType
+            ? (cell.featureName + " " + cell.featureType)
             : "no!";
             
           // Update HUD with screen coordinates for crisp positioning
-          updateHUD(poly, { screenX: mx, screenY: my, worldX: wx, worldY: wy, k: window.currentTransform.k });
+          updateHUD(cell, { screenX: lastXY[0], screenY: lastXY[1], worldX: wx, worldY: wy, k: currentTransform.k });
         });
       } else {
         // Fallback if profiler not available
-        // Use world coordinates for spatial queries
-        const nearest = diagram.find(wx, wy).index;
-        if (nearest === lastNearest) return; // only update when cell changes
-        lastNearest = nearest;
-        const poly = polygons[nearest];
+        const [wx, wy] = currentTransform.invert(lastXY);
+        const cell = window.pickCellAt ? window.pickCellAt(wx, wy) : diagram.find(wx, wy);
+        
+        if (!cell || cell.index === lastCellId) return;
+        lastCellId = cell.index;
         
         // vanilla DOM updates (faster than jQuery for high-frequency UI)
-        cellEl.textContent = nearest;
-        heightEl.textContent = poly.height.toFixed(2);
-        featureEl.textContent = poly.featureType
-          ? (poly.featureName + " " + poly.featureType)
+        cellEl.textContent = cell.index;
+        heightEl.textContent = cell.height.toFixed(2);
+        featureEl.textContent = cell.featureType
+          ? (cell.featureName + " " + cell.featureType)
           : "no!";
           
         // Update HUD with screen coordinates for crisp positioning
-        updateHUD(poly, { screenX: mx, screenY: my, worldX: wx, worldY: wy, k: window.currentTransform.k });
+        updateHUD(cell, { screenX: lastXY[0], screenY: lastXY[1], worldX: wx, worldY: wy, k: currentTransform.k });
       }
     });
-  }
+  });
 
   function updateHUD(cell, ctx) {
     if (!cell) { 

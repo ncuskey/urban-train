@@ -12,6 +12,14 @@ svg {
   shape-rendering: optimizeSpeed;
 }
 
+/* LOD system CSS */
+.mapCells.no-stroke path, .mapCells.no-stroke polygon { 
+  stroke: none; 
+}
+.mapCells path, .mapCells polygon { 
+  shape-rendering: optimizeSpeed; 
+}
+
 .mapStroke {
   stroke-width: 0.2;
   fill: none;

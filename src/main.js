@@ -41,6 +41,118 @@ const state = {
   seed: Math.floor(Math.random() * 1000000) // Random seed for initial generation
 };
 
+// Spatial picking system (no DOM hit-testing)
+let spatialIndex;
+function buildPickingIndex(cells) {
+  // Build simple spatial index from cell centroids
+  // For D3 v5 compatibility, use simple distance-based picking
+  spatialIndex = cells.map((cell, index) => {
+    // Calculate centroid from polygon vertices
+    let cx = 0, cy = 0, count = 0;
+    if (cell && cell.length > 0) {
+      cell.forEach(vertex => {
+        if (vertex && vertex.length >= 2) {
+          cx += vertex[0];
+          cy += vertex[1];
+          count++;
+        }
+      });
+    }
+    return {
+      index,
+      x: count > 0 ? cx / count : 0,
+      y: count > 0 ? cy / count : 0,
+      cell
+    };
+  });
+}
+
+function pickCellAt(wx, wy) {
+  if (!spatialIndex || spatialIndex.length === 0) return null;
+  
+  // Simple nearest-neighbor search
+  let nearest = null;
+  let minDist = Infinity;
+  
+  spatialIndex.forEach(point => {
+    const dx = point.x - wx;
+    const dy = point.y - wy;
+    const dist = dx * dx + dy * dy; // squared distance (faster than sqrt)
+    
+    if (dist < minDist) {
+      minDist = dist;
+      nearest = point.cell;
+    }
+  });
+  
+  return nearest;
+}
+
+// Raster LOD for cells
+function ensureCellsRaster() {
+  let raster = d3.select('#cellsRaster');
+  if (raster.empty()) {
+    raster = d3.select('.viewbox').insert('image', '.mapCells')
+      .attr('id', 'cellsRaster').attr('x', 0).attr('y', 0)
+      .attr('preserveAspectRatio', 'none');
+  }
+  return raster;
+}
+
+function rasterizeCellsToImageURL(w, h, cells) {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  
+  // draw fills only (strokes are too expensive at low zoom)
+  for (const cell of cells) {
+    const poly = cell; // cell is the polygon array
+    if (!poly || !poly.length) continue;
+    
+    // Use the same color logic as the rendering module
+    const height = cell.height || 0;
+    const color = d3.scaleSequential(d3.interpolateSpectral)(1 - height);
+    
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(poly[0][0], poly[0][1]);
+    for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i][0], poly[i][1]);
+    ctx.closePath();
+    ctx.fill();
+  }
+  return c.toDataURL('image/png');
+}
+
+// call after each generation
+function updateCellsRaster() {
+  const raster = ensureCellsRaster();
+  const mapW = +d3.select('svg').attr('width');
+  const mapH = +d3.select('svg').attr('height');
+  raster.attr('href', rasterizeCellsToImageURL(mapW, mapH, window.currentPolygons));
+}
+
+// Toggle LOD by zoom level
+function updateCellsLOD(k) {
+  const gCells = d3.select('.mapCells');
+  const raster = ensureCellsRaster();
+  
+  const showVectors = k >= 2.0;
+  gCells.style('display', showVectors ? null : 'none');
+  raster.style('display', showVectors ? 'none' : null);
+
+  // hide strokes until closer to avoid paint cost
+  gCells.classed('no-stroke', k < 3.0);
+}
+
+// Wire it at generation end
+function afterGenerate() {
+  buildPickingIndex(window.currentPolygons);
+  updateCellsRaster();
+  // Disable pointer events on heavy layers (use spatial picking instead)
+  d3.select('.mapCells').style('pointer-events', 'none');
+}
+
 // Global transform tracking for coordinate space conversions
 let currentTransform = d3.zoomIdentity;
 
@@ -201,6 +313,9 @@ function generate(count) {
     $('.circles').hide();
   }
 
+  // Wire up post-generation setup
+  afterGenerate();
+  
   // Expose fitLand helper after rendering completes
   window.fitLand = () => fitToLand({
     svg: svgSel,
@@ -462,6 +577,11 @@ window.computeMapLabels = computeMapLabels; // Expose label computation function
 window.state = state; // Make state accessible globally
 window.rng = rng; // Make RNG accessible globally for debugging
 window.Perf = Perf; // Make profiler accessible globally
+window.buildPickingIndex = buildPickingIndex; // Make spatial picking functions accessible
+window.pickCellAt = pickCellAt; // Make spatial picking functions accessible
+window.updateCellsRaster = updateCellsRaster; // Make raster functions accessible
+window.updateCellsLOD = updateCellsLOD; // Make LOD functions accessible
+window.afterGenerate = afterGenerate; // Make afterGenerate function accessible
 
 // === Performance Isolation Toggles ==========================================
 // Quick toggles for binary search performance debugging
@@ -585,5 +705,107 @@ window.logToggles = () => {
   console.log('Lake Coast:', d3.select('.lakecoast').style('display') !== 'none' ? 'ON' : 'OFF');
   console.log('Island Back:', d3.select('.islandBack').style('display') !== 'none' ? 'ON' : 'OFF');
   console.log('Hover:', window.hoverDisabled ? 'OFF' : 'ON');
+  console.groupEnd();
+};
+
+// === Advanced Performance Diagnostics ==========================================
+// Quick DevTools toggles for pinpointing bottlenecks
+
+// A) Disable hit-testing on cells (event overhead probe)
+window.toggleCellHitTesting = () => {
+  const cells = d3.select('.mapCells');
+  if (cells.style('pointer-events') === 'none') {
+    cells.style('pointer-events', null);
+    console.log('Cell hit-testing: ON');
+  } else {
+    cells.style('pointer-events', 'none');
+    console.log('Cell hit-testing: OFF (if this helps → event overhead)');
+  }
+};
+
+// B) Remove strokes (paint cost probe)
+window.toggleCellStrokes = () => {
+  const paths = d3.selectAll('.mapCells path, .mapCells polygon');
+  if (window.strokesHidden) {
+    // Restore strokes
+    paths.each(function() {
+      if (this.__oldStroke != null) {
+        this.setAttribute('stroke', this.__oldStroke);
+      }
+    });
+    window.strokesHidden = false;
+    console.log('Cell strokes: RESTORED');
+  } else {
+    // Hide strokes
+    paths.each(function() {
+      this.__oldStroke = this.__oldStroke || this.getAttribute('stroke');
+      this.setAttribute('stroke', 'none');
+    });
+    window.strokesHidden = true;
+    console.log('Cell strokes: HIDDEN (if this helps → stroke painting cost)');
+  }
+};
+
+// C) Show only every Nth cell (node-count probe)
+window.toggleCellLOD = (N = 5) => {
+  const paths = d3.selectAll('.mapCells path, .mapCells polygon');
+  if (window.cellLODEnabled) {
+    // Restore all cells
+    paths.style('display', null);
+    window.cellLODEnabled = false;
+    console.log(`Cell LOD: DISABLED (showing all cells)`);
+  } else {
+    // Show only every Nth cell
+    paths.style('display', (d, i) => (i % N ? 'none' : null));
+    window.cellLODEnabled = true;
+    console.log(`Cell LOD: ENABLED (showing every ${N}th cell)`);
+  }
+};
+
+// D) Count nodes (diagnostic info)
+window.countNodes = () => {
+  const counts = {
+    cells: d3.select('.mapCells').selectAll('path,polygon').size(),
+    labels: d3.select('#labels').selectAll('text').size(),
+    total: 0
+  };
+  counts.total = counts.cells + counts.labels;
+  
+  console.group('Node Counts:');
+  console.table(counts);
+  console.log(`Total DOM nodes: ${counts.total}`);
+  console.groupEnd();
+  
+  return counts;
+};
+
+// Quick performance test suite
+window.runPerfTests = () => {
+  console.group('Performance Test Suite');
+  
+  // Count nodes first
+  const counts = window.countNodes();
+  
+  // Test each toggle and report
+  console.log('\n=== Testing Cell Hit-Testing ===');
+  window.toggleCellHitTesting();
+  console.log('→ If FPS jumps significantly, event overhead is the issue');
+  
+  console.log('\n=== Testing Cell Strokes ===');
+  window.toggleCellStrokes();
+  console.log('→ If FPS jumps significantly, stroke painting is expensive');
+  
+  console.log('\n=== Testing Cell LOD (every 5th) ===');
+  window.toggleCellLOD(5);
+  console.log('→ If FPS jumps proportionally, DOM size is the culprit');
+  
+  console.log('\n=== Recommendations ===');
+  if (counts.cells > 1000) {
+    console.log('⚠️  High cell count detected. Consider LOD or culling.');
+  }
+  if (counts.total > 2000) {
+    console.log('⚠️  High total node count. Consider virtualization.');
+  }
+  
   console.groupEnd();
 };
