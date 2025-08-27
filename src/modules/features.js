@@ -1,12 +1,17 @@
 // js/modules/features.js
 // NOTE: d3 is global if used; do not import it here.
 
+import { makeNamer } from './names.js';
+
 export function markFeatures({
   diagram,
   polygons,
   rng,
   adjectives
 }) {
+  // Create fantasy namer with seeded RNG
+  const namer = makeNamer(() => rng.random(), null); // null = no flavor pack
+  
   var queue = []; // polygons to check
   var used = []; // checked polygons
   // define ocean cells
@@ -18,7 +23,7 @@ export function markFeatures({
   if (polygons[start].featureType) {
     name = polygons[start].featureName;
   } else {
-    name = rng.pick(adjectives);
+    name = namer.ocean();
   }
   polygons[start].featureType = type;
   polygons[start].featureName = name;
@@ -57,7 +62,7 @@ export function markFeatures({
       greater = -100; // just to omit exclusion
       less = 0.2;
     }
-    name = rng.pick(adjectives);
+    name = type === "Island" ? namer.island() : namer.lake();
     start = unmarked[0].index;
     polygons[start].featureType = type;
     polygons[start].featureName = name;

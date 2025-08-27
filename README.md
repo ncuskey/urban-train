@@ -16,6 +16,7 @@ A web-based procedural map generator that creates realistic terrain with islands
 - **Customizable Options**: Adjust various parameters like height, radius, sharpness, and more
 - **Visual Effects**: Toggle grid lines, blur effects, and sea polygon rendering
 - **Smart Labeling**: Automatic feature labeling with deduplication and proper placement
+- **Fantasy Naming**: Rich descriptive names for oceans, lakes, and islands with weighted templates
 - **Label Scaling**: Toggle between scaling and constant-size label modes
 - **Modular Architecture**: ES6 modules for maintainable code organization
 
@@ -66,6 +67,7 @@ A web-based procedural map generator that creates realistic terrain with islands
 - **Pan**: Click and drag to move around the map
 - **Auto-fit**: Automatically fits the map to show all land masses
 - **Performance Optimized**: LOD system switches between raster and vector rendering based on zoom level
+- **Fantasy Names**: Rich descriptive names like "Sea of Fallen Stars" and "Dragon Isle"
 
 ### Advanced Options
 
@@ -124,6 +126,7 @@ urban-train/
    - **Geometry (`src/modules/geometry.js`)**: Voronoi diagram generation and neighbor detection
    - **Heightmap (`src/modules/heightmap.js`)**: Terrain generation and height mapping
    - **Features (`src/modules/features.js`)**: Geographic feature detection and naming
+   - **Names (`src/modules/names.js`)**: Fantasy descriptive naming system with weighted templates
    - **Coastline (`src/modules/coastline.js`)**: Coastline tracing and path generation
    - **Rendering (`src/modules/rendering.js`)**: Polygon rendering and visual effects
    - **Interaction (`src/modules/interaction.js`)**: Zoom, pan, and hover HUD functionality with LOD optimization
@@ -165,6 +168,13 @@ urban-train/
    - Supports both scaling and constant-size label modes
    - Uses keyed data joins to prevent label accumulation
 
+9. **Fantasy Naming System (`makeNamer` function)**:
+   - Generates rich descriptive names using weighted templates
+   - Supports oceans ("Sea of Fallen Stars"), lakes ("Lake Sorrow"), and islands ("Dragon Isle")
+   - Enforces uniqueness within each map generation
+   - Includes flavor packs for different themes (Norse, Greek, Desert)
+   - Uses seeded RNG for reproducible name generation
+
 9. **Interaction System (`attachInteraction` function)**:
    - Provides smooth zoom and pan functionality (0.5x to 32x scale)
    - Implements real-time hover HUD with cell information
@@ -182,6 +192,7 @@ urban-train/
 - **Performance Timing**: RequestAnimationFrame-based timing for accurate measurements
 - **Level-of-Detail (LOD)**: Automatic switching between raster and vector rendering based on zoom level
 - **Spatial Picking**: Efficient cell selection using spatial indexing instead of DOM hit-testing
+- **Fantasy Naming**: Weighted template system for generating descriptive geographic names
 
 ## Browser Compatibility
 

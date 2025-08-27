@@ -5,6 +5,7 @@ import { runSelfTests, renderSelfTestBadge, clamp01, ensureReciprocalNeighbors }
 import { poissonDiscSampler, buildVoronoi, detectNeighbors } from "./modules/geometry.js";
 import { randomMap } from "./modules/heightmap.js";
 import { markFeatures } from "./modules/features.js";
+import { makeNamer } from "./modules/names.js";
 import { drawCoastline } from "./modules/coastline.js";
 import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction } from "./modules/interaction.js";
@@ -234,8 +235,8 @@ function generate(count) {
 
 
 
-  // array to use as names
-  var adjectives = ["Ablaze", "Ablazing", "Accented", "Ashen", "Ashy", "Beaming", "Bi-Color", "Blazing", "Bleached", "Bleak", "Blended", "Blotchy", "Bold", "Brash", "Bright", "Brilliant", "Burnt", "Checkered", "Chromatic", "Classic", "Clean", "Colored", "Colorful", "Colorless", "Complementing", "Contrasting", "Cool", "Coordinating", "Crisp", "Dappled", "Dark", "Dayglo", "Deep", "Delicate", "Digital", "Dim", "Dirty", "Discolored", "Dotted", "Drab", "Dreary", "Dull", "Dusty", "Earth", "Electric", "Eye-Catching", "Faded", "Faint", "Festive", "Fiery", "Flashy", "Flattering", "Flecked", "Florescent", "Frosty", "Full-Toned", "Glistening", "Glittering", "Glowing", "Harsh", "Hazy", "Hot", "Hued", "Icy", "Illuminated", "Incandescent", "Intense", "Interwoven", "Iridescent", "Kaleidoscopic", "Lambent", "Light", "Loud", "Luminous", "Lusterless", "Lustrous", "Majestic", "Marbled", "Matte", "Medium", "Mellow", "Milky", "Mingled", "Mixed", "Monochromatic", "Motley", "Mottled", "Muddy", "Multicolored", "Multihued", "Murky", "Natural", "Neutral", "Opalescent", "Opaque", "Pale", "Pastel", "Patchwork", "Patchy", "Patterned", "Perfect", "Picturesque", "Plain", "Primary", "Prismatic", "Psychedelic", "Pure", "Radiant", "Reflective", "Rich", "Royal", "Ruddy", "Rustic", "Satiny", "Saturated", "Secondary", "Shaded", "Sheer", "Shining", "Shiny", "Shocking", "Showy", "Smoky", "Soft", "Solid", "Somber", "Soothing", "Sooty", "Sparkling", "Speckled", "Stained", "Streaked", "Streaky", "Striking", "Strong Neutral", "Subtle", "Sunny", "Swirling", "Tinged", "Tinted", "Tonal", "Toned", "Translucent", "Transparent", "Two-Tone", "Undiluted", "Uneven", "Uniform", "Vibrant", "Vivid", "Wan", "Warm", "Washed-Out", "Waxen", "Wild"];
+  // Create fantasy namer for this generation
+  const namer = makeNamer(() => rng.random(), null); // null = no flavor pack
 
   detectNeighbors(diagram, polygons);
   
@@ -283,7 +284,7 @@ function generate(count) {
       diagram,
       polygons,
       rng,
-      adjectives
+      adjectives: null // No longer needed with new naming system
     });
     
     // Compute and render map labels with proper deduplication
@@ -583,6 +584,49 @@ window.pickCellAt = pickCellAt; // Make spatial picking functions accessible
 window.updateCellsRaster = updateCellsRaster; // Make raster functions accessible
 window.updateCellsLOD = updateCellsLOD; // Make LOD functions accessible
 window.afterGenerate = afterGenerate; // Make afterGenerate function accessible
+
+// Test functions for the new naming system
+window.testNames = function() {
+  console.group('🧙‍♂️ Fantasy Names Test');
+  
+  // Create a test namer
+  const testRng = () => Math.random(); // Use Math.random for testing
+  const namer = makeNamer(testRng, null);
+  
+  console.log('Ocean names:');
+  for (let i = 0; i < 5; i++) {
+    console.log(`  ${i+1}. ${namer.ocean()}`);
+  }
+  
+  console.log('\nLake names:');
+  for (let i = 0; i < 5; i++) {
+    console.log(`  ${i+1}. ${namer.lake()}`);
+  }
+  
+  console.log('\nIsland names:');
+  for (let i = 0; i < 5; i++) {
+    console.log(`  ${i+1}. ${namer.island()}`);
+  }
+  
+  console.groupEnd();
+};
+
+window.testFlavorPacks = function() {
+  console.group('🎭 Flavor Packs Test');
+  
+  const testRng = () => Math.random();
+  const flavors = ['norse', 'greek', 'desert', null];
+  
+  flavors.forEach(flavor => {
+    const namer = makeNamer(testRng, flavor);
+    console.log(`\n${flavor || 'Default'} flavor:`);
+    console.log(`  Ocean: ${namer.ocean()}`);
+    console.log(`  Lake: ${namer.lake()}`);
+    console.log(`  Island: ${namer.island()}`);
+  });
+  
+  console.groupEnd();
+};
 
 // === Performance Isolation Toggles ==========================================
 // Quick toggles for binary search performance debugging

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fantasy Names Test</title>
+    <style>
+        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+        .test-info { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+        .name-example { background: #e8f4f8; padding: 8px; margin: 5px 0; border-radius: 3px; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <h1>Fantasy Names System Test</h1>
+    
+    <div class="test-info">
+        <h3>New Naming System Features:</h3>
+        <ul>
+            <li class="success">✅ Fantasy descriptive names (e.g., "Sea of Fallen Stars")</li>
+            <li class="success">✅ Weighted templates for variety</li>
+            <li class="success">✅ Seeded RNG for reproducible names</li>
+            <li class="success">✅ Uniqueness enforcement</li>
+            <li class="success">✅ Flavor packs (Norse, Greek, Desert)</li>
+        </ul>
+    </div>
+
+    <div class="test-info">
+        <h3>Test Instructions:</h3>
+        <ol>
+            <li>Open main app: <a href="http://localhost:8001" target="_blank">http://localhost:8001</a></li>
+            <li>Generate a new map</li>
+            <li>Check the labels for fantasy names like:</li>
+        </ol>
+    </div>
+
+    <div class="test-info">
+        <h3>Expected Name Examples:</h3>
+        <div class="name-example">Oceans: "Sea of Fallen Stars", "Mare Umbra", "The Azure Deeps"</div>
+        <div class="name-example">Lakes: "Lake Sorrow", "Shimmering Lake", "Lotus Mere"</div>
+        <div class="name-example">Islands: "Dragon Isle", "Verdant Island", "Skullholm"</div>
+    </div>
+
+    <div class="test-info">
+        <h3>Console Commands:</h3>
+        <ul>
+            <li><code>testNames()</code> - Test the naming system directly</li>
+            <li><code>testFlavorPacks()</code> - Test different flavor packs</li>
+            <li><code>window.currentPolygons</code> - Check current feature names</li>
+        </ul>
+    </div>
+
+    <div class="test-info">
+        <h3>Key Improvements:</h3>
+        <ul>
+            <li><strong>Variety:</strong> 60+ adjectives, 70+ nouns, multiple templates</li>
+            <li><strong>Descriptive:</strong> Names like "Sea of Fallen Stars" instead of "Azure"</li>
+            <li><strong>Seeded:</strong> Same seed produces same names every time</li>
+            <li><strong>Unique:</strong> No duplicate names within a map</li>
+            <li><strong>Extensible:</strong> Easy to add new flavor packs</li>
+        </ul>
+    </div>
+
+    <script>
+        // Auto-redirect to main app
+        setTimeout(() => {
+            window.location.href = 'http://localhost:8001';
+        }, 10000);
+    </script>
+</body>
+</html>
