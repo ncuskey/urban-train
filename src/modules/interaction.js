@@ -32,23 +32,48 @@ export function attachInteraction({
   // This is a known limitation of D3 v5 and the warnings can be safely ignored
 
   function zoomed() {
-    const t = d3.zoomTransform(svg.node());
-    window.currentTransform = t; // Update global transform tracking
-    
-    // Apply transform to world layers (geometry etc.)
-    viewbox.attr("transform", t);
-    
-    // Handle label scaling based on configuration
-    const gLabels = d3.select('#labels');
-    if (!gLabels.empty()) {
-      if (window.LABELS_NONSCALING) {
-        // Keep label text constant-size in pixels: counter-scale each label
-        // Assumes each datum has world coords {x, y}
-        gLabels.selectAll('text')
-          .attr("transform", d => `translate(${t.applyX(d.x)},${t.applyY(d.y)}) scale(${1 / t.k})`);
+    // Use global Perf object from main.js
+    if (window.Perf) {
+      window.Perf.time('zoom', () => {
+        const t = d3.zoomTransform(svg.node());
+        window.currentTransform = t; // Update global transform tracking
+        
+        // Apply transform to world layers (geometry etc.)
+        viewbox.attr("transform", t);
+        
+        // Handle label scaling based on configuration
+        const gLabels = d3.select('#labels');
+        if (!gLabels.empty()) {
+          if (window.LABELS_NONSCALING) {
+            // Keep label text constant-size in pixels: counter-scale each label
+            // Assumes each datum has world coords {x, y}
+            gLabels.selectAll('text')
+              .attr("transform", d => `translate(${t.applyX(d.x)},${t.applyY(d.y)}) scale(${1 / t.k})`);
+          }
+          // If LABELS_NONSCALING is false, labels scale naturally with the map
+          // (they're already under viewbox, so no extra work needed)
+        }
+      });
+    } else {
+      // Fallback if profiler not available
+      const t = d3.zoomTransform(svg.node());
+      window.currentTransform = t; // Update global transform tracking
+      
+      // Apply transform to world layers (geometry etc.)
+      viewbox.attr("transform", t);
+      
+      // Handle label scaling based on configuration
+      const gLabels = d3.select('#labels');
+      if (!gLabels.empty()) {
+        if (window.LABELS_NONSCALING) {
+          // Keep label text constant-size in pixels: counter-scale each label
+          // Assumes each datum has world coords {x, y}
+          gLabels.selectAll('text')
+            .attr("transform", d => `translate(${t.applyX(d.x)},${t.applyY(d.y)}) scale(${1 / t.k})`);
+        }
+        // If LABELS_NONSCALING is false, labels scale naturally with the map
+        // (they're already under viewbox, so no extra work needed)
       }
-      // If LABELS_NONSCALING is false, labels scale naturally with the map
-      // (they're already under viewbox, so no extra work needed)
     }
   }
 
@@ -57,6 +82,9 @@ export function attachInteraction({
   svg.on("touchmove mousemove", moved, { passive: true });
 
   function moved(event) {
+    // Early return if hover is disabled
+    if (window.hoverDisabled) return;
+    
     if (hoverRafId) return; // throttle to animation frame
     
     // Get screen coordinates relative to SVG viewport
@@ -70,21 +98,43 @@ export function attachInteraction({
     hoverRafId = requestAnimationFrame(function () {
       hoverRafId = 0;
       
-      // Use world coordinates for spatial queries
-      const nearest = diagram.find(wx, wy).index;
-      if (nearest === lastNearest) return; // only update when cell changes
-      lastNearest = nearest;
-      const poly = polygons[nearest];
-      
-      // vanilla DOM updates (faster than jQuery for high-frequency UI)
-      cellEl.textContent = nearest;
-      heightEl.textContent = poly.height.toFixed(2);
-      featureEl.textContent = poly.featureType
-        ? (poly.featureName + " " + poly.featureType)
-        : "no!";
+      // Use global Perf object from main.js
+      if (window.Perf) {
+        window.Perf.time('hover', () => {
+          // Use world coordinates for spatial queries
+          const nearest = diagram.find(wx, wy).index;
+          if (nearest === lastNearest) return; // only update when cell changes
+          lastNearest = nearest;
+          const poly = polygons[nearest];
+          
+          // vanilla DOM updates (faster than jQuery for high-frequency UI)
+          cellEl.textContent = nearest;
+          heightEl.textContent = poly.height.toFixed(2);
+          featureEl.textContent = poly.featureType
+            ? (poly.featureName + " " + poly.featureType)
+            : "no!";
+            
+          // Update HUD with screen coordinates for crisp positioning
+          updateHUD(poly, { screenX: mx, screenY: my, worldX: wx, worldY: wy, k: window.currentTransform.k });
+        });
+      } else {
+        // Fallback if profiler not available
+        // Use world coordinates for spatial queries
+        const nearest = diagram.find(wx, wy).index;
+        if (nearest === lastNearest) return; // only update when cell changes
+        lastNearest = nearest;
+        const poly = polygons[nearest];
         
-      // Update HUD with screen coordinates for crisp positioning
-      updateHUD(poly, { screenX: mx, screenY: my, worldX: wx, worldY: wy, k: window.currentTransform.k });
+        // vanilla DOM updates (faster than jQuery for high-frequency UI)
+        cellEl.textContent = nearest;
+        heightEl.textContent = poly.height.toFixed(2);
+        featureEl.textContent = poly.featureType
+          ? (poly.featureName + " " + poly.featureType)
+          : "no!";
+          
+        // Update HUD with screen coordinates for crisp positioning
+        updateHUD(poly, { screenX: mx, screenY: my, worldX: wx, worldY: wy, k: window.currentTransform.k });
+      }
     });
   }
 

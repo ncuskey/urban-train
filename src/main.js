@@ -10,6 +10,32 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction } from "./modules/interaction.js";
 import { fitToLand } from './modules/autofit.js';
 
+// === Minimal Perf HUD ==========================================
+const Perf = (() => {
+  const s = {zoom:[], hover:[], paint:[]};
+  const hud = d3.select('body').append('div')
+    .attr('id','perfHUD')
+    .style('position','fixed').style('left','8px').style('bottom','8px')
+    .style('background','rgba(0,0,0,.6)').style('color','#fff')
+    .style('font','12px/1.2 system-ui').style('padding','6px 8px').style('border-radius','6px')
+    .style('z-index', 99999).style('pointer-events','none');
+
+  let last = performance.now(), frames = 0, fps = 0;
+  (function loop(){
+    const now = performance.now(); frames++;
+    if (now - last > 500) { fps = frames * 1000 / (now - last); frames = 0; last = now; }
+    hud.text(`FPS ${fps.toFixed(0)}  |  zoom ${avg(s.zoom)}ms  hover ${avg(s.hover)}ms  paint ${avg(s.paint)}ms`);
+    requestAnimationFrame(loop);
+  })();
+
+  function avg(a){ return a.length ? (a.reduce((x,y)=>x+y,0)/a.length).toFixed(2) : '—'; }
+  function time(bucket, fn){
+    const t0 = performance.now(); const r = fn(); const dt = performance.now() - t0;
+    const arr = s[bucket]; arr.push(dt); if (arr.length > 60) arr.shift(); return r;
+  }
+  return {time};
+})();
+
 // Global state object for seed management
 const state = {
   seed: Math.floor(Math.random() * 1000000) // Random seed for initial generation
@@ -435,3 +461,129 @@ window.drawLabels = drawLabels; // Expose label drawing function
 window.computeMapLabels = computeMapLabels; // Expose label computation function
 window.state = state; // Make state accessible globally
 window.rng = rng; // Make RNG accessible globally for debugging
+window.Perf = Perf; // Make profiler accessible globally
+
+// === Performance Isolation Toggles ==========================================
+// Quick toggles for binary search performance debugging
+window.toggleHUD = () => {
+  const hud = d3.select('#perfHUD');
+  if (hud.style('display') === 'none') {
+    hud.style('display', 'block');
+    console.log('HUD: ON');
+  } else {
+    hud.style('display', 'none');
+    console.log('HUD: OFF (should jump FPS)');
+  }
+};
+
+window.toggleLabels = () => {
+  const labels = d3.select('#labels');
+  if (labels.style('display') === 'none') {
+    labels.style('display', 'block');
+    console.log('Labels: ON');
+  } else {
+    labels.style('display', 'none');
+    console.log('Labels: OFF');
+  }
+};
+
+window.toggleMapCells = () => {
+  const mapCells = d3.select('.mapCells');
+  if (mapCells.style('display') === 'none') {
+    mapCells.style('display', 'block');
+    console.log('Map Cells: ON');
+  } else {
+    mapCells.style('display', 'none');
+    console.log('Map Cells: OFF (water/roads off)');
+  }
+};
+
+window.toggleCoastline = () => {
+  const coastline = d3.select('.coastline');
+  if (coastline.style('display') === 'none') {
+    coastline.style('display', 'block');
+    console.log('Coastline: ON');
+  } else {
+    coastline.style('display', 'none');
+    console.log('Coastline: OFF');
+  }
+};
+
+window.toggleOcean = () => {
+  const ocean = d3.select('.oceanLayer');
+  if (ocean.style('display') === 'none') {
+    ocean.style('display', 'block');
+    console.log('Ocean: ON');
+  } else {
+    ocean.style('display', 'none');
+    console.log('Ocean: OFF');
+  }
+};
+
+window.toggleShallow = () => {
+  const shallow = d3.select('.shallow');
+  if (shallow.style('display') === 'none') {
+    shallow.style('display', 'block');
+    console.log('Shallow: ON');
+  } else {
+    shallow.style('display', 'none');
+    console.log('Shallow: OFF');
+  }
+};
+
+window.toggleLakeCoast = () => {
+  const lakecoast = d3.select('.lakecoast');
+  if (lakecoast.style('display') === 'none') {
+    lakecoast.style('display', 'block');
+    console.log('Lake Coast: ON');
+  } else {
+    lakecoast.style('display', 'none');
+    console.log('Lake Coast: OFF');
+  }
+};
+
+window.toggleIslandBack = () => {
+  const islandBack = d3.select('.islandBack');
+  if (islandBack.style('display') === 'none') {
+    islandBack.style('display', 'block');
+    console.log('Island Back: ON');
+  } else {
+    islandBack.style('display', 'none');
+    console.log('Island Back: OFF');
+  }
+};
+
+// Disable hover completely (early return)
+window.toggleHover = () => {
+  if (window.hoverDisabled) {
+    window.hoverDisabled = false;
+    console.log('Hover: ON');
+  } else {
+    window.hoverDisabled = true;
+    console.log('Hover: OFF (should jump FPS)');
+  }
+};
+
+// Reset all toggles to visible
+window.resetToggles = () => {
+  d3.selectAll('.viewbox > g').style('display', 'block');
+  d3.select('#perfHUD').style('display', 'block');
+  d3.select('#labels').style('display', 'block');
+  window.hoverDisabled = false;
+  console.log('All layers: RESET to visible');
+};
+
+// Log current toggle states
+window.logToggles = () => {
+  console.group('Current Toggle States:');
+  console.log('HUD:', d3.select('#perfHUD').style('display') !== 'none' ? 'ON' : 'OFF');
+  console.log('Labels:', d3.select('#labels').style('display') !== 'none' ? 'ON' : 'OFF');
+  console.log('Map Cells:', d3.select('.mapCells').style('display') !== 'none' ? 'ON' : 'OFF');
+  console.log('Coastline:', d3.select('.coastline').style('display') !== 'none' ? 'ON' : 'OFF');
+  console.log('Ocean:', d3.select('.oceanLayer').style('display') !== 'none' ? 'ON' : 'OFF');
+  console.log('Shallow:', d3.select('.shallow').style('display') !== 'none' ? 'ON' : 'OFF');
+  console.log('Lake Coast:', d3.select('.lakecoast').style('display') !== 'none' ? 'ON' : 'OFF');
+  console.log('Island Back:', d3.select('.islandBack').style('display') !== 'none' ? 'ON' : 'OFF');
+  console.log('Hover:', window.hoverDisabled ? 'OFF' : 'ON');
+  console.groupEnd();
+};
