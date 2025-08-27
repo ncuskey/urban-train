@@ -1,4 +1,6 @@
 // d3 is global; do not import it.
+import { updateLabelZoom, updateLabelVisibility } from './labels.js';
+import { filterByZoom } from './labels.js'; // or wherever it's defined
 
 let svg, gTarget, zoom, currentTransform = d3.zoomIdentity;
 
@@ -13,9 +15,9 @@ export function attachInteraction({
   svg = svgParam;
 
   // Transform target (the group that contains the whole map)
-  gTarget = d3.select('.viewbox').empty() ? d3.select('#content') : d3.select('.viewbox');
+  gTarget = d3.select('#world');
   if (gTarget.empty()) { 
-    console.error('[zoom] no transform target found, trying fallbacks...');
+    console.error('[zoom] no #world found, trying fallbacks...');
     gTarget = findZoomTarget();
     if (gTarget.empty()) {
       console.error('[zoom] no transform target found. Falling back to first <g> in <svg>.');
@@ -50,24 +52,26 @@ export function attachInteraction({
                                                  : d3.zoomTransform(svg.node());
       currentTransform = t;
       window.currentTransform = currentTransform; // Global transform tracking
-      gTarget.attr('transform', t);          // do NOT do anything else here
       
       // LOD flip: make sure this exists and is cheap
       if (typeof updateCellsLOD === 'function') {
         updateCellsLOD(t.k);
       }
       
-      // Handle label scaling based on configuration
-      const gLabels = d3.select('#labels');
-      if (!gLabels.empty()) {
-        if (window.LABELS_NONSCALING) {
-          // Keep label text constant-size in pixels: counter-scale each label
-          // Assumes each datum has world coords {x, y}
-          gLabels.selectAll('text')
-            .attr("transform", d => `translate(${t.applyX(d.x)},${t.applyY(d.y)}) scale(${1 / t.k})`);
-        }
-        // If LABELS_NONSCALING is false, labels scale naturally with the map
-        // (they're already under viewbox, so no extra work needed)
+      // ONLY transform the world container
+      const world = svg.select('#world');
+      world.attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
+
+      // Update visibility + inverse scale for feature labels
+      if (window._placedFeatureLabels) {
+        updateLabelVisibility({
+          svg,
+          groupId: 'labels-features',
+          placed: window._placedFeatureLabels,
+          k: t.k,
+          filterByZoom
+        });
+        updateLabelZoom({ svg, groupId: 'labels-features', k: t.k });
       }
     });
 

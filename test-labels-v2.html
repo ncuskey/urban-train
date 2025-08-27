@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Labels v2 Test</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .name { margin: 5px 0; padding: 5px; background: #f0f0f0; }
+        .error { color: red; }
+        .success { color: green; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <h1>Labels v2 Test - Oceans, Lakes, Islands</h1>
+    
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="results"></div>
+    </div>
+
+    <script type="module">
+        import { buildFeatureLabels } from './src/modules/labels.js';
+        import { makeNamer } from './src/modules/names.js';
+        
+        // Test RNG
+        const testRng = () => Math.random();
+        const namer = makeNamer(testRng);
+        
+        // Create mock polygons for testing
+        function createMockPolygons() {
+            const polygons = [];
+            const mapWidth = 800;
+            const mapHeight = 600;
+            
+            // Create some water polygons (oceans and lakes)
+            for (let i = 0; i < 20; i++) {
+                const isOcean = i < 5; // First 5 are oceans (touch boundary)
+                const x = isOcean ? (i * 150) : (100 + (i - 5) * 120);
+                const y = isOcean ? (i % 2 === 0 ? 0 : mapHeight) : (150 + (i - 5) * 80);
+                
+                polygons.push([
+                    [x, y],
+                    [x + 50, y],
+                    [x + 50, y + 50],
+                    [x, y + 50]
+                ]);
+                // Add properties to the polygon array
+                const poly = polygons[polygons.length - 1];
+                poly.height = 0.1; // Water
+                poly.neighbors = [];
+            }
+            
+            // Create some land polygons (islands)
+            for (let i = 0; i < 15; i++) {
+                const x = 200 + (i * 100);
+                const y = 200 + (i * 80);
+                
+                polygons.push([
+                    [x, y],
+                    [x + 40, y],
+                    [x + 40, y + 40],
+                    [x, y + 40]
+                ]);
+                // Add properties to the polygon array
+                const poly = polygons[polygons.length - 1];
+                poly.height = 0.8; // Land
+                poly.neighbors = [];
+            }
+            
+            return polygons;
+        }
+        
+        // Test the buildFeatureLabels function
+        function testLabelsV2() {
+            const results = [];
+            
+            try {
+                const polygons = createMockPolygons();
+                
+                const featureLabels = buildFeatureLabels({
+                    polygons,
+                    seaLevel: 0.2,
+                    minOceanArea: 9000,
+                    minLakeArea: 800,
+                    minIslandArea: 1500,
+                    maxOceans: 3,
+                    maxLakes: 6,
+                    maxIslands: 8,
+                    namePickers: {
+                        ocean: (c) => namer.ocean(c.area / 10000),
+                        lake: (c) => namer.lake(c.area / 5000),
+                        island: (c) => namer.island(1)
+                    },
+                    mapWidth: 800,
+                    mapHeight: 600
+                });
+                
+                // Count by kind
+                const oceans = featureLabels.filter(l => l.kind === 'ocean');
+                const lakes = featureLabels.filter(l => l.kind === 'lake');
+                const islands = featureLabels.filter(l => l.kind === 'island');
+                
+                results.push(`<div class="success">✅ buildFeatureLabels executed successfully</div>`);
+                results.push(`<div class="info">📊 Generated ${featureLabels.length} total labels:</div>`);
+                results.push(`<div class="info">   - Oceans: ${oceans.length}</div>`);
+                results.push(`<div class="info">   - Lakes: ${lakes.length}</div>`);
+                results.push(`<div class="info">   - Islands: ${islands.length}</div>`);
+                
+                // Show some example labels
+                if (oceans.length > 0) {
+                    results.push(`<div class="info">🌊 Sample ocean: "${oceans[0].text}"</div>`);
+                }
+                if (lakes.length > 0) {
+                    results.push(`<div class="info">🏞️ Sample lake: "${lakes[0].text}"</div>`);
+                }
+                if (islands.length > 0) {
+                    results.push(`<div class="info">🏝️ Sample island: "${islands[0].text}"</div>`);
+                }
+                
+                // Check for proper structure
+                const hasValidStructure = featureLabels.every(label => 
+                    label.id && label.kind && label.text && 
+                    typeof label.x === 'number' && typeof label.y === 'number' &&
+                    typeof label.area === 'number' && typeof label.priority === 'number'
+                );
+                
+                if (hasValidStructure) {
+                    results.push(`<div class="success">✅ All labels have valid structure</div>`);
+                } else {
+                    results.push(`<div class="error">❌ Some labels have invalid structure</div>`);
+                }
+                
+                // Check for proper priorities
+                const hasValidPriorities = featureLabels.every(label => {
+                    if (label.kind === 'ocean') return label.priority === 100;
+                    if (label.kind === 'lake') return label.priority === 80;
+                    if (label.kind === 'island') return label.priority === 60;
+                    return false;
+                });
+                
+                if (hasValidPriorities) {
+                    results.push(`<div class="success">✅ All labels have correct priorities</div>`);
+                } else {
+                    results.push(`<div class="error">❌ Some labels have incorrect priorities</div>`);
+                }
+                
+            } catch (error) {
+                results.push(`<div class="error">❌ Error: ${error.message}</div>`);
+                console.error('Test error:', error);
+            }
+            
+            return results;
+        }
+        
+        // Run the test
+        const testResults = testLabelsV2();
+        document.getElementById('results').innerHTML = testResults.join('');
+        
+        console.log('Labels v2 test completed');
+    </script>
+</body>
+</html>

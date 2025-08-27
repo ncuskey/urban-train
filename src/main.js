@@ -1,6 +1,6 @@
 import { RNG } from "./core/rng.js";
 import { Timers } from "./core/timers.js";
-import { ensureLayers } from "./render/layers.js";
+import { ensureLayers, ensureLabelSubgroups } from "./render/layers.js";
 import { runSelfTests, renderSelfTestBadge, clamp01, ensureReciprocalNeighbors } from "./selftest.js";
 import { poissonDiscSampler, buildVoronoi, detectNeighbors } from "./modules/geometry.js";
 import { randomMap } from "./modules/heightmap.js";
@@ -11,6 +11,7 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction } from "./modules/interaction.js";
 import { fitToLand } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
+import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility } from "./modules/labels.js";
 
 // === Minimal Perf HUD ==========================================
 const Perf = (() => {
@@ -94,7 +95,7 @@ function pickCellAt(wx, wy) {
 function ensureCellsRaster() {
   let raster = d3.select('#cellsRaster');
   if (raster.empty()) {
-    raster = d3.select('.viewbox').insert('image', '.mapCells')
+    raster = d3.select('#world').insert('image', '.mapCells')
       .attr('id', 'cellsRaster').attr('x', 0).attr('y', 0)
       .attr('preserveAspectRatio', 'none');
   }
@@ -159,8 +160,11 @@ function afterGenerate() {
 let currentTransform = d3.zoomIdentity;
 window.currentTransform = currentTransform; // Global transform tracking
 
-// Label scaling configuration - set to true to keep labels constant pixel size
-const LABELS_NONSCALING = false;
+// Label scaling configuration - now handled by per-label transforms
+// const LABELS_NONSCALING = true; // DEPRECATED: Now using per-label transform system
+
+// Feature label system configuration
+const USE_NEW_FEATURE_LABELS = true; // global switch
 
 // Suppress console warnings for D3 wheel events globally
 // This prevents the expected D3 v5 wheel event warnings from cluttering the console
@@ -204,22 +208,24 @@ function generate(count) {
   var svg = d3.select("svg"),
     mapWidth = +svg.attr("width"),
     mapHeight = +svg.attr("height"),
-    defs = svg.select("defs"),
-    viewbox = svg.append("g").attr("class", "viewbox"),
-    islandBack = viewbox.append("g").attr("class", "islandBack"),
-    mapCells = viewbox.append("g").attr("class", "mapCells"),
-    oceanLayer = viewbox.append("g").attr("class", "oceanLayer"),
-    circles = viewbox.append("g").attr("class", "circles"),
-    coastline = viewbox.append("g").attr("class", "coastline"),
-		shallow = viewbox.append("g").attr("class", "shallow"),
-    lakecoast = viewbox.append("g").attr("class", "lakecoast");
+    defs = svg.select("defs");
     
-  // Create label and HUD layers for proper coordinate space handling
-  let gLabels = viewbox.append("g").attr("id", "labels");
+  // Ensure proper layer structure
+  const layers = ensureLayers(svg);
+  ensureLabelSubgroups(svg);
+  
+  // Use the world container for map elements
+  const world = layers.world;
+  const islandBack = world.append("g").attr("class", "islandBack");
+  const mapCells = world.append("g").attr("class", "mapCells");
+  const oceanLayer = world.append("g").attr("class", "oceanLayer");
+  const circles = world.append("g").attr("class", "circles");
+  const coastline = world.append("g").attr("class", "coastline");
+  const shallow = world.append("g").attr("class", "shallow");
+  const lakecoast = world.append("g").attr("class", "lakecoast");
+    
+  // Create HUD layer outside the world container
   let gHUD = svg.append("g").attr("id", "hud").style("pointer-events", "none");
-    
-  // Ensure SVG layers exist for self-tests
-  const layers = ensureLayers(svg.node());
   // Poisson-disc sampling from https://bl.ocks.org/mbostock/99049112373e12709381
   const sampler = poissonDiscSampler(mapWidth, mapHeight, sizeInput.valueAsNumber, rng);
   let samples = [];
@@ -246,7 +252,7 @@ function generate(count) {
 
   // Attach interaction handlers (zoom + hover HUD)
   const svgSel = d3.select('svg');
-  const viewSel = d3.select('.viewbox');
+  const worldSel = d3.select('#world');
   const hudRefs = { 
     cellEl:   document.getElementById('cell'),
     heightEl: document.getElementById('height'),
@@ -254,7 +260,7 @@ function generate(count) {
   };
   const interact = attachInteraction({
     svg: svgSel,
-    viewbox: viewSel,
+    viewbox: worldSel, // Use world container instead of viewbox
     diagram,
     polygons,
     hud: hudRefs
@@ -343,9 +349,65 @@ function generate(count) {
       rng
     });
     
+    // Build & place feature labels
+    const featureLabels = buildFeatureLabels({
+      polygons,
+      seaLevel: 0.2,
+      mapWidth,             // <-- pass actual mapWidth
+      mapHeight,            // <-- pass actual mapHeight
+      minOceanArea: 6000,
+      minLakeArea: 250,
+      minIslandArea: 400,
+      maxOceans: 3,
+      maxLakes: 10,
+      maxIslands: 12,
+      // namePickers: { ocean: names.pickOcean, lake: names.pickLake, island: names.pickIsland }
+    });
+
+    const placed = placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels });
+    window._placedFeatureLabels = placed;
+
+    console.log('[labels] after build:', {
+      built: featureLabels.length, placed: placed.length
+    });
+
+    const k0 = (d3.zoomTransform(svgSel.node()).k || 1);
+
+    // Render every label once (unfiltered), then immediately set visibility for k0
+    renderLabels({ svg: svgSel, placed, groupId: 'labels-features', k: k0 });
+
+    // DEBUG: verify nodes exist
+    console.log('[labels] DOM count after initial render:',
+      svgSel.select('#labels-features').selectAll('g.label').size()
+    );
+
+    // Store for zoom updates
+    window._placedFeatureLabels = placed;
+
+    // Apply initial visibility without re-render
+    updateLabelVisibility({
+      svg: svgSel,
+      groupId: 'labels-features',
+      placed: window._placedFeatureLabels,
+      k: k0,
+      filterByZoom
+    });
+
+    // DEBUG: how many visible
+    const _visibleNow = svgSel.select('#labels-features')
+      .selectAll('g.label')
+      .filter(function(){ return d3.select(this).style('display') !== 'none'; })
+      .size();
+    console.log('[labels] visible after initial filter:', _visibleNow);
+
+    // Quick sanity log
+    console.log(`[labels] oceans=${featureLabels.filter(l=>l.kind==='ocean').length}, lakes=${featureLabels.filter(l=>l.kind==='lake').length}, islands=${featureLabels.filter(l=>l.kind==='island').length}, placed=${placed.length}, total=${placed.length}`);
+    
     // Compute and render map labels with proper deduplication
-    const labelData = computeMapLabels(polygons);
-    drawLabels(labelData);
+    if (!USE_NEW_FEATURE_LABELS) {
+      const labelData = computeMapLabels(polygons);
+      drawLabels(labelData);
+    }
     drawCoastline({
       polygons,
       diagram,
@@ -368,6 +430,12 @@ function generate(count) {
       circlesLayer: circles,
       svg
     });
+    
+    // Ensure labels are on top after all map elements are rendered
+    const labelsGroup = svgSel.select('#labels');
+    if (!labelsGroup.empty()) {
+      labelsGroup.raise();
+    }
     $('.circles').hide();
   }
 
@@ -388,7 +456,7 @@ function generate(count) {
   });
   
   // Expose label configuration globally
-  window.LABELS_NONSCALING = LABELS_NONSCALING;
+  // window.LABELS_NONSCALING = LABELS_NONSCALING; // DEPRECATED: Now using per-label transform system
 
   // OPTIONAL: auto-fit after generation
   const AUTO_FIT = true;
@@ -527,8 +595,8 @@ function drawLabels(data) {
   const gLabels = d3.select('#labels');
   if (gLabels.empty()) return;
   
-  // Clear existing labels to prevent accumulation
-  gLabels.selectAll('*').remove();
+  // Clear existing place labels to prevent accumulation (but keep feature labels)
+  gLabels.selectAll('text.place-label').remove();
   
   const sel = gLabels.selectAll('text.place-label')
     .data(data, d => d.id);
@@ -571,29 +639,10 @@ function toggleBlobCenters() {
   $('.circles').toggle();
 }
 
-// Toggle label scaling mode
+// Toggle label scaling mode - DISABLED: Now using per-label transforms
 function toggleLabelScaling() {
-  window.LABELS_NONSCALING = !window.LABELS_NONSCALING;
-  
-  // Re-apply current transform to update label scaling
-  const svg = d3.select('svg');
-  const zoom = svg.__zoomBehavior__ || d3.zoom();
-  if (svg.__zoomBehavior__) {
-    const t = d3.zoomTransform(svg.node());
-    const gLabels = d3.select('#labels');
-    if (!gLabels.empty()) {
-      if (window.LABELS_NONSCALING) {
-        // Switch to constant-size mode
-        gLabels.selectAll('text')
-          .attr("transform", d => `translate(${t.applyX(d.x)},${t.applyY(d.y)}) scale(${1 / t.k})`);
-      } else {
-        // Switch to scaling mode - remove individual transforms
-        gLabels.selectAll('text').attr("transform", null);
-      }
-    }
-  }
-  
-  console.log(`Labels now ${window.LABELS_NONSCALING ? 'constant-size' : 'scaling'} mode`);
+  console.log('Label scaling toggle disabled - now using per-label transform system');
+  console.log('Labels automatically maintain constant size with proper anchoring');
 }
 
 // Change polygons stroke-width,
@@ -800,7 +849,7 @@ window.toggleHover = () => {
 
 // Reset all toggles to visible
 window.resetToggles = () => {
-  d3.selectAll('.viewbox > g').style('display', 'block');
+  d3.selectAll('#world > g').style('display', 'block');
   d3.select('#perfHUD').style('display', 'block');
   d3.select('#labels').style('display', 'block');
   window.hoverDisabled = false;

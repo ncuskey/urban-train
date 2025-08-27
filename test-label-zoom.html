@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Label Zoom Anchoring Test</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .error { color: red; }
+        .success { color: green; }
+        .info { color: blue; }
+        .warning { color: orange; }
+        
+        #test-svg {
+            border: 1px solid #ccc;
+            background: #f0f0f0;
+        }
+        
+        .test-controls {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f9f9f9;
+        }
+        
+        .test-controls button {
+            margin: 5px;
+            padding: 5px 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Label Zoom Anchoring Test</h1>
+    
+    <div class="test-controls">
+        <button onclick="testZoomIn()">Zoom In (2x)</button>
+        <button onclick="testZoomOut()">Zoom Out (0.5x)</button>
+        <button onclick="testPan()">Pan (100,100)</button>
+        <button onclick="resetZoom()">Reset</button>
+        <button onclick="checkTransforms()">Check Transforms</button>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>SVG Test Area</h2>
+        <svg id="test-svg" width="600" height="400">
+            <defs>
+                <filter id="blurFilter">
+                    <feGaussianBlur stdDeviation="2"/>
+                </filter>
+            </defs>
+            <g class="viewbox">
+                <g class="mapCells"></g>
+                <g id="labels">
+                    <g id="labels-features"></g>
+                </g>
+            </g>
+        </svg>
+    </div>
+
+    <script type="module">
+        import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelZoom } from './src/modules/labels.js';
+        import { makeNamer } from './src/modules/names.js';
+        
+        // Test RNG
+        const testRng = () => Math.random();
+        const namer = makeNamer(testRng);
+        
+        // Create mock polygons for testing
+        function createMockPolygons() {
+            const polygons = [];
+            const mapWidth = 600;
+            const mapHeight = 400;
+            
+            // Create some water polygons (oceans and lakes)
+            for (let i = 0; i < 10; i++) {
+                const isOcean = i < 3; // First 3 are oceans (touch boundary)
+                const x = isOcean ? (i * 180) : (100 + (i - 3) * 120);
+                const y = isOcean ? (i % 2 === 0 ? 0 : mapHeight) : (150 + (i - 3) * 80);
+                
+                polygons.push([
+                    [x, y],
+                    [x + 60, y],
+                    [x + 60, y + 60],
+                    [x, y + 60]
+                ]);
+                // Add properties to the polygon array
+                const poly = polygons[polygons.length - 1];
+                poly.height = 0.1; // Water
+                poly.neighbors = [];
+            }
+            
+            // Create some land polygons (islands)
+            for (let i = 0; i < 8; i++) {
+                const x = 200 + (i * 80);
+                const y = 200 + (i * 60);
+                
+                polygons.push([
+                    [x, y],
+                    [x + 50, y],
+                    [x + 50, y + 50],
+                    [x, y + 50]
+                ]);
+                // Add properties to the polygon array
+                const poly = polygons[polygons.length - 1];
+                poly.height = 0.8; // Land
+                poly.neighbors = [];
+            }
+            
+            return polygons;
+        }
+        
+        // Initialize test
+        function initTest() {
+            const results = [];
+            
+            try {
+                const svg = d3.select('#test-svg');
+                const polygons = createMockPolygons();
+                
+                // Build feature labels
+                const featureLabels = buildFeatureLabels({
+                    polygons,
+                    seaLevel: 0.2,
+                    mapWidth: 600,
+                    mapHeight: 400,
+                    minOceanArea: 6000,
+                    minLakeArea: 250,
+                    minIslandArea: 400,
+                    maxOceans: 3,
+                    maxLakes: 10,
+                    maxIslands: 12
+                });
+                
+                // Place labels
+                const placed = placeLabelsAvoidingCollisions({ svg, labels: featureLabels });
+                window._placedFeatureLabels = placed;
+                
+                // Initial render
+                const k0 = 1;
+                const initialVisible = filterByZoom(placed, k0);
+                svg.select('#labels-features').selectAll('*').remove();
+                renderLabels({ svg, placed: initialVisible, groupId: 'labels-features', k: k0 });
+                
+                results.push(`<div class="success">✅ Test initialized successfully</div>`);
+                results.push(`<div class="info">📊 Generated ${featureLabels.length} labels:</div>`);
+                results.push(`<div class="info">   - Oceans: ${featureLabels.filter(l => l.kind === 'ocean').length}</div>`);
+                results.push(`<div class="info">   - Lakes: ${featureLabels.filter(l => l.kind === 'lake').length}</div>`);
+                results.push(`<div class="info">   - Islands: ${featureLabels.filter(l => l.kind === 'island').length}</div>`);
+                
+                // Store for testing
+                window.testSvg = svg;
+                window.testPlaced = placed;
+                
+            } catch (error) {
+                results.push(`<div class="error">❌ Error: ${error.message}</div>`);
+                console.error('Test error:', error);
+            }
+            
+            return results;
+        }
+        
+        // Test zoom functions
+        window.testZoomIn = function() {
+            const svg = window.testSvg;
+            if (!svg) return;
+            
+            const t = d3.zoomTransform(svg.node());
+            const newT = t.scale(2);
+            
+            // Apply transform to viewbox
+            svg.select('.viewbox').attr('transform', newT);
+            
+            // Apply transform to labels container
+            svg.select('#labels').attr('transform', newT);
+            
+            // Update label visibility and scaling
+            if (window._placedFeatureLabels) {
+                const visible = filterByZoom(window._placedFeatureLabels, newT.k);
+                svg.select('#labels-features').selectAll('*').remove();
+                renderLabels({ svg, placed: visible, groupId: 'labels-features', k: newT.k });
+            }
+            
+            updateLabelZoom({ svg, groupId: 'labels-features', k: newT.k });
+            
+            console.log('Zoomed in to 2x');
+        };
+        
+        window.testZoomOut = function() {
+            const svg = window.testSvg;
+            if (!svg) return;
+            
+            const t = d3.zoomTransform(svg.node());
+            const newT = t.scale(0.5);
+            
+            // Apply transform to viewbox
+            svg.select('.viewbox').attr('transform', newT);
+            
+            // Apply transform to labels container
+            svg.select('#labels').attr('transform', newT);
+            
+            // Update label visibility and scaling
+            if (window._placedFeatureLabels) {
+                const visible = filterByZoom(window._placedFeatureLabels, newT.k);
+                svg.select('#labels-features').selectAll('*').remove();
+                renderLabels({ svg, placed: visible, groupId: 'labels-features', k: newT.k });
+            }
+            
+            updateLabelZoom({ svg, groupId: 'labels-features', k: newT.k });
+            
+            console.log('Zoomed out to 0.5x');
+        };
+        
+        window.testPan = function() {
+            const svg = window.testSvg;
+            if (!svg) return;
+            
+            const t = d3.zoomTransform(svg.node());
+            const newT = t.translate(100, 100);
+            
+            // Apply transform to viewbox
+            svg.select('.viewbox').attr('transform', newT);
+            
+            // Apply transform to labels container
+            svg.select('#labels').attr('transform', newT);
+            
+            console.log('Panned by (100,100)');
+        };
+        
+        window.resetZoom = function() {
+            const svg = window.testSvg;
+            if (!svg) return;
+            
+            const newT = d3.zoomIdentity;
+            
+            // Apply transform to viewbox
+            svg.select('.viewbox').attr('transform', newT);
+            
+            // Apply transform to labels container
+            svg.select('#labels').attr('transform', newT);
+            
+            // Update label visibility and scaling
+            if (window._placedFeatureLabels) {
+                const visible = filterByZoom(window._placedFeatureLabels, newT.k);
+                svg.select('#labels-features').selectAll('*').remove();
+                renderLabels({ svg, placed: visible, groupId: 'labels-features', k: newT.k });
+            }
+            
+            updateLabelZoom({ svg, groupId: 'labels-features', k: newT.k });
+            
+            console.log('Reset zoom');
+        };
+        
+        window.checkTransforms = function() {
+            const svg = window.testSvg;
+            if (!svg) return;
+            
+            const results = [];
+            
+            // Check viewbox transform
+            const viewboxTransform = svg.select('.viewbox').attr('transform');
+            results.push(`<div class="info">🎯 Viewbox transform: ${viewboxTransform || 'none'}</div>`);
+            
+            // Check labels container transform
+            const labelsTransform = svg.select('#labels').attr('transform');
+            results.push(`<div class="info">🏷️ Labels container transform: ${labelsTransform || 'none'}</div>`);
+            
+            // Check individual label transforms
+            const labelGroups = svg.select('#labels-features').selectAll('g.label');
+            let labelCount = 0;
+            labelGroups.each(function() {
+                const transform = d3.select(this).attr('transform');
+                results.push(`<div class="info">   Label ${labelCount}: ${transform}</div>`);
+                labelCount++;
+            });
+            
+            // Check for proper transform structure
+            const hasProperTransforms = labelGroups.size() > 0 && 
+                labelGroups.filter(function() {
+                    const transform = d3.select(this).attr('transform');
+                    return transform && transform.includes('translate') && transform.includes('scale');
+                }).size() === labelGroups.size();
+            
+            if (hasProperTransforms) {
+                results.push(`<div class="success">✅ All labels have proper transforms (translate + scale)</div>`);
+            } else {
+                results.push(`<div class="error">❌ Some labels missing proper transforms</div>`);
+            }
+            
+            document.getElementById('results').innerHTML = results.join('');
+        };
+        
+        // Initialize the test
+        const testResults = initTest();
+        document.getElementById('results').innerHTML = testResults.join('');
+        
+        console.log('Label zoom test initialized');
+    </script>
+</body>
+</html>

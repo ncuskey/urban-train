@@ -112,3 +112,54 @@ svg {
   font-size: 12px;
   font-weight: bold;
 }
+
+/* Feature label styling */
+#labels text.stroke {
+  paint-order: stroke;
+  stroke: #000;
+  stroke-width: 2px;     /* was 3px */
+  stroke-linejoin: round;
+  fill: none;
+  opacity: 0.7;          /* was 0.8 */
+  vector-effect: non-scaling-stroke; /* keeps stroke width pleasant */
+}
+
+#labels text.fill {
+  fill: #fff;
+  letter-spacing: 0.3px;
+}
+
+#labels-features text.fill {
+  font-size: 16px;
+  font-weight: 700;      /* crisper fill, thinner stroke */
+  opacity: 0.95;
+}
+
+/* Make sure labels are visible */
+#labels-features g.label text {
+  font-size: 16px;
+  font-weight: bold;
+  fill: white;
+  stroke: black;
+  stroke-width: 2px;
+  paint-order: stroke;
+}
+
+/* Ensure label text elements are properly styled */
+#labels-features g.label text.stroke {
+  paint-order: stroke;
+  stroke: #000;
+  stroke-width: 2px;
+  stroke-linejoin: round;
+  fill: none;
+  opacity: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+
+#labels-features g.label text.fill {
+  fill: #fff;
+  letter-spacing: 0.3px;
+  font-size: 16px;
+  font-weight: 700;
+  opacity: 0.95;
+}

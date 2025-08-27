@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Labels v2.1 Test</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .error { color: red; }
+        .success { color: green; }
+        .info { color: blue; }
+        .warning { color: orange; }
+        
+        #test-svg {
+            border: 1px solid #ccc;
+            background: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Labels v2.1 Test</h1>
+    
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>SVG Test Area</h2>
+        <svg id="test-svg" width="600" height="400">
+            <g id="viewport">
+                <g id="world">
+                    <g id="map"></g>
+                    <g id="labels">
+                        <g id="labels-features"></g>
+                    </g>
+                </g>
+            </g>
+        </svg>
+    </div>
+
+    <script type="module">
+        import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility } from './src/modules/labels.js';
+        
+        // Create mock polygons for testing
+        function createMockPolygons() {
+            const polygons = [];
+            const mapWidth = 600;
+            const mapHeight = 400;
+            
+            // Create some water polygons (oceans and lakes)
+            for (let i = 0; i < 15; i++) {
+                const isOcean = i < 3; // First 3 are oceans (touch boundary)
+                const x = isOcean ? (i * 180) : (100 + (i - 3) * 80);
+                const y = isOcean ? (i % 2 === 0 ? 0 : mapHeight) : (150 + (i - 3) * 60);
+                
+                polygons.push([
+                    [x, y],
+                    [x + 80, y],
+                    [x + 80, y + 80],
+                    [x, y + 80]
+                ]);
+                // Add properties to the polygon array
+                const poly = polygons[polygons.length - 1];
+                poly.height = 0.1; // Water
+                poly.neighbors = [];
+            }
+            
+            // Create some land polygons (islands)
+            for (let i = 0; i < 12; i++) {
+                const x = 200 + (i * 70);
+                const y = 200 + (i * 50);
+                
+                polygons.push([
+                    [x, y],
+                    [x + 60, y],
+                    [x + 60, y + 60],
+                    [x, y + 60]
+                ]);
+                // Add properties to the polygon array
+                const poly = polygons[polygons.length - 1];
+                poly.height = 0.8; // Land
+                poly.neighbors = [];
+            }
+            
+            return polygons;
+        }
+        
+        // Run tests
+        function runTests() {
+            const results = [];
+            
+            try {
+                const svg = d3.select('#test-svg');
+                const polygons = createMockPolygons();
+                
+                // Test buildFeatureLabels with new parameters
+                const featureLabels = buildFeatureLabels({
+                    polygons,
+                    seaLevel: 0.2,
+                    mapWidth: 600,
+                    mapHeight: 400,
+                    minOceanArea: 6000,
+                    minLakeArea: 250,
+                    minIslandArea: 400,
+                    maxOceans: 3,
+                    maxLakes: 10,
+                    maxIslands: 12
+                });
+                
+                // Test placement
+                const placed = placeLabelsAvoidingCollisions({ svg, labels: featureLabels });
+                
+                // Test rendering
+                const k0 = 1;
+                renderLabels({ svg, placed, groupId: 'labels-features', k: k0 });
+                
+                // Test visibility
+                updateLabelVisibility({
+                    svg,
+                    groupId: 'labels-features',
+                    placed,
+                    k: k0,
+                    filterByZoom
+                });
+                
+                // Validation checks
+                const oceanCount = featureLabels.filter(l => l.kind === 'ocean').length;
+                const lakeCount = featureLabels.filter(l => l.kind === 'lake').length;
+                const islandCount = featureLabels.filter(l => l.kind === 'island').length;
+                const totalCount = oceanCount + lakeCount + islandCount;
+                
+                results.push(`<div class="success">✅ buildFeatureLabels executed successfully</div>`);
+                results.push(`<div class="info">📊 Component counts: ${oceanCount} oceans, ${lakeCount} lakes, ${islandCount} islands</div>`);
+                results.push(`<div class="info">📊 Total labels: ${totalCount}</div>`);
+                results.push(`<div class="info">📊 Placed labels: ${placed.length}</div>`);
+                
+                // Check for generics
+                const generics = featureLabels.filter(l => ['Ocean', 'Lake', 'Island'].includes(l.text));
+                results.push(`<div class="info">📊 Generic labels: ${generics.length}</div>`);
+                
+                // Check DOM
+                const domLabels = svg.select('#labels-features').selectAll('g.label').size();
+                results.push(`<div class="info">📊 DOM labels: ${domLabels}</div>`);
+                
+                // Validation
+                if (totalCount > 1) {
+                    results.push(`<div class="success">✅ Multiple labels generated (${totalCount})</div>`);
+                } else {
+                    results.push(`<div class="warning">⚠️ Only ${totalCount} labels generated</div>`);
+                }
+                
+                if (generics.length > 0) {
+                    results.push(`<div class="success">✅ Generic labels preserved (${generics.length})</div>`);
+                } else {
+                    results.push(`<div class="warning">⚠️ No generic labels found</div>`);
+                }
+                
+                if (domLabels === placed.length) {
+                    results.push(`<div class="success">✅ DOM count matches placed count</div>`);
+                } else {
+                    results.push(`<div class="error">❌ DOM count (${domLabels}) != placed count (${placed.length})</div>`);
+                }
+                
+            } catch (error) {
+                results.push(`<div class="error">❌ Error: ${error.message}</div>`);
+                console.error('Test error:', error);
+            }
+            
+            return results;
+        }
+        
+        // Run tests and display results
+        const results = runTests();
+        document.getElementById('results').innerHTML = results.join('');
+    </script>
+    
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+</body>
+</html>
