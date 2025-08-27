@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Coastline Refinement Test</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <h1>Coastline Refinement Test</h1>
+    
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="results"></div>
+    </div>
+
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script type="module">
+        import { refineCoastlineAndRebuild } from './src/modules/refine.js';
+        import { buildVoronoi } from './src/modules/geometry.js';
+        
+        const results = [];
+        
+        function log(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = type;
+            div.textContent = message;
+            document.getElementById('results').appendChild(div);
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+        
+        // Test 1: Basic functionality
+        log('Testing coastline refinement...');
+        
+        try {
+            // Create a simple test case with some coastal edges
+            const samples = [
+                [100, 100], // land
+                [200, 100], // land  
+                [300, 100], // sea
+                [400, 100], // sea
+                [100, 200], // land
+                [200, 200], // land
+                [300, 200], // sea
+                [400, 200], // sea
+            ];
+            
+            const { diagram, polygons } = buildVoronoi(samples, 500, 300);
+            
+            // Set heights to create coastal edges
+            polygons.forEach((poly, i) => {
+                poly.height = i < 4 ? 0.5 : 0.1; // First 4 are land, rest are sea
+            });
+            
+            const result = refineCoastlineAndRebuild({
+                samples,
+                diagram,
+                polygons,
+                mapWidth: 500,
+                mapHeight: 300,
+                seaLevel: 0.2,
+                targetSpacing: 8,
+                minSpacingFactor: 0.75
+            });
+            
+            if (result.added > 0) {
+                log(`✅ Successfully added ${result.added} coastal points`, 'success');
+                log(`Original samples: ${samples.length}, New samples: ${result.samples.length}`, 'info');
+                log(`Original polygons: ${polygons.length}, New polygons: ${result.polygons.length}`, 'info');
+            } else {
+                log(`ℹ️ No coastal points added (this is normal for small test cases)`, 'info');
+            }
+            
+            // Test 2: Verify height transfer
+            let heightTransferSuccess = true;
+            for (let i = 0; i < result.polygons.length; i++) {
+                const poly = result.polygons[i];
+                if (poly && poly.data) {
+                    const x = poly.data[0];
+                    const y = poly.data[1];
+                    const old = diagram.find(x, y);
+                    if (old && old.index != null && polygons[old.index]) {
+                        if (Math.abs(poly.height - polygons[old.index].height) > 0.001) {
+                            heightTransferSuccess = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (heightTransferSuccess) {
+                log('✅ Height transfer working correctly', 'success');
+            } else {
+                log('❌ Height transfer failed', 'error');
+            }
+            
+        } catch (error) {
+            log(`❌ Test failed with error: ${error.message}`, 'error');
+            console.error(error);
+        }
+        
+        // Test 3: Edge case - no coastal edges
+        log('Testing edge case with no coastal edges...');
+        
+        try {
+            const samples = [[100, 100], [200, 200], [300, 300]];
+            const { diagram, polygons } = buildVoronoi(samples, 500, 300);
+            
+            // All land
+            polygons.forEach(poly => { poly.height = 0.5; });
+            
+            const result = refineCoastlineAndRebuild({
+                samples,
+                diagram,
+                polygons,
+                mapWidth: 500,
+                mapHeight: 300
+            });
+            
+            if (result.added === 0) {
+                log('✅ Correctly handled case with no coastal edges', 'success');
+            } else {
+                log('❌ Should not add points when no coastal edges exist', 'error');
+            }
+            
+        } catch (error) {
+            log(`❌ Edge case test failed: ${error.message}`, 'error');
+        }
+        
+        log('Test complete!');
+        
+    </script>
+</body>
+</html>

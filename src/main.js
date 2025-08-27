@@ -10,6 +10,7 @@ import { drawCoastline } from "./modules/coastline.js";
 import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction } from "./modules/interaction.js";
 import { fitToLand } from './modules/autofit.js';
+import { refineCoastlineAndRebuild } from "./modules/refine.js";
 
 // === Minimal Perf HUD ==========================================
 const Perf = (() => {
@@ -221,10 +222,10 @@ function generate(count) {
   const layers = ensureLayers(svg.node());
   // Poisson-disc sampling from https://bl.ocks.org/mbostock/99049112373e12709381
   const sampler = poissonDiscSampler(mapWidth, mapHeight, sizeInput.valueAsNumber, rng);
-  const samples = [];
+  let samples = [];
   for (let s; (s = sampler()); ) samples.push(s);
   // Voronoi D3
-  const { diagram, polygons } = buildVoronoi(samples, mapWidth, mapHeight);
+  let { diagram, polygons } = buildVoronoi(samples, mapWidth, mapHeight);
   
   // Store polygons globally for access by other functions
   window.currentPolygons = polygons;
@@ -278,6 +279,62 @@ function generate(count) {
       circlesLayer: circles,
       mapWidth, mapHeight, color, radiusOutput
     });
+    
+    // === Adaptive Coastline Refinement ===================================
+    {
+      // Pre-refinement height check
+      (function logHeightStats(tag, polys){
+        let c = 0, min = Infinity, max = -Infinity, sum = 0;
+        for (const p of polys) {
+          const h = p.height ?? 0;
+          if (h < min) min = h;
+          if (h > max) max = h;
+          sum += h; c++;
+        }
+        console.log(`${tag} height stats: count=${c} min=${min.toFixed(3)} max=${max.toFixed(3)} mean=${(sum/c).toFixed(3)}`);
+      })('[pre-refine]', polygons);
+      
+      const seaLevel = 0.2; // keep consistent with existing logic
+      // More aggressive spacing for noticeable refinement:
+      const targetSpacing = Math.max(4, sizeInput.valueAsNumber * 0.4);
+      const minSpacingFactor = 0.6;
+
+      const refined = refineCoastlineAndRebuild({
+        samples,
+        diagram,
+        polygons,
+        mapWidth,
+        mapHeight,
+        seaLevel,
+        targetSpacing,
+        minSpacingFactor
+      });
+
+      if (refined && refined.polygons && refined.diagram) {
+        samples = refined.samples;
+        diagram = refined.diagram;
+        polygons = refined.polygons;
+        window.currentPolygons = polygons; // update global reference
+
+        // Recompute neighbors after topology change
+        detectNeighbors(diagram, polygons);
+
+        console.log(`[refine] Added ${refined.added} coastal points; polygons now: ${polygons.length}`);
+      }
+    }
+    // =====================================================================
+    
+    // Sanity check: verify heights are preserved
+    (function logHeightStats(tag, polys){
+      let c = 0, min = Infinity, max = -Infinity, sum = 0;
+      for (const p of polys) {
+        const h = p.height ?? 0;
+        if (h < min) min = h;
+        if (h > max) max = h;
+        sum += h; c++;
+      }
+      console.log(`${tag} height stats: count=${c} min=${min.toFixed(3)} max=${max.toFixed(3)} mean=${(sum/c).toFixed(3)}`);
+    })('[post-refine]', polygons);
     
     // process the calculations
     markFeatures({

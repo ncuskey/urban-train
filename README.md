@@ -18,6 +18,7 @@ A web-based procedural map generator that creates realistic terrain with islands
 - **Smart Labeling**: Automatic feature labeling with deduplication and proper placement
 - **Fantasy Naming**: Rich descriptive names for oceans, lakes, and islands with weighted templates
 - **Label Scaling**: Toggle between scaling and constant-size label modes
+- **Adaptive Coastline Refinement**: Automatically adds detail points along land-sea boundaries for smoother shorelines
 - **Modular Architecture**: ES6 modules for maintainable code organization
 
 ## Technologies Used
@@ -193,6 +194,7 @@ urban-train/
 - **Level-of-Detail (LOD)**: Automatic switching between raster and vector rendering based on zoom level
 - **Spatial Picking**: Efficient cell selection using spatial indexing instead of DOM hit-testing
 - **Fantasy Naming**: Weighted template system for generating descriptive geographic names
+- **Adaptive Coastline Refinement**: Automatically subdivides coastal edges for smoother shorelines
 
 ## Browser Compatibility
 
