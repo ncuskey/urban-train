@@ -18,6 +18,7 @@ A web-based procedural map generator that creates realistic terrain with islands
 - **Smart Labeling**: Automatic feature labeling with deduplication and proper placement
 - **Fantasy Naming**: Rich descriptive names for oceans, lakes, and islands with weighted templates
 - **Label Scaling**: Toggle between scaling and constant-size label modes
+- **Labels v2.1**: Robust label generation with visibility fixes and permissive thresholds
 - **Adaptive Coastline Refinement**: Automatically adds detail points along land-sea boundaries for smoother shorelines
 - **Modular Architecture**: ES6 modules for maintainable code organization
 
@@ -162,12 +163,13 @@ urban-train/
    - Updates the display based on user settings
    - Manages sea cutoff logic and shallow water rendering
 
-8. **Label Management (`computeMapLabels` and `drawLabels` functions)**:
+8. **Label Management (`buildFeatureLabels` and `renderLabels` functions)**:
    - Automatically generates labels for geographic features (Oceans, Islands, Lakes)
    - Deduplicates labels to prevent overlapping text
    - Calculates proper centroids for label placement
    - Supports both scaling and constant-size label modes
    - Uses keyed data joins to prevent label accumulation
+   - **Labels v2.1**: Robust generation with visibility fixes and permissive thresholds
 
 9. **Fantasy Naming System (`makeNamer` function)**:
    - Generates rich descriptive names using weighted templates
@@ -223,6 +225,8 @@ urban-train/
 - Use the network tab to verify all resources are loading
 - Click the self-test badge for validation results
 - Check console.table output for detailed timing information
+- Run `debugLabels()` in console for label diagnostics
+- See `LABELS_V2_1_IMPLEMENTATION.md` for detailed label system documentation
 
 ### Modular Architecture
 
