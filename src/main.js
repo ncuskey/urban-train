@@ -236,7 +236,7 @@ function generate(count) {
 
 
   // Create fantasy namer for this generation
-  const namer = makeNamer(() => rng.random(), null); // null = no flavor pack
+  const namer = makeNamer(() => rng.random());
 
   detectNeighbors(diagram, polygons);
   
@@ -283,8 +283,7 @@ function generate(count) {
     markFeatures({
       diagram,
       polygons,
-      rng,
-      adjectives: null // No longer needed with new naming system
+      rng
     });
     
     // Compute and render map labels with proper deduplication
@@ -453,7 +452,7 @@ function computeMapLabels(polygons) {
       
       labels.push({
         id,
-        name: `${featureName} ${featureType}`,
+        name: featureName, // The generator already includes the type if appropriate
         x,
         y,
         kind: featureType.toLowerCase(),
@@ -591,7 +590,7 @@ window.testNames = function() {
   
   // Create a test namer
   const testRng = () => Math.random(); // Use Math.random for testing
-  const namer = makeNamer(testRng, null);
+  const namer = makeNamer(testRng);
   
   console.log('Ocean names:');
   for (let i = 0; i < 5; i++) {
@@ -612,18 +611,31 @@ window.testNames = function() {
 };
 
 window.testFlavorPacks = function() {
-  console.group('🎭 Flavor Packs Test');
+  console.group('🎭 New Naming System Test');
   
   const testRng = () => Math.random();
-  const flavors = ['norse', 'greek', 'desert', null];
+  const namer = makeNamer(testRng);
   
-  flavors.forEach(flavor => {
-    const namer = makeNamer(testRng, flavor);
-    console.log(`\n${flavor || 'Default'} flavor:`);
-    console.log(`  Ocean: ${namer.ocean()}`);
-    console.log(`  Lake: ${namer.lake()}`);
-    console.log(`  Island: ${namer.island()}`);
-  });
+  console.log('Ocean names (with size variations):');
+  for (let i = 0; i < 3; i++) {
+    console.log(`  Small: ${namer.ocean(0.2)}`);
+    console.log(`  Medium: ${namer.ocean(0.5)}`);
+    console.log(`  Large: ${namer.ocean(0.8)}`);
+  }
+  
+  console.log('\nLake names (with size variations):');
+  for (let i = 0; i < 3; i++) {
+    console.log(`  Small: ${namer.lake(0.1)}`);
+    console.log(`  Medium: ${namer.lake(0.3)}`);
+    console.log(`  Large: ${namer.lake(0.6)}`);
+  }
+  
+  console.log('\nIsland names (with cluster size variations):');
+  for (let i = 0; i < 3; i++) {
+    console.log(`  Single: ${namer.island(1)}`);
+    console.log(`  Cluster: ${namer.island(3)}`);
+    console.log(`  Archipelago: ${namer.island(8)}`);
+  }
   
   console.groupEnd();
 };

@@ -6,14 +6,17 @@ import { makeNamer } from './names.js';
 export function markFeatures({
   diagram,
   polygons,
-  rng,
-  adjectives
+  rng
 }) {
   // Create fantasy namer with seeded RNG
-  const namer = makeNamer(() => rng.random(), null); // null = no flavor pack
+  const namer = makeNamer(() => rng.random());
   
   var queue = []; // polygons to check
   var used = []; // checked polygons
+  
+  // Calculate total area for size normalization
+  const totalArea = polygons.length;
+  
   // define ocean cells
   var start = diagram.find(0, 0).index;
   queue.push(start);
@@ -23,7 +26,13 @@ export function markFeatures({
   if (polygons[start].featureType) {
     name = polygons[start].featureName;
   } else {
-    name = namer.ocean();
+    // Calculate ocean size (number of ocean cells)
+    let oceanSize = 0;
+    for (let i = 0; i < polygons.length; i++) {
+      if (polygons[i].height < 0.2) oceanSize++;
+    }
+    const oceanAreaNorm = oceanSize / totalArea;
+    name = namer.ocean(oceanAreaNorm);
   }
   polygons[start].featureType = type;
   polygons[start].featureName = name;
@@ -39,6 +48,7 @@ export function markFeatures({
       }
     });
   }
+  
   // define islands and lakes
   var island = 0,
     lake = 0,
@@ -62,7 +72,48 @@ export function markFeatures({
       greater = -100; // just to omit exclusion
       less = 0.2;
     }
-    name = type === "Island" ? namer.island() : namer.lake();
+    
+    // Calculate feature size and cluster size for naming
+    let featureSize = 0;
+    let clusterSize = 1; // Default for single feature
+    
+    if (type === "Island") {
+      // Count islands in this cluster
+      const tempQueue = [unmarked[0].index];
+      const tempUsed = [unmarked[0].index];
+      while (tempQueue.length > 0) {
+        const i = tempQueue[0];
+        tempQueue.shift();
+        featureSize++;
+        polygons[i].neighbors.forEach(function(e) {
+          if (tempUsed.indexOf(e) < 0 && polygons[e] && polygons[e].height >= greater && polygons[e].height < less) {
+            tempQueue.push(e);
+            tempUsed.push(e);
+          }
+        });
+      }
+      clusterSize = featureSize;
+      const islandAreaNorm = featureSize / totalArea;
+      name = namer.island(clusterSize);
+    } else {
+      // Count lakes in this cluster
+      const tempQueue = [unmarked[0].index];
+      const tempUsed = [unmarked[0].index];
+      while (tempQueue.length > 0) {
+        const i = tempQueue[0];
+        tempQueue.shift();
+        featureSize++;
+        polygons[i].neighbors.forEach(function(e) {
+          if (tempUsed.indexOf(e) < 0 && polygons[e] && polygons[e].height >= greater && polygons[e].height < less) {
+            tempQueue.push(e);
+            tempUsed.push(e);
+          }
+        });
+      }
+      const lakeAreaNorm = featureSize / totalArea;
+      name = namer.lake(lakeAreaNorm);
+    }
+    
     start = unmarked[0].index;
     polygons[start].featureType = type;
     polygons[start].featureName = name;

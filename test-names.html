@@ -1,70 +1,143 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Fantasy Names Test</title>
+    <title>Realistic Hydronyms Test</title>
     <style>
-        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
-        .test-info { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }
-        .success { color: green; }
+        body { font-family: monospace; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .name { margin: 5px 0; padding: 5px; background: #f0f0f0; }
         .error { color: red; }
-        .name-example { background: #e8f4f8; padding: 8px; margin: 5px 0; border-radius: 3px; font-family: monospace; }
+        .success { color: green; }
     </style>
 </head>
 <body>
-    <h1>Fantasy Names System Test</h1>
+    <h1>Realistic Hydronyms & Islands Test</h1>
     
-    <div class="test-info">
-        <h3>New Naming System Features:</h3>
-        <ul>
-            <li class="success">✅ Fantasy descriptive names (e.g., "Sea of Fallen Stars")</li>
-            <li class="success">✅ Weighted templates for variety</li>
-            <li class="success">✅ Seeded RNG for reproducible names</li>
-            <li class="success">✅ Uniqueness enforcement</li>
-            <li class="success">✅ Flavor packs (Norse, Greek, Desert)</li>
-        </ul>
+    <div class="test-section">
+        <h2>Ocean Names</h2>
+        <div id="oceans"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Lake Names</h2>
+        <div id="lakes"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Island Names</h2>
+        <div id="islands"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Validation Results</h2>
+        <div id="validation"></div>
     </div>
 
-    <div class="test-info">
-        <h3>Test Instructions:</h3>
-        <ol>
-            <li>Open main app: <a href="http://localhost:8001" target="_blank">http://localhost:8001</a></li>
-            <li>Generate a new map</li>
-            <li>Check the labels for fantasy names like:</li>
-        </ol>
-    </div>
-
-    <div class="test-info">
-        <h3>Expected Name Examples:</h3>
-        <div class="name-example">Oceans: "Sea of Fallen Stars", "Mare Umbra", "The Azure Deeps"</div>
-        <div class="name-example">Lakes: "Lake Sorrow", "Shimmering Lake", "Lotus Mere"</div>
-        <div class="name-example">Islands: "Dragon Isle", "Verdant Island", "Skullholm"</div>
-    </div>
-
-    <div class="test-info">
-        <h3>Console Commands:</h3>
-        <ul>
-            <li><code>testNames()</code> - Test the naming system directly</li>
-            <li><code>testFlavorPacks()</code> - Test different flavor packs</li>
-            <li><code>window.currentPolygons</code> - Check current feature names</li>
-        </ul>
-    </div>
-
-    <div class="test-info">
-        <h3>Key Improvements:</h3>
-        <ul>
-            <li><strong>Variety:</strong> 60+ adjectives, 70+ nouns, multiple templates</li>
-            <li><strong>Descriptive:</strong> Names like "Sea of Fallen Stars" instead of "Azure"</li>
-            <li><strong>Seeded:</strong> Same seed produces same names every time</li>
-            <li><strong>Unique:</strong> No duplicate names within a map</li>
-            <li><strong>Extensible:</strong> Easy to add new flavor packs</li>
-        </ul>
-    </div>
-
-    <script>
-        // Auto-redirect to main app
-        setTimeout(() => {
-            window.location.href = 'http://localhost:8001';
-        }, 10000);
+    <script type="module">
+        import { makeNamer } from './src/modules/names.js';
+        
+        // Test RNG
+        const testRng = () => Math.random();
+        const namer = makeNamer(testRng);
+        
+        // Generate test names
+        const oceans = [];
+        const lakes = [];
+        const islands = [];
+        
+        // Generate ocean names with different sizes
+        for (let i = 0; i < 10; i++) {
+            oceans.push(namer.ocean(0.2 + (i * 0.08))); // Small to large
+        }
+        
+        // Generate lake names with different sizes
+        for (let i = 0; i < 10; i++) {
+            lakes.push(namer.lake(0.1 + (i * 0.09))); // Small to large
+        }
+        
+        // Generate island names with different cluster sizes
+        for (let i = 0; i < 10; i++) {
+            islands.push(namer.island(1 + (i % 5))); // Single to cluster
+        }
+        
+        // Display results
+        document.getElementById('oceans').innerHTML = oceans.map(name => 
+            `<div class="name">${name}</div>`
+        ).join('');
+        
+        document.getElementById('lakes').innerHTML = lakes.map(name => 
+            `<div class="name">${name}</div>`
+        ).join('');
+        
+        document.getElementById('islands').innerHTML = islands.map(name => 
+            `<div class="name">${name}</div>`
+        ).join('');
+        
+        // Validation
+        const validation = [];
+        
+        // Check for tautologies
+        const tautologyPatterns = [
+            /\bLake\s+.*\s+Lake\b/i,
+            /\bOcean\s+.*\s+Ocean\b/i,
+            /\bSea\s+.*\s+Sea\b/i,
+            /\bIsland\s+.*\s+Island\b/i,
+            /\bIsle\s+.*\s+Isle\b/i,
+            /\bBasin\s+.*\s+Lake\b/i,
+            /\bMere\s+.*\s+Lake\b/i,
+            /\bLoch\s+.*\s+Lake\b/i,
+            /\bTarn\s+.*\s+Lake\b/i,
+            /\bLagoon\s+.*\s+Lake\b/i,
+            /\bPool\s+.*\s+Lake\b/i
+        ];
+        
+        let hasTautologies = false;
+        [...oceans, ...lakes, ...islands].forEach(name => {
+            tautologyPatterns.forEach(pattern => {
+                if (pattern.test(name)) {
+                    validation.push(`<div class="error">❌ Tautology found: "${name}"</div>`);
+                    hasTautologies = true;
+                }
+            });
+        });
+        
+        if (!hasTautologies) {
+            validation.push('<div class="success">✅ No tautologies found!</div>');
+        }
+        
+        // Check for classical vs modern ocean terms
+        const classicalOceans = oceans.filter(name => 
+            /Mare|Thalassa|Pelagos/i.test(name)
+        );
+        const modernOceans = oceans.filter(name => 
+            /Sea|Ocean|Gulf|Bight|Expanse|Reach|Deeps/i.test(name)
+        );
+        
+        validation.push(`<div class="success">✅ Classical oceans: ${classicalOceans.length}</div>`);
+        validation.push(`<div class="success">✅ Modern oceans: ${modernOceans.length}</div>`);
+        
+        // Check for lake patterns
+        const lakeWithLake = lakes.filter(name => /Lake/i.test(name));
+        const lakeStandalone = lakes.filter(name => 
+            /Mere|Loch|Lough|Tarn|Lagoon|Basin|Pool/i.test(name)
+        );
+        
+        validation.push(`<div class="success">✅ Lake X/X Lake: ${lakeWithLake.length}</div>`);
+        validation.push(`<div class="success">✅ Standalone types: ${lakeStandalone.length}</div>`);
+        
+        // Check for island patterns
+        const singularIslands = islands.filter(name => 
+            /Island|Isle|Islet|Atoll|Cay|Key|Skerry/i.test(name) && 
+            !/Islands|Isles|Keys|Skerries/i.test(name)
+        );
+        const pluralIslands = islands.filter(name => 
+            /Islands|Isles|Keys|Skerries/i.test(name)
+        );
+        
+        validation.push(`<div class="success">✅ Singular islands: ${singularIslands.length}</div>`);
+        validation.push(`<div class="success">✅ Plural islands: ${pluralIslands.length}</div>`);
+        
+        document.getElementById('validation').innerHTML = validation.join('');
     </script>
 </body>
 </html>

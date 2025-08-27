@@ -110,9 +110,9 @@ export function attachInteraction({
           // vanilla DOM updates (faster than jQuery for high-frequency UI)
           cellEl.textContent = cell.index;
           heightEl.textContent = cell.height.toFixed(2);
-          featureEl.textContent = cell.featureType
-            ? (cell.featureName + " " + cell.featureType)
-            : "no!";
+                  featureEl.textContent = cell.featureType
+          ? cell.featureName
+          : "no!";
             
           // Update HUD with screen coordinates for crisp positioning
           updateHUD(cell, { screenX: mx, screenY: my, worldX: wx, worldY: wy, k: t.k });
@@ -131,7 +131,7 @@ export function attachInteraction({
         cellEl.textContent = cell.index;
         heightEl.textContent = cell.height.toFixed(2);
         featureEl.textContent = cell.featureType
-          ? (cell.featureName + " " + cell.featureType)
+          ? cell.featureName
           : "no!";
           
         // Update HUD with screen coordinates for crisp positioning
