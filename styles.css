@@ -72,6 +72,25 @@ svg {
   pointer-events: none;
 }
 
+/* Different styling for different feature types */
+.place-label.island {
+  fill: #2d5016;
+  stroke: #1a2f0d;
+  font-weight: 900;
+}
+
+.place-label.ocean {
+  fill: #1e3a8a;
+  stroke: #1e40af;
+  font-weight: 700;
+}
+
+.place-label.lake {
+  fill: #0369a1;
+  stroke: #0c4a6e;
+  font-weight: 700;
+}
+
 /* HUD styling */
 #hud {
   pointer-events: none;

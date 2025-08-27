@@ -53,6 +53,12 @@ function generate(count) {
 
   // make RNG deterministic for this generation
   rng.reseed(state.seed);
+  
+  // Clear any existing labels from previous generation
+  const existingLabels = d3.select('#labels');
+  if (!existingLabels.empty()) {
+    existingLabels.selectAll('*').remove();
+  }
 
   var svg = d3.select("svg"),
     mapWidth = +svg.attr("width"),
@@ -141,17 +147,8 @@ function generate(count) {
       adjectives
     });
     
-    // Add example labels for demonstration
-    const labelData = polygons
-      .filter(p => p.featureType && p.featureName)
-      .slice(0, 5) // Limit to 5 labels for demo
-      .map((p, i) => ({
-        id: `label-${i}`,
-        x: p[0] ? p[0][0] : 0, // Use first vertex as label position
-        y: p[0] ? p[0][1] : 0,
-        name: `${p.featureName} ${p.featureType}`
-      }));
-    
+    // Compute and render map labels with proper deduplication
+    const labelData = computeMapLabels(polygons);
     drawLabels(labelData);
     drawCoastline({
       polygons,
@@ -262,21 +259,91 @@ function generate(count) {
 
 
 
+// Compute map labels with proper deduplication and positioning
+function computeMapLabels(polygons) {
+  const labels = [];
+  const seenFeatures = new Map(); // Track seen features by type + name to prevent duplicates
+
+  // Group polygons by feature type and name
+  const featureGroups = new Map();
+  
+  polygons.forEach((poly, index) => {
+    if (!poly.featureType || !poly.featureName) return;
+    
+    const key = `${poly.featureType}:${poly.featureName}`;
+    if (!featureGroups.has(key)) {
+      featureGroups.set(key, []);
+    }
+    featureGroups.get(key).push({ poly, index });
+  });
+
+  // Process each feature group
+  featureGroups.forEach((group, key) => {
+    if (group.length === 0) return;
+    
+    const firstPoly = group[0].poly;
+    const featureType = firstPoly.featureType;
+    const featureName = firstPoly.featureName;
+    
+    // Calculate centroid for the feature group
+    let totalX = 0, totalY = 0, count = 0;
+    
+    group.forEach(({ poly }) => {
+      if (poly && poly.length > 0) {
+        // Use polygon centroid (average of all vertices)
+        poly.forEach(vertex => {
+          if (vertex && vertex.length >= 2) {
+            totalX += vertex[0];
+            totalY += vertex[1];
+            count++;
+          }
+        });
+      }
+    });
+    
+    if (count > 0) {
+      const x = totalX / count;
+      const y = totalY / count;
+      
+      // Create unique ID based on feature type and name
+      const id = `${featureType.toLowerCase()}:${featureName.replace(/\s+/g, '-')}`;
+      
+      labels.push({
+        id,
+        name: `${featureName} ${featureType}`,
+        x,
+        y,
+        kind: featureType.toLowerCase(),
+        featureType,
+        featureName
+      });
+    }
+  });
+
+  return labels;
+}
+
 // Draw labels in world coordinates - scaling/positioning handled in zoom handler
 function drawLabels(data) {
   const gLabels = d3.select('#labels');
   if (gLabels.empty()) return;
   
-  const sel = gLabels.selectAll('text').data(data, d => d.id);
-  sel.enter()
-    .append('text')
-    .attr('class', 'place-label')
-    .attr('x', d => d.x)       // world coords
-    .attr('y', d => d.y)       // world coords
-    .text(d => d.name)
+  // Clear existing labels to prevent accumulation
+  gLabels.selectAll('*').remove();
+  
+  const sel = gLabels.selectAll('text.place-label')
+    .data(data, d => d.id);
+
+  const enter = sel.enter().append('text')
+    .attr('class', d => `place-label ${d.kind}`)
     .attr('text-anchor', 'middle')
     .attr('dy', '0.35em')
-    .attr('font-size', 12);    // pick a base size; it will scale if LABELS_NONSCALING=false
+    .attr('font-size', 12)
+    .text(d => d.name);
+
+  enter.merge(sel)
+    .attr('x', d => d.x)   // world coords
+    .attr('y', d => d.y);  // world coords
 
   sel.exit().remove();
 }
@@ -365,5 +432,6 @@ window.toggleBlobCenters = toggleBlobCenters;
 window.toggleStrokes = toggleStrokes;
 window.toggleLabelScaling = toggleLabelScaling; // Expose label scaling toggle
 window.drawLabels = drawLabels; // Expose label drawing function
+window.computeMapLabels = computeMapLabels; // Expose label computation function
 window.state = state; // Make state accessible globally
 window.rng = rng; // Make RNG accessible globally for debugging

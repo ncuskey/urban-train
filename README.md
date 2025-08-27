@@ -14,6 +14,8 @@ A web-based procedural map generator that creates realistic terrain with islands
 - **Self-Testing**: Automatic validation and regression testing with visual feedback
 - **Customizable Options**: Adjust various parameters like height, radius, sharpness, and more
 - **Visual Effects**: Toggle grid lines, blur effects, and sea polygon rendering
+- **Smart Labeling**: Automatic feature labeling with deduplication and proper placement
+- **Label Scaling**: Toggle between scaling and constant-size label modes
 - **Modular Architecture**: ES6 modules for maintainable code organization
 
 ## Technologies Used
@@ -72,6 +74,7 @@ A web-based procedural map generator that creates realistic terrain with islands
 - **Show Grid**: Displays grid lines between cells
 - **Draw Sea Polygons**: Shows/hides sea area polygons
 - **Show Blob Centers**: Toggles visibility of terrain center points
+- **Constant-size Labels**: Toggle between scaling and fixed-size label modes
 
 ### Self-Testing and Performance
 
@@ -151,6 +154,13 @@ urban-train/
    - Applies visual effects (blur, strokes)
    - Updates the display based on user settings
    - Manages sea cutoff logic and shallow water rendering
+
+8. **Label Management (`computeMapLabels` and `drawLabels` functions)**:
+   - Automatically generates labels for geographic features (Oceans, Islands, Lakes)
+   - Deduplicates labels to prevent overlapping text
+   - Calculates proper centroids for label placement
+   - Supports both scaling and constant-size label modes
+   - Uses keyed data joins to prevent label accumulation
 
 ### Key Algorithms
 
