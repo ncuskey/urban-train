@@ -276,7 +276,7 @@
                 }
                 
                 if (overlaps === 0) {
-                    results.push(`<div class="success">✅ Collision avoidance working perfectly - no overlaps detected</div>`);
+                    results.push(`<div class="success">✅ Collision avoidance working - ${overlaps} overlaps detected (expected for dense clusters)</div>`);
                 } else {
                     results.push(`<div class="warning">⚠️ ${overlaps} overlapping labels detected (some overlap is expected for very dense areas)</div>`);
                 }

@@ -1,261 +1,180 @@
 # Urban Train - Procedural Map Generator
 
-A web-based procedural map generator that creates realistic terrain with islands, lakes, coastlines, and interactive features using D3.js and Voronoi diagrams.
+A web-based procedural map generator that creates Voronoi-based terrain with interactive features, realistic hydronyms, and intelligent label placement.
 
 ## Features
 
-- **Procedural Terrain Generation**: Creates realistic maps using Poisson-disc sampling and Voronoi diagrams
-- **Deterministic Generation**: Seeded random number generation for reproducible maps
-- **Interactive Map Creation**: Generate maps with islands and hills automatically
-- **Random Map Generation**: Generate maps with random terrain features
-- **Smooth Zoom and Pan**: Navigate around the generated terrain with optimized performance
-- **Real-time Information**: View cell data, height values, and feature names with optimized performance
-- **Level-of-Detail (LOD)**: Automatic switching between raster and vector rendering for optimal performance
-- **Performance Monitoring**: Built-in timing and performance analysis
-- **Self-Testing**: Automatic validation and regression testing with visual feedback
-- **Customizable Options**: Adjust various parameters like height, radius, sharpness, and more
-- **Visual Effects**: Toggle grid lines, blur effects, and sea polygon rendering
-- **Smart Labeling**: Automatic feature labeling with deduplication and proper placement
-- **Fantasy Naming**: Rich descriptive names for oceans, lakes, and islands with weighted templates
-- **Label Scaling**: Toggle between scaling and constant-size label modes
-- **Labels v2.1**: Robust label generation with visibility fixes and permissive thresholds
-- **Adaptive Coastline Refinement**: Automatically adds detail points along land-sea boundaries for smoother shorelines
-- **Modular Architecture**: ES6 modules for maintainable code organization
+### 🌊 **Terrain Generation**
+- **Voronoi-based terrain** with realistic heightmaps
+- **Feature detection**: Oceans, lakes, islands with connected components
+- **Coastal refinement** with automatic coastline tracing
+- **Deterministic generation** with seedable RNG
 
-## Technologies Used
+### 🏷️ **Label Management**
+- **All features get names**: No minimum size thresholds - even the smallest lakes and islands receive appropriate names
+- **Size-aware naming**: Uses feature area to select appropriate terms (e.g., "Mere" vs "Lake" vs "Ocean")
+- **Advanced collision avoidance**: Cluster-based jiggling algorithm that optimizes placement of nearby labels simultaneously
+- **Size-based zoom filtering**: Features appear progressively based on area and zoom level
 
-- **D3.js v5**: For SVG manipulation, Voronoi diagrams, and data visualization
-- **jQuery**: For DOM manipulation and event handling
-- **HTML5/CSS3**: For structure and styling
-- **ES6 Modules**: For modern JavaScript organization and modular architecture
-- **Deterministic RNG**: Custom sfc32 + xmur3 implementation for seeded generation
+### 🎯 **Interactive Features**
+- **Pan and zoom** with smooth performance
+- **Hover HUD** with feature information
+- **Autofit to land** for optimal initial view
+- **Performance monitoring** with built-in timers
 
-## Getting Started
+## Key Algorithms
 
-### Prerequisites
+### **Cluster Jiggling Algorithm**
+The label placement system uses an innovative "cluster jiggling" approach:
+- **Cluster detection**: Groups nearby labels (within 200px) for simultaneous optimization
+- **Systematic combination testing**: For small clusters (≤3 labels), tries ALL possible combinations (up to 729 combinations)
+- **Distance optimization**: Selects placement that minimizes total distance from feature centroids
+- **Intelligent fallback**: Uses overlapped placement only when necessary
 
-- A modern web browser (Chrome, Firefox, Safari, Edge)
-- Python 3 (for local development server)
+### **Size-Based Zoom Filtering**
+- **Oceans**: Always visible
+- **Lakes**: Tiny (50+) at zoom 2x, Small (200+) at zoom 1x, Medium (800+) at zoom 0.5x, All at zoom 4x
+- **Islands**: Tiny (30+) at zoom 1.5x, Small (150+) at zoom 0.8x, Medium (600+) at zoom 0.4x, All at zoom 3x
 
-### Installation
+### **Collision Avoidance**
+- **Quadtree spatial indexing** for efficient collision detection
+- **Cardinal direction offsets** (9 positions per label: centroid + 8 directions)
+- **Priority-based placement** (oceans > lakes > islands)
+- **Visual indicators** for overlapped labels (reduced opacity)
 
-1. Clone the repository:
+## Quick Start
+
+1. **Clone and serve**:
    ```bash
-   git clone <repository-url>
+   git clone <repository>
    cd urban-train
-   ```
-
-2. Start a local development server:
-   ```bash
-   python3 -m http.server 8080
-   ```
-
-3. Open your browser and navigate to:
-   ```
-   http://localhost:8080
-   ```
-
-## How to Use
-
-### Basic Controls
-
-- **Random Map**: Creates a map with 5 random terrain features
-- **Options**: Toggles the options panel for advanced settings
-
-### Interactive Features
-
-- **Mouse Movement**: See real-time information about the cell under your cursor (optimized with throttling and change detection)
-- **Zoom**: Use mouse wheel or pinch gestures to zoom in/out (0.5x to 32x scale)
-- **Pan**: Click and drag to move around the map
-- **Auto-fit**: Automatically fits the map to show all land masses
-- **Performance Optimized**: LOD system switches between raster and vector rendering based on zoom level
-- **Fantasy Names**: Rich descriptive names like "Sea of Fallen Stars" and "Dragon Isle"
-
-### Advanced Options
-
-- **Points Radius**: Controls the density of the Voronoi cells
-- **Max Height**: Sets the maximum height for terrain features
-- **Blob Radius**: Controls how far terrain features spread
-- **Blob Sharpness**: Adds randomness to terrain generation
-- **Blur**: Adds stroke effects to terrain polygons
-- **Show Grid**: Displays grid lines between cells
-- **Draw Sea Polygons**: Shows/hides sea area polygons
-- **Show Blob Centers**: Toggles visibility of terrain center points
-- **Constant-size Labels**: Toggle between scaling and fixed-size label modes
-
-### Self-Testing and Performance
-
-- **Self-Test Badge**: Click the badge in the bottom-right corner to see test results
-- **Performance Timing**: Check browser console for detailed timing information
-- **Deterministic Maps**: Same seed produces identical terrain every time
-
-## File Structure
-
-```
-urban-train/
-├── index.html              # Main HTML file with UI controls
-├── styles.css              # CSS styling for the application
-├── src/
-│   ├── main.js             # Main JavaScript application logic
-│   ├── core/
-│   │   ├── rng.js          # Deterministic, seedable RNG
-│   │   └── timers.js       # Performance timing utilities
-│   ├── modules/
-│   │   ├── geometry.js     # Voronoi diagram and neighbor detection
-│   │   ├── heightmap.js    # Terrain generation and height mapping
-│   │   ├── features.js     # Geographic feature detection and naming
-│   │   ├── coastline.js    # Coastline tracing and path generation
-│   │   ├── rendering.js    # Polygon rendering and visual effects
-│   │   └── interaction.js  # Zoom and hover HUD functionality
-│   ├── render/
-│   │   └── layers.js       # SVG layer management
-│   └── selftest.js         # Regression testing and validation
-├── README.md               # This file
-└── CODEMAP.md              # Detailed code documentation
-```
-
-## Code Architecture
-
-### Modular Components
-
-1. **Core Modules**:
-   - **RNG (`src/core/rng.js`)**: Deterministic, seedable random number generation
-   - **Timers (`src/core/timers.js`)**: Performance monitoring and timing utilities
-   - **Layers (`src/render/layers.js`)**: SVG layer management and organization
-   - **Self-Tests (`src/selftest.js`)**: Validation and regression testing
-
-2. **Feature Modules**:
-   - **Geometry (`src/modules/geometry.js`)**: Voronoi diagram generation and neighbor detection
-   - **Heightmap (`src/modules/heightmap.js`)**: Terrain generation and height mapping
-   - **Features (`src/modules/features.js`)**: Geographic feature detection and naming
-   - **Names (`src/modules/names.js`)**: Fantasy descriptive naming system with weighted templates
-   - **Coastline (`src/modules/coastline.js`)**: Coastline tracing and path generation
-   - **Rendering (`src/modules/rendering.js`)**: Polygon rendering and visual effects
-   - **Interaction (`src/modules/interaction.js`)**: Zoom, pan, and hover HUD functionality with LOD optimization
-
-3. **Map Generation (`generate` function)**:
-   - Sets up SVG canvas and D3.js elements
-   - Creates Poisson-disc sampling for natural point distribution
-   - Generates Voronoi diagram from sampled points
-   - Initializes interactive features via interaction module
-   - Integrates modular components for timing and validation
-
-4. **Terrain Generation (`add` function)**:
-   - Adds height values to polygons based on user input
-   - Spreads terrain features to neighboring cells
-   - Supports different terrain types (islands vs hills)
-   - Uses seeded RNG for deterministic behavior
-
-5. **Feature Detection (`markFeatures` function)**:
-   - Identifies oceans, islands, and lakes
-   - Assigns random names to geographic features
-   - Groups connected areas into coherent regions
-
-6. **Coastline Generation (`drawCoastline` function)**:
-   - Detects boundaries between land and water
-   - Creates smooth coastline paths
-   - Handles both island coastlines and lake shorelines
-   - Marks shallow water areas
-
-7. **Visualization (`drawPolygons` function from `src/modules/rendering.js`)**:
-   - Renders terrain polygons with color-coded heights
-   - Applies visual effects (blur, strokes)
-   - Updates the display based on user settings
-   - Manages sea cutoff logic and shallow water rendering
-
-8. **Label Management (`buildFeatureLabels` and `renderLabels` functions)**:
-   - Automatically generates labels for geographic features (Oceans, Islands, Lakes)
-   - **No minimum size thresholds** - even the smallest lakes and islands get names
-   - **Advanced collision avoidance** using quadtree spatial indexing and spiral placement
-   - **Size-based zoom filtering** - features appear based on area and zoom level
-   - Calculates proper centroids for label placement
-   - Supports both scaling and constant-size label modes
-   - Uses keyed data joins to prevent label accumulation
-   - **Labels v2.1**: Robust generation with collision avoidance and size-based filtering
-
-9. **Fantasy Naming System (`makeNamer` function)**:
-   - Generates rich descriptive names using weighted templates
-   - Supports oceans ("Sea of Fallen Stars"), lakes ("Lake Sorrow"), and islands ("Dragon Isle")
-   - Enforces uniqueness within each map generation
-   - Includes flavor packs for different themes (Norse, Greek, Desert)
-   - Uses seeded RNG for reproducible name generation
-
-9. **Interaction System (`attachInteraction` function)**:
-   - Provides smooth zoom and pan functionality (0.5x to 32x scale)
-   - Implements real-time hover HUD with cell information
-   - Features Level-of-Detail (LOD) system for performance optimization
-   - Uses spatial picking for efficient cell selection
-   - Supports auto-fit functionality for optimal map viewing
-
-### Key Algorithms
-
-- **Poisson-disc Sampling**: Creates evenly distributed points for natural-looking terrain
-- **Voronoi Diagrams**: Divides the map into cellular regions
-- **Flood Fill**: Identifies connected regions (oceans, islands, lakes)
-- **Path Finding**: Creates continuous coastline paths
-- **Deterministic RNG**: sfc32 + xmur3 algorithms for reproducible generation
-- **Performance Timing**: RequestAnimationFrame-based timing for accurate measurements
-- **Level-of-Detail (LOD)**: Automatic switching between raster and vector rendering based on zoom level
-- **Spatial Picking**: Efficient cell selection using spatial indexing instead of DOM hit-testing
-- **Fantasy Naming**: Weighted template system for generating descriptive geographic names
-- **Adaptive Coastline Refinement**: Automatically subdivides coastal edges for smoother shorelines
-- **Collision Avoidance**: Quadtree-based spatial indexing with spiral placement algorithm
-- **Size-Based Zoom Filtering**: Progressive disclosure of features based on area and zoom level
-
-## Browser Compatibility
-
-- Chrome 60+
-- Firefox 55+
-- Safari 12+
-- Edge 79+
-
-## Development
-
-### Local Development
-
-1. Start the development server:
-   ```bash
    python3 -m http.server 8000
    ```
 
-2. Open `http://localhost:8000` in your browser
+2. **Open in browser**:
+   ```
+   http://localhost:8000
+   ```
 
-3. Make changes to the code and refresh the page to see updates
+3. **Interact**:
+   - **Pan**: Click and drag
+   - **Zoom**: Mouse wheel or pinch
+   - **Debug**: Open console and run `debugLabels()`
 
-### Debugging
+## Debugging
 
-- Open browser developer tools (F12)
-- Check the console for any JavaScript errors and performance timing data
-- Use the network tab to verify all resources are loading
-- Click the self-test badge for validation results
-- Check console.table output for detailed timing information
-- Run `debugLabels()` in console for label diagnostics
-- See `LABELS_V2_1_IMPLEMENTATION.md` for detailed label system documentation
-- Open `test-collision-zoom.html` for interactive collision avoidance and zoom filtering tests
+### **Console Commands**
+```javascript
+// Comprehensive label inspection
+debugLabels()
 
-### Modular Architecture
+// Check self-tests
+runSelfTests()
 
-The project has been refactored with a comprehensive modular architecture:
-- **Deterministic generation** with seeded RNG
-- **Performance monitoring** with built-in timers
-- **Self-testing** with visual feedback
-- **ES6 modules** for maintainable code organization
-- **Feature extraction** into specialized modules (geometry, heightmap, features, coastline, rendering, interaction)
+// Performance monitoring
+Timers.report()
+```
+
+### **Test Pages**
+- **Main app**: `index.html`
+- **Label testing**: `test-labels-v2.1.html`
+- **Collision testing**: `test-collision-zoom.html`
+- **Zoom testing**: `test-label-zoom.html`
+
+## Architecture
+
+### **Core Modules**
+- **`geometry.js`**: Poisson-disc sampling, Voronoi construction, neighbor detection
+- **`heightmap.js`**: Terrain generation and height assignment
+- **`features.js`**: Feature marking (ocean/lake/island detection)
+- **`labels.js`**: Label generation, placement, and zoom filtering
+- **`names.js`**: Fantasy hydronyms and island names
+- **`interaction.js`**: Pan/zoom and hover HUD
+- **`autofit.js`**: Land bounding box and fit-to-view
+
+### **Data Flow**
+1. **Seed & Sampling** → `rng`, `poissonDiscSampler`
+2. **Voronoi** → `buildVoronoi`, `detectNeighbors`
+3. **Heightmap** → `randomMap` (heights ∈ [0,1])
+4. **Features** → `markFeatures` (sets `featureType`, components)
+5. **Labels** → `buildFeatureLabels` → `placeLabelsAvoidingCollisions` → `filterByZoom`
+6. **Interaction** → `attachInteraction` (zoom, hover HUD)
+7. **Autofit** → `fitToLand` (uses `computeLandBBox`)
+
+## Configuration
+
+### **Label Settings**
+```javascript
+{
+  minLakeArea: 0,      // No minimum size - all lakes get names
+  minIslandArea: 0,    // No minimum size - all islands get names
+  maxOceans: 3,
+  maxLakes: 15,
+  maxIslands: 20
+}
+```
+
+### **Collision Avoidance**
+```javascript
+{
+  clusterRadius: 200,  // Pixels for cluster detection
+  maxCombinations: 1000, // Maximum combinations to try
+  offsetDistance: 0.6  // 60% of label size for offsets
+}
+```
+
+## Performance
+
+### **Optimizations**
+- **RequestAnimationFrame** for hover/HUD throttling
+- **Quadtree collision detection** for O(log n) spatial queries
+- **Combination limiting** to prevent exponential growth
+- **Early termination** when collision-free placement found
+- **Layer management** to minimize DOM manipulation
+
+### **Memory Usage**
+- **Cluster formation**: O(n²) for initial clustering
+- **Combination generation**: O(9^n) for small clusters, O(500) for large
+- **Collision detection**: O(log n) per check using quadtree
+
+## Development
+
+### **Tech Stack**
+- **HTML5 + ES Modules** (no bundler)
+- **D3.js v5** (global, no imports)
+- **jQuery 3.6** (minimal usage)
+- **Static file serving**
+
+### **File Structure**
+```
+/src/
+  /core/          # RNG, timers
+  /modules/       # Main algorithms
+  /render/        # Layer management
+  /terrain/       # Terrain data
+  main.js         # App entry point
+  selftest.js     # Invariants and testing
+```
+
+### **Testing**
+- **Self-tests**: `runSelfTests()` validates invariants
+- **Focused tests**: `test-*.html` pages for specific functionality
+- **Manual verification**: Console debugging and visual inspection
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+### **Guidelines**
+- **No new dependencies** - keep it vanilla
+- **Performance first** - avoid layout thrash
+- **Deterministic generation** - maintain seedable RNG
+- **Modular design** - keep functions focused and testable
+
+### **Debugging Tips**
+- Use `debugLabels()` for comprehensive inspection
+- Check console for placement statistics
+- Monitor performance with built-in timers
+- Test with various zoom levels and feature densities
 
 ## License
 
-This project is open source and available under the [MIT License](LICENSE).
-
-## Acknowledgments
-
-- **D3.js**: For powerful data visualization capabilities
-- **Poisson-disc Sampling**: Algorithm adapted from Jason Davies' implementation
-- **Voronoi Diagrams**: For creating natural cellular terrain patterns
+[Add your license here]

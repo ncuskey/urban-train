@@ -11,7 +11,7 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction } from "./modules/interaction.js";
 import { fitToLand } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
-import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility } from "./modules/labels.js";
+import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels } from "./modules/labels.js";
 
 // === Minimal Perf HUD ==========================================
 const Perf = (() => {
@@ -447,6 +447,7 @@ function generate(count) {
   
   // Expose label configuration globally
   // window.LABELS_NONSCALING = LABELS_NONSCALING; // DEPRECATED: Now using per-label transform system
+  window.debugLabels = debugLabels; // Expose debug function globally
 
   // OPTIONAL: auto-fit after generation
   const AUTO_FIT = true;
