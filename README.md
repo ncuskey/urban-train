@@ -75,11 +75,15 @@ runSelfTests()
 Timers.report()
 ```
 
+### **Development Tools**
+For comprehensive debugging and testing, see the `/dev/` directory:
+- **Test pages**: Focused testing of specific features
+- **Debug scripts**: Console-based diagnostics
+- **Performance tools**: Monitoring and optimization helpers
+
 ### **Test Pages**
 - **Main app**: `index.html`
-- **Label testing**: `test-labels-v2.1.html`
-- **Collision testing**: `test-collision-zoom.html`
-- **Zoom testing**: `test-label-zoom.html`
+- **Development tools**: See `/dev/` directory for comprehensive test pages and debugging tools
 
 ## Architecture
 

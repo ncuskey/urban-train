@@ -127,7 +127,7 @@ Web-based procedural map generator that constructs **Voronoi-based terrain**, de
 ---
 
 ## Testing & Verification
-- Run focused test pages: `test-labels-v2.html`, `test-labels-v2.1.html`, `test-svg-zoom.html`, `test-refine.html`, etc.
+- Run focused test pages: `/dev/test-labels-v2.html`, `/dev/test-labels-v2.1.html`, `/dev/test-svg-zoom.html`, `/dev/test-refine.html`, etc.
 - Ensure `runSelfTests()` passes: heights in-range, neighbor symmetry, optional river widths non-negative, etc.
 - Manually verify:
   - Pan/zoom works smoothly.
@@ -142,6 +142,7 @@ Web-based procedural map generator that constructs **Voronoi-based terrain**, de
 - Include **WHY** in comments for any algorithmic change.
 - Update/extend self-tests if you change invariants.
 - Add a quick "How to verify" note in the PR description (which test page to load, what to expect).
+- For debugging, see `/dev/README.md` for comprehensive test pages and tools.
 - Avoid mass reformatting—respect existing style to keep diffs readable.
 
 ---

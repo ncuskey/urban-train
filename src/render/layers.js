@@ -59,16 +59,20 @@ export function ensureLayers(svg) {
 export function ensureLabelSubgroups(svg) {
   const labels = svg.select('#labels');
   
-  ['labels-features', 'labels-towns', 'labels-geo'].forEach(id => {
-    if (labels.select(`#${id}`).empty()) {
-      labels.append('g').attr('id', id);
-    }
-  });
+  // Create labels-features subgroup (currently the only one used)
+  if (labels.select('#labels-features').empty()) {
+    labels.append('g').attr('id', 'labels-features');
+  }
   
-  // Keep subgroups on top as well
+  // TODO: Future label subgroups for different label types
+  // - labels-towns: For settlement/city labels when town generation is implemented
+  // - labels-geo: For geographic feature labels (mountains, rivers, etc.) when terrain features are added
+  // When implementing, uncomment and add:
+  // if (labels.select('#labels-towns').empty()) labels.append('g').attr('id', 'labels-towns');
+  // if (labels.select('#labels-geo').empty()) labels.append('g').attr('id', 'labels-geo');
+  
+  // Keep labels-features on top
   labels.select('#labels-features').raise();
-  labels.select('#labels-towns').raise();
-  labels.select('#labels-geo').raise();
 }
 
 export function clearLayer(layer) {

@@ -146,7 +146,7 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
   // Place high priority first (oceans > lakes > islands)
   labels.sort((a,b)=> b.priority - a.priority);
 
-  console.log('[labels] DEBUG: Collision avoidance starting with', labels.length, 'labels');
+  if (window.DEBUG) console.log('[labels] DEBUG: Collision avoidance starting with', labels.length, 'labels');
 
   // Group labels by proximity to find clusters
   const clusters = findLabelClusters(labels);
@@ -170,23 +170,29 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
   const spiralPlacements = placed.length - centroidPlacements - offsetPlacements;
   const overlappedPlacements = placed.filter(l => l.overlapped).length;
   
-  console.log('[labels] DEBUG: Collision avoidance placed', placed.length, 'out of', labels.length, 'labels');
-  console.log('[labels] DEBUG: Placement stats - centroid:', centroidPlacements, 'offset:', offsetPlacements, 'spiral:', spiralPlacements, 'overlapped:', overlappedPlacements);
+    if (window.DEBUG) {
+    console.log('[labels] DEBUG: Collision avoidance placed', placed.length, 'out of', labels.length, 'labels');
+    console.log('[labels] DEBUG: Placement stats - centroid:', centroidPlacements, 'offset:', offsetPlacements, 'spiral:', spiralPlacements, 'overlapped:', overlappedPlacements);
+  }
   
   // Log scale distribution
-  const scales = placed.map(l => l.scale || 1.0);
-  const avgScale = scales.reduce((a, b) => a + b, 0) / scales.length;
-  console.log('[labels] DEBUG: Average label scale:', avgScale.toFixed(2), 'range:', Math.min(...scales).toFixed(2), '-', Math.max(...scales).toFixed(2));
+  if (window.DEBUG) {
+    const scales = placed.map(l => l.scale || 1.0);
+    const avgScale = scales.reduce((a, b) => a + b, 0) / scales.length;
+    console.log('[labels] DEBUG: Average label scale:', avgScale.toFixed(2), 'range:', Math.min(...scales).toFixed(2), '-', Math.max(...scales).toFixed(2));
+  }
   
   // Log distance statistics
-  const distances = placed.map(l => {
-    const dx = l.placed.x - l.x;
-    const dy = l.placed.y - l.y;
-    return Math.sqrt(dx*dx + dy*dy);
-  });
-  const avgDistance = distances.reduce((a, b) => a + b, 0) / distances.length;
-  const maxDistance = Math.max(...distances);
-  console.log('[labels] DEBUG: Distance stats - avg:', avgDistance.toFixed(1), 'max:', maxDistance.toFixed(1));
+  if (window.DEBUG) {
+    const distances = placed.map(l => {
+      const dx = l.placed.x - l.x;
+      const dy = l.placed.y - l.y;
+      return Math.sqrt(dx*dx + dy*dy);
+    });
+    const avgDistance = distances.reduce((a, b) => a + b, 0) / distances.length;
+    const maxDistance = Math.max(...distances);
+    console.log('[labels] DEBUG: Distance stats - avg:', avgDistance.toFixed(1), 'max:', maxDistance.toFixed(1));
+  }
   
   // Warn about labels placed far from their features
   const farLabels = placed.filter(l => {
@@ -203,6 +209,10 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
       distance: Math.sqrt((l.placed.x - l.x)**2 + (l.placed.y - l.y)**2).toFixed(1)
     })));
   }
+  
+  // Sort placed labels once by priority and area (for efficient zoom filtering)
+  const sort = (a,b) => (b.priority??0)-(a.priority??0) || (b.area??0)-(a.area??0);
+  placed.sort(sort);
   
   return placed;
 }
@@ -231,7 +241,7 @@ function findLabelClusters(labels) {
     clusters.push(cluster);
   }
   
-  console.log('[labels] DEBUG: Found', clusters.length, 'clusters:', clusters.map(c => c.length));
+  if (window.DEBUG) console.log('[labels] DEBUG: Found', clusters.length, 'clusters:', clusters.map(c => c.length));
   
   return clusters;
 }
@@ -249,6 +259,10 @@ function placeClusterWithJiggle(cluster) {
 
 function placeSingleLabel(lab) {
   // Size-based label dimensions
+  // OPTIMIZATION: Current approach uses text.length * 8 for fast estimation
+  // For tighter packing, could measure actual width with getComputedTextLength()
+  // after DOM creation, store w back onto datum, and keep quadtree deterministic
+  // Tradeoff: performance vs precision - current approach is pragmatic
   const baseWidth = Math.max(80, Math.min(500, lab.text.length * 8));
   const baseHeight = 18;
   const areaScale = Math.min(1.0, Math.max(0.6, lab.area / 1000));
@@ -283,6 +297,7 @@ function placeSingleLabel(lab) {
 
 function tryClusterJiggle(cluster) {
   // Calculate label dimensions for all labels in cluster
+  // OPTIMIZATION: Uses text.length * 8 for fast estimation (see placeSingleLabel for details)
   const labelsWithDims = cluster.map(lab => {
     const baseWidth = Math.max(80, Math.min(500, lab.text.length * 8));
     const baseHeight = 18;
@@ -364,7 +379,7 @@ function tryClusterJiggle(cluster) {
     }));
   }
   
-  console.log(`[labels] DEBUG: Cluster of ${cluster.length} labels tried ${combinationsTried} combinations, found ${bestPlacement ? 'collision-free' : 'overlapped'} placement`);
+  if (window.DEBUG) console.log(`[labels] DEBUG: Cluster of ${cluster.length} labels tried ${combinationsTried} combinations, found ${bestPlacement ? 'collision-free' : 'overlapped'} placement`);
   
   return bestPlacement;
 }
@@ -448,103 +463,37 @@ function checkPartialClear(qt, x, y, w, h, area = 0) {
   return overlapCount === 0 || (overlapCount / totalChecks) < maxOverlap;
 }
 
-// ---- Zoom filtering with size-based visibility ----
+// ---- Zoom filtering with progressive reveal ----
 export function filterByZoom(placed, k) {
-  // bucket by kind
+  // Bucket by kind (placed is already sorted by priority and area)
   const buckets = { ocean: [], lake: [], island: [], other: [] };
-  for (const l of placed) {
-    const kind = (l && (l.kind === 'ocean' || l.kind === 'lake' || l.kind === 'island')) ? l.kind : 'other';
-    buckets[kind].push(l);
-  }
+  for (const l of placed) (buckets[l.kind] ?? buckets.other).push(l);
 
-  // prefer bigger/prioritized first
-  const sortFn = (a, b) =>
-    (b.priority ?? 0) - (a.priority ?? 0) || (b.area ?? 0) - (a.area ?? 0);
-
-  Object.values(buckets).forEach(arr => arr.sort(sortFn));
-
-  // Size-based visibility thresholds
-  const sizeThresholds = {
-    ocean: { min: 0, max: Infinity }, // Oceans always visible
-    lake: { 
-      tiny: 50,    // Very small lakes
-      small: 200,  // Small lakes  
-      medium: 800, // Medium lakes
-      large: 2000  // Large lakes
-    },
-    island: {
-      tiny: 30,    // Very small islands
-      small: 150,  // Small islands
-      medium: 600, // Medium islands
-      large: 1500  // Large islands
-    }
-  };
-
-  // Zoom-based visibility rules
-  const getVisibilityForZoom = (kind, area, k) => {
-    if (kind === 'ocean') return true; // Oceans always visible
-    
-    if (kind === 'lake') {
-      if (k >= 4) return true; // All lakes visible at high zoom
-      if (k >= 2 && area >= sizeThresholds.lake.tiny) return true; // Small+ lakes at medium zoom
-      if (k >= 1 && area >= sizeThresholds.lake.small) return true; // Medium+ lakes at low zoom
-      if (k >= 0.5 && area >= sizeThresholds.lake.medium) return true; // Large lakes at very low zoom
-      return false;
-    }
-    
-    if (kind === 'island') {
-      if (k >= 3) return true; // All islands visible at high zoom
-      if (k >= 1.5 && area >= sizeThresholds.island.tiny) return true; // Small+ islands at medium zoom
-      if (k >= 0.8 && area >= sizeThresholds.island.small) return true; // Medium+ islands at low zoom
-      if (k >= 0.4 && area >= sizeThresholds.island.medium) return true; // Large islands at very low zoom
-      return false;
-    }
-    
-    return false;
-  };
-
-  // Apply size-based filtering
-  const filtered = [];
-  for (const bucket of Object.values(buckets)) {
-    for (const label of bucket) {
-      if (getVisibilityForZoom(label.kind, label.area, k)) {
-        filtered.push(label);
-      }
-    }
-  }
-
-  // Apply maximum limits to prevent overcrowding
-  const maxLimits = {
+  const lim = {
     ocean: 4,
-    lake: k < 1 ? 15 : k < 2 ? 40 : k < 4 ? 80 : 200,
-    island: k < 1 ? 20 : k < 2 ? 50 : k < 3 ? 100 : 300,
-    other: k < 2 ? 0 : k < 4 ? 10 : 30
+    lake:   k < 1   ? 3  : k < 2 ? 10 : k < 4 ? 25 : 80,
+    island: k < 1   ? 3  : k < 2 ? 14 : k < 4 ? 40 : 120,
+    other:  k < 2   ? 0  : k < 4 ? 10 : 30
   };
 
-  // Re-bucket and apply limits
-  const finalBuckets = { ocean: [], lake: [], island: [], other: [] };
-  for (const label of filtered) {
-    const kind = label.kind || 'other';
-    if (finalBuckets[kind].length < maxLimits[kind]) {
-      finalBuckets[kind].push(label);
-    }
+  const out = [
+    ...buckets.ocean.slice(0, lim.ocean),
+    ...buckets.lake.slice(0, lim.lake),
+    ...buckets.island.slice(0, lim.island),
+    ...buckets.other.slice(0, lim.other),
+  ];
+
+  // Debug logging
+  if (window.DEBUG) {
+    console.log(`[labels] zoom filter: k=${k.toFixed(2)}, total=${placed.length}, visible=${out.length}`);
+    console.log(`[labels] visible by kind:`, {
+      ocean: buckets.ocean.slice(0, lim.ocean).length,
+      lake: buckets.lake.slice(0, lim.lake).length,
+      island: buckets.island.slice(0, lim.island).length,
+      other: buckets.other.slice(0, lim.other).length
+    });
   }
 
-  const out = [];
-  out.push(...finalBuckets.ocean);
-  out.push(...finalBuckets.lake);
-  out.push(...finalBuckets.island);
-  out.push(...finalBuckets.other);
-  
-  // Debug logging for size-based filtering
-  console.log(`[labels] zoom filter: k=${k.toFixed(2)}, total=${placed.length}, visible=${out.length}`);
-  console.log(`[labels] visible by kind:`, {
-    ocean: finalBuckets.ocean.length,
-    lake: finalBuckets.lake.length,
-    island: finalBuckets.island.length,
-    other: finalBuckets.other.length
-  });
-  
   return out;
 }
 
@@ -612,8 +561,10 @@ export function debugLabels() {
 export function renderLabels({ svg, placed, groupId, k = 1 }) {
   const g = svg.select(`#${groupId}`);
   
-  console.log('[labels] DEBUG: renderLabels called with', placed.length, 'labels, groupId:', groupId);
-  console.log('[labels] DEBUG: Group exists:', !g.empty(), 'Group node:', g.node());
+    if (window.DEBUG) {
+    console.log('[labels] DEBUG: renderLabels called with', placed.length, 'labels, groupId:', groupId);
+    console.log('[labels] DEBUG: Group exists:', !g.empty(), 'Group node:', g.node());
+  }
   
   // DEBUG: Check for invalid label data
   const invalidLabels = placed.filter(l => {
@@ -639,7 +590,15 @@ export function renderLabels({ svg, placed, groupId, k = 1 }) {
   const sel = g.selectAll('g.label').data(placed, d => d.id);
   const enter = sel.enter().append('g').attr('class', 'label');
 
-  console.log('[labels] DEBUG: Enter selection size:', enter.size());
+  if (window.DEBUG) console.log('[labels] DEBUG: Enter selection size:', enter.size());
+
+  // OPTIMIZATION OPPORTUNITY: For tighter packing, could measure actual text width here:
+  // enter.each(function(d) {
+  //   const textNode = d3.select(this).select('text.fill');
+  //   const actualWidth = textNode.node().getComputedTextLength();
+  //   d.w = actualWidth; // Update datum with measured width
+  // });
+  // Then re-run collision avoidance with accurate widths (keep quadtree deterministic)
 
   enter.append('text').attr('class', 'stroke');
   enter.append('text').attr('class', 'fill');
@@ -674,7 +633,7 @@ export function renderLabels({ svg, placed, groupId, k = 1 }) {
 
   sel.exit().remove();
   
-  console.log('[labels] DEBUG: Final DOM count:', g.selectAll('g.label').size());
+  if (window.DEBUG) console.log('[labels] DEBUG: Final DOM count:', g.selectAll('g.label').size());
 }
 
 // On zoom: only update each label's inverse scale; do NOT recalc placement
@@ -696,12 +655,12 @@ export function updateLabelVisibility({ svg, groupId, placed, k, filterByZoom })
 
   // DEBUG: counts
   const visCount = sel.filter(function(){ return d3.select(this).style('display') !== 'none'; }).size();
-  console.log(`[labels] updateLabelVisibility: total=${sel.size()} visible=${visCount} k=${k.toFixed(2)}`);
+  if (window.DEBUG) console.log(`[labels] updateLabelVisibility: total=${sel.size()} visible=${visCount} k=${k.toFixed(2)}`);
   
   // DEBUG: Check for missing labels
   if (visibleIds.size !== visCount) {
     console.warn('[labels] WARNING: Visibility mismatch detected!');
-    console.log('[labels] Expected visible IDs:', Array.from(visibleIds));
+    if (window.DEBUG) console.log('[labels] Expected visible IDs:', Array.from(visibleIds));
     
     // Check each visible label's DOM state
     sel.each(function(d) {

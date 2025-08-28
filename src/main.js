@@ -1,3 +1,6 @@
+// Global debug toggle - flip to true when tuning
+window.DEBUG = false;
+
 import { RNG } from "./core/rng.js";
 import { Timers } from "./core/timers.js";
 import { ensureLayers, ensureLabelSubgroups } from "./render/layers.js";
@@ -360,20 +363,24 @@ function generate(count) {
       namePickers: makeNamer(rng) // or whatever you already use
     });
 
-    console.log('[labels] DEBUG: Built feature labels:', {
-      total: featureLabels.length,
-      oceans: featureLabels.filter(l=>l.kind==='ocean').length,
-      lakes: featureLabels.filter(l=>l.kind==='lake').length,
-      islands: featureLabels.filter(l=>l.kind==='island').length,
-      sample: featureLabels.slice(0, 3).map(l => ({ kind: l.kind, text: l.text, area: l.area }))
-    });
+    if (window.DEBUG) {
+      console.log('[labels] DEBUG: Built feature labels:', {
+        total: featureLabels.length,
+        oceans: featureLabels.filter(l=>l.kind==='ocean').length,
+        lakes: featureLabels.filter(l=>l.kind==='lake').length,
+        islands: featureLabels.filter(l=>l.kind==='island').length,
+        sample: featureLabels.slice(0, 3).map(l => ({ kind: l.kind, text: l.text, area: l.area }))
+      });
+    }
 
     const placedFeatures = placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels });
     
-    console.log('[labels] DEBUG: After collision avoidance:', {
-      placed: placedFeatures.length,
-      sample: placedFeatures.slice(0, 3).map(l => ({ kind: l.kind, text: l.text, area: l.area }))
-    });
+    if (window.DEBUG) {
+      console.log('[labels] DEBUG: After collision avoidance:', {
+        placed: placedFeatures.length,
+        sample: placedFeatures.slice(0, 3).map(l => ({ kind: l.kind, text: l.text, area: l.area }))
+      });
+    }
 
     renderLabels({ svg: svgSel, placed: placedFeatures, groupId: 'labels-features', k: 1 });
 
@@ -390,12 +397,14 @@ function generate(count) {
       filterByZoom
     });
 
-    console.log('[labels] after build:', {
-      built: featureLabels.length, placed: placedFeatures.length
-    });
+    if (window.DEBUG) {
+      console.log('[labels] after build:', {
+        built: featureLabels.length, placed: placedFeatures.length
+      });
 
-    // Quick sanity log
-    console.log(`[labels] oceans=${featureLabels.filter(l=>l.kind==='ocean').length}, lakes=${featureLabels.filter(l=>l.kind==='lake').length}, islands=${featureLabels.filter(l=>l.kind==='island').length}, placed=${placedFeatures.length}`);
+      // Quick sanity log
+      console.log(`[labels] oceans=${featureLabels.filter(l=>l.kind==='ocean').length}, lakes=${featureLabels.filter(l=>l.kind==='lake').length}, islands=${featureLabels.filter(l=>l.kind==='island').length}, placed=${placedFeatures.length}`);
+    }
     
     // Old label system removed - using new feature labels
     drawCoastline({
@@ -517,94 +526,7 @@ function generate(count) {
 
 
 
-// Compute map labels with proper deduplication and positioning
-function computeMapLabels(polygons) {
-  const labels = [];
-  const seenFeatures = new Map(); // Track seen features by type + name to prevent duplicates
 
-  // Group polygons by feature type and name
-  const featureGroups = new Map();
-  
-  polygons.forEach((poly, index) => {
-    if (!poly.featureType || !poly.featureName) return;
-    
-    const key = `${poly.featureType}:${poly.featureName}`;
-    if (!featureGroups.has(key)) {
-      featureGroups.set(key, []);
-    }
-    featureGroups.get(key).push({ poly, index });
-  });
-
-  // Process each feature group
-  featureGroups.forEach((group, key) => {
-    if (group.length === 0) return;
-    
-    const firstPoly = group[0].poly;
-    const featureType = firstPoly.featureType;
-    const featureName = firstPoly.featureName;
-    
-    // Calculate centroid for the feature group
-    let totalX = 0, totalY = 0, count = 0;
-    
-    group.forEach(({ poly }) => {
-      if (poly && poly.length > 0) {
-        // Use polygon centroid (average of all vertices)
-        poly.forEach(vertex => {
-          if (vertex && vertex.length >= 2) {
-            totalX += vertex[0];
-            totalY += vertex[1];
-            count++;
-          }
-        });
-      }
-    });
-    
-    if (count > 0) {
-      const x = totalX / count;
-      const y = totalY / count;
-      
-      // Create unique ID based on feature type and name
-      const id = `${featureType.toLowerCase()}:${featureName.replace(/\s+/g, '-')}`;
-      
-      labels.push({
-        id,
-        name: featureName, // The generator already includes the type if appropriate
-        x,
-        y,
-        kind: featureType.toLowerCase(),
-        featureType,
-        featureName
-      });
-    }
-  });
-
-  return labels;
-}
-
-// Draw labels in world coordinates - scaling/positioning handled in zoom handler
-function drawLabels(data) {
-  const gLabels = d3.select('#labels');
-  if (gLabels.empty()) return;
-  
-  // Clear existing place labels to prevent accumulation (but keep feature labels)
-  gLabels.selectAll('text.place-label').remove();
-  
-  const sel = gLabels.selectAll('text.place-label')
-    .data(data, d => d.id);
-
-  const enter = sel.enter().append('text')
-    .attr('class', d => `place-label ${d.kind}`)
-    .attr('text-anchor', 'middle')
-    .attr('dy', '0.35em')
-    .attr('font-size', 12)
-    .text(d => d.name);
-
-  enter.merge(sel)
-    .attr('x', d => d.x)   // world coords
-    .attr('y', d => d.y);  // world coords
-
-  sel.exit().remove();
-}
 
 // Generate a completely new random map with a fresh seed
 function generateRandomMap(count = 5) {
@@ -632,8 +554,10 @@ function toggleBlobCenters() {
 
 // Toggle label scaling mode - DISABLED: Now using per-label transforms
 function toggleLabelScaling() {
-  console.log('Label scaling toggle disabled - now using per-label transform system');
-  console.log('Labels automatically maintain constant size with proper anchoring');
+  if (window.DEBUG) {
+    console.log('Label scaling toggle disabled - now using per-label transform system');
+    console.log('Labels automatically maintain constant size with proper anchoring');
+  }
 }
 
 // Change polygons stroke-width,
@@ -670,8 +594,7 @@ window.toggleOptions = toggleOptions;
 window.toggleBlobCenters = toggleBlobCenters;
 window.toggleStrokes = toggleStrokes;
 window.toggleLabelScaling = toggleLabelScaling; // Expose label scaling toggle
-window.drawLabels = drawLabels; // Expose label drawing function
-window.computeMapLabels = computeMapLabels; // Expose label computation function
+
 window.state = state; // Make state accessible globally
 window.rng = rng; // Make RNG accessible globally for debugging
 window.Perf = Perf; // Make profiler accessible globally

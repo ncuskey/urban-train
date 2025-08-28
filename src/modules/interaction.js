@@ -1,6 +1,6 @@
 // d3 is global; do not import it.
 import { updateLabelZoom, updateLabelVisibility } from './labels.js';
-import { filterByZoom } from './labels.js'; // or wherever it's defined
+import { filterByZoom } from './labels.js';
 
 let svg, gTarget, zoom, currentTransform = d3.zoomIdentity;
 
