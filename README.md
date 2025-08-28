@@ -165,11 +165,13 @@ urban-train/
 
 8. **Label Management (`buildFeatureLabels` and `renderLabels` functions)**:
    - Automatically generates labels for geographic features (Oceans, Islands, Lakes)
-   - Deduplicates labels to prevent overlapping text
+   - **No minimum size thresholds** - even the smallest lakes and islands get names
+   - **Advanced collision avoidance** using quadtree spatial indexing and spiral placement
+   - **Size-based zoom filtering** - features appear based on area and zoom level
    - Calculates proper centroids for label placement
    - Supports both scaling and constant-size label modes
    - Uses keyed data joins to prevent label accumulation
-   - **Labels v2.1**: Robust generation with visibility fixes and permissive thresholds
+   - **Labels v2.1**: Robust generation with collision avoidance and size-based filtering
 
 9. **Fantasy Naming System (`makeNamer` function)**:
    - Generates rich descriptive names using weighted templates
@@ -197,6 +199,8 @@ urban-train/
 - **Spatial Picking**: Efficient cell selection using spatial indexing instead of DOM hit-testing
 - **Fantasy Naming**: Weighted template system for generating descriptive geographic names
 - **Adaptive Coastline Refinement**: Automatically subdivides coastal edges for smoother shorelines
+- **Collision Avoidance**: Quadtree-based spatial indexing with spiral placement algorithm
+- **Size-Based Zoom Filtering**: Progressive disclosure of features based on area and zoom level
 
 ## Browser Compatibility
 
@@ -227,6 +231,7 @@ urban-train/
 - Check console.table output for detailed timing information
 - Run `debugLabels()` in console for label diagnostics
 - See `LABELS_V2_1_IMPLEMENTATION.md` for detailed label system documentation
+- Open `test-collision-zoom.html` for interactive collision avoidance and zoom filtering tests
 
 ### Modular Architecture
 

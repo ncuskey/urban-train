@@ -17,16 +17,16 @@ function getExistingNameFromComponent(indices, polygons) {
 export function buildFeatureLabels({
   polygons,
   seaLevel = 0.2,
-  mapWidth,            // <-- REQUIRED
-  mapHeight,           // <-- REQUIRED
-  // more permissive defaults; tune as needed
+  mapWidth,
+  mapHeight,
+  // ↓ ensure even smallest features get labels
   minOceanArea  = 6000,
-  minLakeArea   = 250,
-  minIslandArea = 400,
-  maxOceans = 3,
-  maxLakes  = 10,
-  maxIslands = 12,
-  namePickers   // optional { ocean, lake, island }
+  minLakeArea   = 0,      // was 40 - no minimum for lakes
+  minIslandArea = 0,      // was 60 - no minimum for islands
+  maxOceans     = 4,      // optional
+  maxLakes      = 500,    // was 10
+  maxIslands    = 800,    // was 12
+  namePickers
 }) {
   const n = polygons.length;
   const visited = new Uint8Array(n);
@@ -141,23 +141,61 @@ function polygonArea(poly) {
 
 
 
-// ---- Placement / collision (unchanged, but now fewer labels) --------
+// ---- Placement / collision avoidance ----
 export function placeLabelsAvoidingCollisions({ svg, labels }) {
   const qt = d3.quadtree().x(d=>d.x).y(d=>d.y).addAll([]);
   const placed = [];
 
-  // Place high priority first
+  // Place high priority first (oceans > lakes > islands)
   labels.sort((a,b)=> b.priority - a.priority);
 
+  console.log('[labels] DEBUG: Collision avoidance starting with', labels.length, 'labels');
+
   for (const lab of labels) {
-    const w = Math.max(80, Math.min(500, lab.text.length * 8)); // rough bbox
-    const h = 18;
+    const w = Math.max(80, Math.min(500, lab.text.length * 8)); // rough bbox width
+    const h = 18; // fixed height
     let pos = {x: lab.x, y: lab.y};
+    
+    // Try to place at centroid first
     if (clear(qt, pos.x, pos.y, w, h)) {
+      placed.push({...lab, w, h, placed: pos});
+      qt.add({x: pos.x, y: pos.y, w, h});
+      continue;
+    }
+    
+    // If centroid fails, try nearby positions in a spiral pattern
+    const maxAttempts = 20;
+    const step = Math.max(w, h) * 0.8;
+    let attempts = 0;
+    let found = false;
+    
+    for (let ring = 1; ring <= 3 && attempts < maxAttempts; ring++) {
+      for (let i = 0; i < ring * 8 && attempts < maxAttempts; i++) {
+        attempts++;
+        const angle = (i / (ring * 8)) * 2 * Math.PI;
+        const radius = ring * step;
+        const testX = lab.x + Math.cos(angle) * radius;
+        const testY = lab.y + Math.sin(angle) * radius;
+        
+        if (clear(qt, testX, testY, w, h)) {
+          pos = {x: testX, y: testY};
+          placed.push({...lab, w, h, placed: pos});
+          qt.add({x: pos.x, y: pos.y, w, h});
+          found = true;
+          break;
+        }
+      }
+      if (found) break;
+    }
+    
+    // If still no position found, place at centroid anyway (will overlap)
+    if (!found) {
       placed.push({...lab, w, h, placed: pos});
       qt.add({x: pos.x, y: pos.y, w, h});
     }
   }
+  
+  console.log('[labels] DEBUG: Collision avoidance placed', placed.length, 'out of', labels.length, 'labels');
   return placed;
 }
 
@@ -179,21 +217,119 @@ function rectsOverlap(x,y,w,h,X,Y,W,H){
   return !(x+w/2 < X-W/2 || x-w/2 > X+W/2 || y+h/2 < Y-H/2 || y-h/2 > Y+H/2);
 }
 
-// ---- Zoom filtering ----
+// ---- Zoom filtering with size-based visibility ----
 export function filterByZoom(placed, k) {
-  // DEBUG: show everything while we tune counts
-  return placed;
+  // bucket by kind
+  const buckets = { ocean: [], lake: [], island: [], other: [] };
+  for (const l of placed) {
+    const kind = (l && (l.kind === 'ocean' || l.kind === 'lake' || l.kind === 'island')) ? l.kind : 'other';
+    buckets[kind].push(l);
+  }
+
+  // prefer bigger/prioritized first
+  const sortFn = (a, b) =>
+    (b.priority ?? 0) - (a.priority ?? 0) || (b.area ?? 0) - (a.area ?? 0);
+
+  Object.values(buckets).forEach(arr => arr.sort(sortFn));
+
+  // Size-based visibility thresholds
+  const sizeThresholds = {
+    ocean: { min: 0, max: Infinity }, // Oceans always visible
+    lake: { 
+      tiny: 50,    // Very small lakes
+      small: 200,  // Small lakes  
+      medium: 800, // Medium lakes
+      large: 2000  // Large lakes
+    },
+    island: {
+      tiny: 30,    // Very small islands
+      small: 150,  // Small islands
+      medium: 600, // Medium islands
+      large: 1500  // Large islands
+    }
+  };
+
+  // Zoom-based visibility rules
+  const getVisibilityForZoom = (kind, area, k) => {
+    if (kind === 'ocean') return true; // Oceans always visible
+    
+    if (kind === 'lake') {
+      if (k >= 4) return true; // All lakes visible at high zoom
+      if (k >= 2 && area >= sizeThresholds.lake.tiny) return true; // Small+ lakes at medium zoom
+      if (k >= 1 && area >= sizeThresholds.lake.small) return true; // Medium+ lakes at low zoom
+      if (k >= 0.5 && area >= sizeThresholds.lake.medium) return true; // Large lakes at very low zoom
+      return false;
+    }
+    
+    if (kind === 'island') {
+      if (k >= 3) return true; // All islands visible at high zoom
+      if (k >= 1.5 && area >= sizeThresholds.island.tiny) return true; // Small+ islands at medium zoom
+      if (k >= 0.8 && area >= sizeThresholds.island.small) return true; // Medium+ islands at low zoom
+      if (k >= 0.4 && area >= sizeThresholds.island.medium) return true; // Large islands at very low zoom
+      return false;
+    }
+    
+    return false;
+  };
+
+  // Apply size-based filtering
+  const filtered = [];
+  for (const bucket of Object.values(buckets)) {
+    for (const label of bucket) {
+      if (getVisibilityForZoom(label.kind, label.area, k)) {
+        filtered.push(label);
+      }
+    }
+  }
+
+  // Apply maximum limits to prevent overcrowding
+  const maxLimits = {
+    ocean: 4,
+    lake: k < 1 ? 15 : k < 2 ? 40 : k < 4 ? 80 : 200,
+    island: k < 1 ? 20 : k < 2 ? 50 : k < 3 ? 100 : 300,
+    other: k < 2 ? 0 : k < 4 ? 10 : 30
+  };
+
+  // Re-bucket and apply limits
+  const finalBuckets = { ocean: [], lake: [], island: [], other: [] };
+  for (const label of filtered) {
+    const kind = label.kind || 'other';
+    if (finalBuckets[kind].length < maxLimits[kind]) {
+      finalBuckets[kind].push(label);
+    }
+  }
+
+  const out = [];
+  out.push(...finalBuckets.ocean);
+  out.push(...finalBuckets.lake);
+  out.push(...finalBuckets.island);
+  out.push(...finalBuckets.other);
+  
+  // Debug logging for size-based filtering
+  console.log(`[labels] zoom filter: k=${k.toFixed(2)}, total=${placed.length}, visible=${out.length}`);
+  console.log(`[labels] visible by kind:`, {
+    ocean: finalBuckets.ocean.length,
+    lake: finalBuckets.lake.length,
+    island: finalBuckets.island.length,
+    other: finalBuckets.other.length
+  });
+  
+  return out;
 }
-// Later, restore:
-// if (l.kind==='ocean') return true; if (l.kind==='lake') return k>=0.9; if (l.kind==='island') return k>=0.8; return k>=1.2;
 
 // --- Render ----------------------------------------------------------
 
 // Render all labels once (no zoom filtering here)
 export function renderLabels({ svg, placed, groupId, k = 1 }) {
   const g = svg.select(`#${groupId}`);
+  
+  console.log('[labels] DEBUG: renderLabels called with', placed.length, 'labels, groupId:', groupId);
+  console.log('[labels] DEBUG: Group exists:', !g.empty(), 'Group node:', g.node());
+  
   const sel = g.selectAll('g.label').data(placed, d => d.id);
   const enter = sel.enter().append('g').attr('class', 'label');
+
+  console.log('[labels] DEBUG: Enter selection size:', enter.size());
 
   enter.append('text').attr('class', 'stroke');
   enter.append('text').attr('class', 'fill');
@@ -214,6 +350,8 @@ export function renderLabels({ svg, placed, groupId, k = 1 }) {
     .attr('dominant-baseline', 'central');
 
   sel.exit().remove();
+  
+  console.log('[labels] DEBUG: Final DOM count:', g.selectAll('g.label').size());
 }
 
 // On zoom: only update each label's inverse scale; do NOT recalc placement

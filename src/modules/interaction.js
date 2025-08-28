@@ -63,11 +63,11 @@ export function attachInteraction({
       world.attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
 
       // Update visibility + inverse scale for feature labels
-      if (window._placedFeatureLabels) {
+      if (window.__labelsPlaced && window.__labelsPlaced.features) {
         updateLabelVisibility({
           svg,
           groupId: 'labels-features',
-          placed: window._placedFeatureLabels,
+          placed: window.__labelsPlaced.features,
           k: t.k,
           filterByZoom
         });

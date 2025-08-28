@@ -120,15 +120,15 @@
                 const svg = d3.select('#test-svg');
                 const polygons = createMockPolygons();
                 
-                // Build feature labels
+                // Build feature labels - no minimum size for lakes/islands
                 const featureLabels = buildFeatureLabels({
                     polygons,
                     seaLevel: 0.2,
                     mapWidth: 600,
                     mapHeight: 400,
                     minOceanArea: 6000,
-                    minLakeArea: 250,
-                    minIslandArea: 400,
+                    minLakeArea: 0,      // no minimum - even smallest lakes get names
+                    minIslandArea: 0,    // no minimum - even smallest islands get names
                     maxOceans: 3,
                     maxLakes: 10,
                     maxIslands: 12

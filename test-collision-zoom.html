@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Collision Avoidance & Size-Based Zoom Filtering</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .success { color: #28a745; font-weight: bold; }
+        .error { color: #dc3545; font-weight: bold; }
+        .info { color: #17a2b8; }
+        .warning { color: #ffc107; font-weight: bold; }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+            align-items: center;
+        }
+        button {
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover { background: #0056b3; }
+        input[type="range"] {
+            width: 200px;
+        }
+        .zoom-info {
+            font-family: monospace;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        #test-svg {
+            border: 1px solid #ccc;
+            background: #5E4FA2;
+        }
+        .results {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Test Collision Avoidance & Size-Based Zoom Filtering</h1>
+        
+        <div class="test-section">
+            <h3>Test Controls</h3>
+            <div class="controls">
+                <button onclick="initTest()">Initialize Test</button>
+                <button onclick="testCollisionAvoidance()">Test Collision Avoidance</button>
+                <button onclick="testZoomFiltering()">Test Zoom Filtering</button>
+                <button onclick="runFullTest()">Run Full Test</button>
+            </div>
+            
+            <div class="controls">
+                <label>Zoom Level: <span id="zoom-value">1.0</span></label>
+                <input type="range" id="zoom-slider" min="0.1" max="8" step="0.1" value="1" oninput="updateZoom(this.value)">
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>Test Map</h3>
+            <svg id="test-svg" width="800" height="600">
+                <defs>
+                    <filter id="blurFilter">
+                        <feGaussianBlur stdDeviation="1"/>
+                    </filter>
+                </defs>
+                <g id="world">
+                    <!-- Map content will be generated here -->
+                </g>
+                <g id="labels-features">
+                    <!-- Labels will be rendered here -->
+                </g>
+            </svg>
+        </div>
+
+        <div class="results" id="results">
+            <h3>Test Results</h3>
+            <div id="test-output">Click "Initialize Test" to begin...</div>
+        </div>
+    </div>
+
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script type="module">
+        import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility } from './src/modules/labels.js';
+        import { makeNamer } from './src/modules/names.js';
+        
+        // Test RNG
+        const testRng = () => Math.random();
+        const namer = makeNamer(testRng);
+        
+        // Global test state
+        window.testState = {
+            svg: null,
+            polygons: [],
+            featureLabels: [],
+            placedLabels: [],
+            currentZoom: 1.0
+        };
+        
+        // Create mock polygons with various sizes for testing
+        function createMockPolygons() {
+            const polygons = [];
+            const mapWidth = 800;
+            const mapHeight = 600;
+            
+            // Create oceans (large water bodies touching boundary)
+            for (let i = 0; i < 3; i++) {
+                const x = i * 250;
+                const y = i % 2 === 0 ? 0 : mapHeight;
+                
+                polygons.push([
+                    [x, y],
+                    [x + 200, y],
+                    [x + 200, y + 200],
+                    [x, y + 200]
+                ]);
+                const poly = polygons[polygons.length - 1];
+                poly.height = 0.1; // Water
+                poly.neighbors = [];
+            }
+            
+            // Create lakes of various sizes
+            const lakeSizes = [30, 80, 150, 300, 500, 800, 1200]; // Different sizes for testing
+            for (let i = 0; i < lakeSizes.length; i++) {
+                const size = lakeSizes[i];
+                const x = 100 + (i * 100);
+                const y = 150 + (i * 60);
+                
+                polygons.push([
+                    [x, y],
+                    [x + size/4, y],
+                    [x + size/4, y + size/4],
+                    [x, y + size/4]
+                ]);
+                const poly = polygons[polygons.length - 1];
+                poly.height = 0.1; // Water
+                poly.neighbors = [];
+            }
+            
+            // Create islands of various sizes
+            const islandSizes = [20, 60, 120, 250, 400, 600, 900]; // Different sizes for testing
+            for (let i = 0; i < islandSizes.length; i++) {
+                const size = islandSizes[i];
+                const x = 200 + (i * 80);
+                const y = 300 + (i * 50);
+                
+                polygons.push([
+                    [x, y],
+                    [x + size/5, y],
+                    [x + size/5, y + size/5],
+                    [x, y + size/5]
+                ]);
+                const poly = polygons[polygons.length - 1];
+                poly.height = 0.8; // Land
+                poly.neighbors = [];
+            }
+            
+            return polygons;
+        }
+        
+        // Initialize test
+        window.initTest = function() {
+            const results = [];
+            
+            try {
+                const svg = d3.select('#test-svg');
+                const polygons = createMockPolygons();
+                
+                // Build feature labels with no minimum size
+                const featureLabels = buildFeatureLabels({
+                    polygons,
+                    seaLevel: 0.2,
+                    mapWidth: 800,
+                    mapHeight: 600,
+                    minOceanArea: 6000,
+                    minLakeArea: 0,      // no minimum - even smallest lakes get names
+                    minIslandArea: 0,    // no minimum - even smallest islands get names
+                    maxOceans: 3,
+                    maxLakes: 20,
+                    maxIslands: 20
+                });
+                
+                // Place labels with collision avoidance
+                const placedLabels = placeLabelsAvoidingCollisions({ svg, labels: featureLabels });
+                
+                // Initial render
+                renderLabels({ svg, placed: placedLabels, groupId: 'labels-features', k: 1.0 });
+                
+                // Store test state
+                window.testState = {
+                    svg,
+                    polygons,
+                    featureLabels,
+                    placedLabels,
+                    currentZoom: 1.0
+                };
+                
+                results.push(`<div class="success">✅ Test initialized successfully</div>`);
+                results.push(`<div class="info">📊 Generated ${featureLabels.length} labels:</div>`);
+                results.push(`<div class="info">   - Oceans: ${featureLabels.filter(l => l.kind === 'ocean').length}</div>`);
+                results.push(`<div class="info">   - Lakes: ${featureLabels.filter(l => l.kind === 'lake').length}</div>`);
+                results.push(`<div class="info">   - Islands: ${featureLabels.filter(l => l.kind === 'island').length}</div>`);
+                results.push(`<div class="info">📊 Placed ${placedLabels.length} labels after collision avoidance</div>`);
+                
+                // Show size distribution
+                const lakeAreas = featureLabels.filter(l => l.kind === 'lake').map(l => l.area).sort((a,b) => a-b);
+                const islandAreas = featureLabels.filter(l => l.kind === 'island').map(l => l.area).sort((a,b) => a-b);
+                
+                results.push(`<div class="info">📏 Lake areas: ${lakeAreas.join(', ')}</div>`);
+                results.push(`<div class="info">📏 Island areas: ${islandAreas.join(', ')}</div>`);
+                
+            } catch (error) {
+                results.push(`<div class="error">❌ Error: ${error.message}</div>`);
+                console.error('Test initialization error:', error);
+            }
+            
+            document.getElementById('test-output').innerHTML = results.join('');
+        };
+        
+        // Test collision avoidance
+        window.testCollisionAvoidance = function() {
+            const results = [];
+            const state = window.testState;
+            
+            if (!state.placedLabels || state.placedLabels.length === 0) {
+                results.push(`<div class="error">❌ No labels to test. Initialize test first.</div>`);
+                document.getElementById('test-output').innerHTML = results.join('');
+                return;
+            }
+            
+            try {
+                // Check for overlapping labels
+                let overlaps = 0;
+                for (let i = 0; i < state.placedLabels.length; i++) {
+                    for (let j = i + 1; j < state.placedLabels.length; j++) {
+                        const a = state.placedLabels[i];
+                        const b = state.placedLabels[j];
+                        
+                        if (rectsOverlap(a.placed.x, a.placed.y, a.w, a.h, 
+                                       b.placed.x, b.placed.y, b.w, b.h)) {
+                            overlaps++;
+                        }
+                    }
+                }
+                
+                if (overlaps === 0) {
+                    results.push(`<div class="success">✅ Collision avoidance working perfectly - no overlaps detected</div>`);
+                } else {
+                    results.push(`<div class="warning">⚠️ ${overlaps} overlapping labels detected (some overlap is expected for very dense areas)</div>`);
+                }
+                
+                // Show placement statistics
+                const avgDistance = calculateAverageDistance(state.placedLabels);
+                results.push(`<div class="info">📏 Average distance between labels: ${avgDistance.toFixed(1)}px</div>`);
+                
+                // Show label distribution
+                const oceanLabels = state.placedLabels.filter(l => l.kind === 'ocean');
+                const lakeLabels = state.placedLabels.filter(l => l.kind === 'lake');
+                const islandLabels = state.placedLabels.filter(l => l.kind === 'island');
+                
+                results.push(`<div class="info">📍 Placed: ${oceanLabels.length} oceans, ${lakeLabels.length} lakes, ${islandLabels.length} islands</div>`);
+                
+            } catch (error) {
+                results.push(`<div class="error">❌ Error: ${error.message}</div>`);
+                console.error('Collision test error:', error);
+            }
+            
+            document.getElementById('test-output').innerHTML = results.join('');
+        };
+        
+        // Test zoom filtering
+        window.testZoomFiltering = function() {
+            const results = [];
+            const state = window.testState;
+            
+            if (!state.placedLabels || state.placedLabels.length === 0) {
+                results.push(`<div class="error">❌ No labels to test. Initialize test first.</div>`);
+                document.getElementById('test-output').innerHTML = results.join('');
+                return;
+            }
+            
+            try {
+                const zoomLevels = [0.5, 1.0, 2.0, 4.0, 6.0];
+                results.push(`<div class="info">🔍 Testing zoom filtering at different levels:</div>`);
+                
+                for (const k of zoomLevels) {
+                    const visible = filterByZoom(state.placedLabels, k);
+                    const oceanCount = visible.filter(l => l.kind === 'ocean').length;
+                    const lakeCount = visible.filter(l => l.kind === 'lake').length;
+                    const islandCount = visible.filter(l => l.kind === 'island').length;
+                    
+                    results.push(`<div class="info">   Zoom ${k.toFixed(1)}x: ${visible.length} total (${oceanCount} oceans, ${lakeCount} lakes, ${islandCount} islands)</div>`);
+                }
+                
+                // Test size-based filtering
+                results.push(`<div class="info">📏 Size-based filtering test:</div>`);
+                const smallLakes = state.placedLabels.filter(l => l.kind === 'lake' && l.area < 100);
+                const mediumLakes = state.placedLabels.filter(l => l.kind === 'lake' && l.area >= 100 && l.area < 500);
+                const largeLakes = state.placedLabels.filter(l => l.kind === 'lake' && l.area >= 500);
+                
+                results.push(`<div class="info">   Small lakes (${smallLakes.length}): ${smallLakes.map(l => l.area.toFixed(0)).join(', ')}</div>`);
+                results.push(`<div class="info">   Medium lakes (${mediumLakes.length}): ${mediumLakes.map(l => l.area.toFixed(0)).join(', ')}</div>`);
+                results.push(`<div class="info">   Large lakes (${largeLakes.length}): ${largeLakes.map(l => l.area.toFixed(0)).join(', ')}</div>`);
+                
+            } catch (error) {
+                results.push(`<div class="error">❌ Error: ${error.message}</div>`);
+                console.error('Zoom test error:', error);
+            }
+            
+            document.getElementById('test-output').innerHTML = results.join('');
+        };
+        
+        // Update zoom level
+        window.updateZoom = function(k) {
+            const state = window.testState;
+            if (!state.placedLabels || state.placedLabels.length === 0) return;
+            
+            k = parseFloat(k);
+            state.currentZoom = k;
+            document.getElementById('zoom-value').textContent = k.toFixed(1);
+            
+            // Update label visibility
+            updateLabelVisibility({
+                svg: state.svg,
+                groupId: 'labels-features',
+                placed: state.placedLabels,
+                k: k,
+                filterByZoom
+            });
+            
+            // Update zoom transform
+            state.svg.select('#labels-features').selectAll('g.label')
+                .attr('transform', d => `translate(${d.placed.x},${d.placed.y}) scale(${1 / k})`);
+        };
+        
+        // Run full test
+        window.runFullTest = function() {
+            initTest();
+            setTimeout(() => {
+                testCollisionAvoidance();
+                setTimeout(() => {
+                    testZoomFiltering();
+                }, 500);
+            }, 500);
+        };
+        
+        // Helper functions
+        function rectsOverlap(x,y,w,h,X,Y,W,H){
+            return !(x+w/2 < X-W/2 || x-w/2 > X+W/2 || y+h/2 < Y-H/2 || y-h/2 > Y+H/2);
+        }
+        
+        function calculateAverageDistance(labels) {
+            if (labels.length < 2) return 0;
+            
+            let totalDistance = 0;
+            let count = 0;
+            
+            for (let i = 0; i < labels.length; i++) {
+                for (let j = i + 1; j < labels.length; j++) {
+                    const a = labels[i];
+                    const b = labels[j];
+                    const dx = a.placed.x - b.placed.x;
+                    const dy = a.placed.y - b.placed.y;
+                    totalDistance += Math.sqrt(dx*dx + dy*dy);
+                    count++;
+                }
+            }
+            
+            return count > 0 ? totalDistance / count : 0;
+        }
+        
+    </script>
+</body>
+</html>

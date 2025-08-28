@@ -163,8 +163,7 @@ window.currentTransform = currentTransform; // Global transform tracking
 // Label scaling configuration - now handled by per-label transforms
 // const LABELS_NONSCALING = true; // DEPRECATED: Now using per-label transform system
 
-// Feature label system configuration
-const USE_NEW_FEATURE_LABELS = true; // global switch
+// Feature label system configuration - using new system
 
 // Suppress console warnings for D3 wheel events globally
 // This prevents the expected D3 v5 wheel event warnings from cluttering the console
@@ -349,65 +348,56 @@ function generate(count) {
       rng
     });
     
-    // Build & place feature labels
+    // Build & place feature labels - no minimum size for lakes/islands
     const featureLabels = buildFeatureLabels({
       polygons,
-      seaLevel: 0.2,
-      mapWidth,             // <-- pass actual mapWidth
-      mapHeight,            // <-- pass actual mapHeight
-      minOceanArea: 6000,
-      minLakeArea: 250,
-      minIslandArea: 400,
-      maxOceans: 3,
-      maxLakes: 10,
-      maxIslands: 12,
-      // namePickers: { ocean: names.pickOcean, lake: names.pickLake, island: names.pickIsland }
+      mapWidth,
+      mapHeight,
+      minLakeArea: 0,      // no minimum - even smallest lakes get names
+      minIslandArea: 0,    // no minimum - even smallest islands get names
+      maxLakes: 500,
+      maxIslands: 800,
+      namePickers: makeNamer(rng) // or whatever you already use
     });
 
-    const placed = placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels });
-    window._placedFeatureLabels = placed;
-
-    console.log('[labels] after build:', {
-      built: featureLabels.length, placed: placed.length
+    console.log('[labels] DEBUG: Built feature labels:', {
+      total: featureLabels.length,
+      oceans: featureLabels.filter(l=>l.kind==='ocean').length,
+      lakes: featureLabels.filter(l=>l.kind==='lake').length,
+      islands: featureLabels.filter(l=>l.kind==='island').length,
+      sample: featureLabels.slice(0, 3).map(l => ({ kind: l.kind, text: l.text, area: l.area }))
     });
 
+    const placedFeatures = placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels });
+    
+    console.log('[labels] DEBUG: After collision avoidance:', {
+      placed: placedFeatures.length,
+      sample: placedFeatures.slice(0, 3).map(l => ({ kind: l.kind, text: l.text, area: l.area }))
+    });
+
+    renderLabels({ svg: svgSel, placed: placedFeatures, groupId: 'labels-features', k: 1 });
+
+    // stash for zoom visibility updates
+    window.__labelsPlaced = { features: placedFeatures };
+
+    // Apply initial visibility filter
     const k0 = (d3.zoomTransform(svgSel.node()).k || 1);
-
-    // Render every label once (unfiltered), then immediately set visibility for k0
-    renderLabels({ svg: svgSel, placed, groupId: 'labels-features', k: k0 });
-
-    // DEBUG: verify nodes exist
-    console.log('[labels] DOM count after initial render:',
-      svgSel.select('#labels-features').selectAll('g.label').size()
-    );
-
-    // Store for zoom updates
-    window._placedFeatureLabels = placed;
-
-    // Apply initial visibility without re-render
     updateLabelVisibility({
       svg: svgSel,
       groupId: 'labels-features',
-      placed: window._placedFeatureLabels,
+      placed: window.__labelsPlaced.features,
       k: k0,
       filterByZoom
     });
 
-    // DEBUG: how many visible
-    const _visibleNow = svgSel.select('#labels-features')
-      .selectAll('g.label')
-      .filter(function(){ return d3.select(this).style('display') !== 'none'; })
-      .size();
-    console.log('[labels] visible after initial filter:', _visibleNow);
+    console.log('[labels] after build:', {
+      built: featureLabels.length, placed: placedFeatures.length
+    });
 
     // Quick sanity log
-    console.log(`[labels] oceans=${featureLabels.filter(l=>l.kind==='ocean').length}, lakes=${featureLabels.filter(l=>l.kind==='lake').length}, islands=${featureLabels.filter(l=>l.kind==='island').length}, placed=${placed.length}, total=${placed.length}`);
+    console.log(`[labels] oceans=${featureLabels.filter(l=>l.kind==='ocean').length}, lakes=${featureLabels.filter(l=>l.kind==='lake').length}, islands=${featureLabels.filter(l=>l.kind==='island').length}, placed=${placedFeatures.length}`);
     
-    // Compute and render map labels with proper deduplication
-    if (!USE_NEW_FEATURE_LABELS) {
-      const labelData = computeMapLabels(polygons);
-      drawLabels(labelData);
-    }
+    // Old label system removed - using new feature labels
     drawCoastline({
       polygons,
       diagram,

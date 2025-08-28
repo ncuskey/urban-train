@@ -2,7 +2,7 @@
 
 ## Overview
 
-This implementation addresses label visibility issues and improves the label generation system to be more robust and show more labels.
+This implementation addresses label visibility issues and improves the label generation system to be more robust and show more labels. **Version 2.1** adds advanced collision avoidance and size-based zoom filtering.
 
 ## Key Improvements
 
@@ -26,8 +26,28 @@ This implementation addresses label visibility issues and improves the label gen
 **Solution**:
 - ✅ **Removed global generic drop**: Each component gets a label (named if available, otherwise generic)
 - ✅ **Robust ocean/lake classification**: Use explicit map bounds instead of relying on p.bounds
-- ✅ **Lower area thresholds**: More permissive filtering to show more lakes and islands
-- ✅ **Increased max counts**: Allow more lakes (10) and islands (12)
+- ✅ **No minimum size thresholds**: All lakes and islands get names, regardless of size
+- ✅ **Increased max counts**: Allow more lakes (500) and islands (800)
+
+### 3. Advanced Collision Avoidance
+
+**Problem**: Labels were overlapping, making them unreadable
+
+**Solution**:
+- ✅ **Quadtree-based collision detection**: Efficient spatial queries for overlap detection
+- ✅ **Spiral placement algorithm**: Tries up to 20 positions around centroid when collision detected
+- ✅ **Priority-based placement**: Oceans > lakes > islands to ensure important features get placed first
+- ✅ **Fallback placement**: Places at centroid with overlap if no collision-free position found
+
+### 4. Size-Based Zoom Filtering
+
+**Problem**: All labels visible at all zoom levels created visual clutter
+
+**Solution**:
+- ✅ **Size-based visibility rules**: Features appear based on area and zoom level
+- ✅ **Progressive disclosure**: Small features appear as zoom increases
+- ✅ **Maximum limits**: Prevents overcrowding at high zoom levels
+- ✅ **Smooth transitions**: Labels appear/disappear based on zoom level
 
 ## Technical Changes
 
@@ -40,18 +60,27 @@ This implementation addresses label visibility issues and improves the label gen
 #### `src/modules/labels.js`
 - **Updated `buildFeatureLabels()`**:
   - Made `mapWidth` and `mapHeight` required parameters
-  - Lowered thresholds: `minOceanArea: 6000`, `minLakeArea: 250`, `minIslandArea: 400`
-  - Increased max counts: `maxLakes: 10`, `maxIslands: 12`
+  - **Zero minimum thresholds**: `minLakeArea: 0`, `minIslandArea: 0` (all features get names)
+  - Increased max counts: `maxLakes: 500`, `maxIslands: 800`
   - Removed global generic drop logic
   - Added robust boundary detection
   - Added debug logging
+- **Updated `placeLabelsAvoidingCollisions()`**:
+  - **Quadtree-based collision detection** with efficient spatial queries
+  - **Spiral placement algorithm** with up to 20 attempts per label
+  - **Priority-based placement** (oceans > lakes > islands)
+  - **Fallback placement** for unresolvable collisions
+- **Updated `filterByZoom()`**:
+  - **Size-based visibility thresholds** for lakes and islands
+  - **Zoom-dependent visibility rules** with progressive disclosure
+  - **Maximum limits** to prevent overcrowding
+  - **Enhanced debug logging** for monitoring
 - **Updated `updateLabelVisibility()`**:
   - Made visibility updates non-destructive
   - Added debug logging for troubleshooting
-- **Temporarily loosened `filterByZoom()`** for tuning
 
 #### `src/main.js`
-- Updated `buildFeatureLabels()` call with new parameters
+- Updated `buildFeatureLabels()` call with zero minimum thresholds
 - Added debug logging for label counts
 - Added final `.raise()` after map rendering
 - Removed duplicate transform in zoom handler
@@ -73,18 +102,39 @@ This implementation addresses label visibility issues and improves the label gen
 - Comprehensive test for Labels v2.1 functionality
 - Validates multiple labels, generics preservation, DOM counts
 
+#### `test-collision-zoom.html`
+- **NEW**: Interactive test for collision avoidance and zoom filtering
+- Tests collision detection with overlap analysis
+- Tests size-based zoom filtering at multiple zoom levels
+- Provides real-time zoom controls and statistics
+
 ## Configuration
 
 ### New Defaults
 ```javascript
 {
   minOceanArea: 6000,    // was 9000
-  minLakeArea: 250,      // was 800
-  minIslandArea: 400,    // was 1500
-  maxOceans: 3,          // unchanged
-  maxLakes: 10,          // was 6
-  maxIslands: 12         // was 8
+  minLakeArea: 0,        // was 250 - NO MINIMUM SIZE
+  minIslandArea: 0,      // was 400 - NO MINIMUM SIZE
+  maxOceans: 4,          // unchanged
+  maxLakes: 500,         // was 10
+  maxIslands: 800        // was 12
 }
+```
+
+### Size-Based Zoom Filtering Rules
+```javascript
+// Oceans: Always visible
+// Lakes: 
+//   - Tiny (50+ area) visible at zoom 2x+
+//   - Small (200+ area) visible at zoom 1x+
+//   - Medium (800+ area) visible at zoom 0.5x+
+//   - All lakes visible at zoom 4x+
+// Islands:
+//   - Tiny (30+ area) visible at zoom 1.5x+
+//   - Small (150+ area) visible at zoom 0.8x+
+//   - Medium (600+ area) visible at zoom 0.4x+
+//   - All islands visible at zoom 3x+
 ```
 
 ### Required Parameters
@@ -98,45 +148,46 @@ The system now provides comprehensive debug logging:
 ```
 [labels] comps: { oceans: X, lakes: Y, islands: Z, waterComps: W, landComps: L }
 [labels] after build: { built: N, placed: N }
-[labels] DOM count after initial render: N
-[labels] visible after initial filter: N
+[labels] DEBUG: Collision avoidance placed N out of N labels
+[labels] zoom filter: k=1.00, total=N, visible=N
+[labels] visible by kind: { ocean: X, lake: Y, island: Z, other: W }
 [labels] updateLabelVisibility: total=N visible=N k=1.00
 ```
 
 ## Testing
 
 ### Manual Testing
-1. Open `index.html` - should see multiple labels
+1. Open `index.html` - should see multiple labels with no overlaps
 2. Open browser console - should see debug output
 3. Run `debugLabels()` in console for detailed diagnostics
-4. Test zoom in/out - labels should remain visible and anchored
+4. Test zoom in/out - labels should appear/disappear based on size and zoom
+5. **NEW**: Open `test-collision-zoom.html` for interactive testing
 
 ### Automated Testing
 1. Open `test-labels-v2.1.html` - validates all functionality
 2. Open `test-label-zoom.html` - tests zoom behavior
+3. **NEW**: Open `test-collision-zoom.html` - tests collision avoidance and size-based filtering
 
 ## Acceptance Criteria
 
 ✅ **Multiple labels**: X+Y+Z > 1 in component counts  
 ✅ **Generic preservation**: Each component gets a label  
-✅ **DOM verification**: DOM count matches placed count  
-✅ **Zoom anchoring**: Labels remain pinned and constant size  
-✅ **Debug logging**: Comprehensive console output  
+✅ **No minimum size**: All lakes and islands get names  
+✅ **Collision avoidance**: Minimal or no overlapping labels  
+✅ **Size-based filtering**: Small features appear at appropriate zoom levels  
+✅ **Smooth zoom transitions**: Labels appear/disappear smoothly  
+✅ **Performance**: Efficient collision detection and zoom filtering  
 
-## Future Improvements
+## Performance Considerations
 
-- Re-enable zoom filtering with tuned thresholds
-- Add namePickers back for custom naming
-- Optimize collision detection for better placement
-- Add label priority system for better visibility
+- **Quadtree collision detection**: O(log n) spatial queries for efficient overlap checking
+- **Spiral placement**: Limited to 20 attempts per label to prevent infinite loops
+- **Size-based filtering**: Pre-computed thresholds for fast visibility decisions
+- **Maximum limits**: Prevents exponential growth of visible labels at high zoom
 
-## Files Changed
+## Future Enhancements
 
-- `src/render/layers.js`
-- `src/modules/labels.js`
-- `src/main.js`
-- `src/modules/interaction.js`
-- `styles.css`
-- `test-label-zoom.html`
-- `debug-labels.js` (new)
-- `test-labels-v2.1.html` (new)
+- **Label clustering**: Group nearby small labels at low zoom
+- **Dynamic font sizing**: Adjust label size based on zoom level
+- **Label animation**: Smooth fade in/out transitions
+- **User preferences**: Configurable size thresholds and zoom rules

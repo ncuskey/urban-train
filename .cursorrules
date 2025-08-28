@@ -1,0 +1,185 @@
+# Cursor Rules for **Urban Train** (Procedural Map Generator)
+_Last updated: 2025-08-27_
+
+## TL;DR (What the AI should prioritize)
+1) **Don't invent features.** Work strictly with what's in `/src` and `index.html`. Keep refactors 1:1 with existing behavior.
+2) **D3 v5 is global**; **do not import d3** inside modules. Use `d3.mouse`, `d3.zoom`, `d3.zoomTransform(svg.node())`, etc.
+3) **ES Modules only.** Files live under `/src/**`. Keep imports as relative ESM paths and preserve the current module boundaries.
+4) **Performance matters.** Hover/HUD work must be throttled (`requestAnimationFrame`) and avoid layout thrash. Use the existing Perf HUD timers.
+5) **Labels:** Use the existing `names`, `labels`, and collision/zoom filtering. **No minimum size for lakes/islands** - even the smallest features get names. **Size-based zoom filtering** shows features based on area and zoom level. **Collision avoidance** uses spiral placement with quadtree optimization.
+6) **Autofit/Zoom:** Use `computeLandBBox` + `fitToLand` and apply transforms via the bound `zoom` behavior. Don't set transforms directly on groups.
+7) **Self-tests must pass.** Don't regress invariants in `selftest.js` (height in [0..1], reciprocal neighbors, etc.).
+
+---
+
+## Project Context
+Web-based procedural map generator that constructs **Voronoi-based terrain**, detects features (ocean, lakes, islands), renders SVG with **D3 v5**, and provides **interactive pan/zoom + hover HUD** with label placement and LOD hints.
+
+### Primary goals for contributions
+- Keep generation **deterministic** (seedable RNG).
+- Maintain fast **first paint** and **interactive** performance.
+- Improve **label quality** (collision/zoom thresholds, name variety) without introducing new frameworks.
+- Keep the code **modular**, **readable**, and **testable** with the existing self-test scaffolding.
+
+---
+
+## Tech Stack & Runtime
+- **HTML5 + ES Modules** (loaded via `<script type="module">` in `index.html`)
+- **D3 v5** loaded globally from CDN; **do not `import d3`** inside modules
+- jQuery 3.6 is present in `index.html` (loaded globally). Keep usage minimal; prefer vanilla/d3.
+- No bundler. Served as static files.
+
+### Directory Layout (relevant)
+```
+/index.html                 # App shell, loads d3 v5 + src/main.js
+/styles.css                 # App styling + LOD-related classes
+/src/main.js                # App entry; wiring + Perf HUD
+/src/core/rng.js            # Seedable RNG
+/src/core/timers.js         # Timing utilities
+/src/render/layers.js       # Layer creation + label subgroups
+/src/modules/geometry.js    # Poisson-disc, Voronoi, neighbor detection
+/src/modules/heightmap.js   # Terrain growth + height assignment
+/src/modules/features.js    # Feature marking (ocean/lake/island)
+/src/modules/coastline.js   # Coastline tracing
+/src/modules/refine.js      # Coastal refinement + diagram rebuild
+/src/modules/rendering.js   # Draw polygons, blur toggle, sea layer
+/src/modules/labels.js      # Build/position labels; zoom filtering
+/src/modules/names.js       # Fantasy hydronyms + island names (size-aware)
+/src/modules/interaction.js # Pan/zoom + hover HUD; world/screen coords
+/src/modules/autofit.js     # computeLandBBox + fitToLand
+/src/selftest.js            # Invariants + badge
+/test-*.html                # Focused test pages (labels, zoom, refine, etc.)
+```
+
+---
+
+## Data Flow (high-level)
+1. **Seed & Sampling** → `rng`, `poissonDiscSampler` (geometry)
+2. **Voronoi** → `buildVoronoi`, `detectNeighbors`
+3. **Heightmap** → `randomMap(count, …)` modifies `polygons[].height ∈ [0,1]`
+4. **Features** → `markFeatures` (sets `featureType`, components)
+5. **Coastline** → `drawCoastline` (and optional `refineCoastlineAndRebuild`)
+6. **Rendering** → `drawPolygons` (+ ocean/shallow layers, optional blur)
+7. **Labels** → `buildFeatureLabels` → `placeLabelsAvoidingCollisions` → `renderLabels`
+8. **Interaction** → `attachInteraction` (zoom, hover HUD)
+9. **Autofit** → `fitToLand` (uses `computeLandBBox`, zoom.transform path)
+10. **Self-tests** → `runSelfTests` + `renderSelfTestBadge`
+
+**Invariant checklist (must keep true):**
+- Heights clamped to `[0..1]` (use `clamp01` when needed).
+- Reciprocal neighbors maintained (use `ensureReciprocalNeighbors` if rebuilding).
+- Polygons keep stable indices across refine where possible; copy `height`/`featureType` when remapping.
+- Labels positioned in **world coordinates**; optional constant-size label mode counterscales by `1/t.k`.
+
+---
+
+## Module Boundaries & Conventions
+- **D3 is global**. Inside modules, rely on global `d3` (no imports).
+- **ES Modules**: export functions and import via relative paths. Keep paths **relative**.
+- **Interaction**: Convert screen→world with `d3.zoomTransform(svg.node())` in D3 v5.
+- **Rendering**: All draw operations respect layer ordering created by `ensureLayers(svg)`.
+- **Refine**: When rebuilding, **carry over** `height` and `featureType` from old → new cells by `oldIndex` mapping when available.
+- **Labels**: Build once per **connected component** (deduplicate); run collision/zoom filtering; then render. Don't attach labels to individual cells.
+- **Names**: Use `makeNamer(rng)`; avoid tautologies ("Mare Sea", "Basin Lake", "Island Island"); use size-aware terms.
+- **Autofit**: Apply transforms via the bound zoom behavior: `svg.call(zoom.transform, d3.zoomIdentity.translate(tx,ty).scale(k))` (don't set `transform` attribute directly).
+
+---
+
+## Style Guidelines
+- **Indent:** 2 spaces; avoid mixed tabs.
+- **Quotes:** Prefer **single quotes**; match local style when editing.
+- **Semicolons:** Match existing files (don't mass-format). Keep them where present in the module you're touching.
+- **Naming:** camelCase for functions/locals; PascalCase for types/classes; UPPER_SNAKE for constants.
+- **Imports:** One per line; group built-ins → internal core → modules.
+- **Comments:** Use `//` for single-line and `/** … */` for exported APIs; include usage where helpful.
+- **No new deps.** No TS convert, no bundlers, no new frameworks.
+
+---
+
+## Performance Rules
+- **Hover/HUD**: Throttle with `requestAnimationFrame`; early-return if hover disabled.
+- **Zoom**: Read the current transform with `d3.zoomTransform(svg.node())`; avoid layout thrash (no forced reflows).
+- **Painting**: Batch DOM writes; prefer updating `d` attributes/text in a single pass. Avoid per-frame `.selectAll().data().enter()` churn for static layers.
+- **Timers**: Use the existing Perf HUD buckets (`zoom`, `hover`, `paint`) and `Timers` in `/src/core/timers.js` for hot paths.
+- **LOD**: Keep raster/vector CSS toggles and blurs optional (`#blurFilter`, `.blur`).
+
+---
+
+## Labeling Rules (Oceans, Lakes, Islands)
+- Build **connected components** for water/land; deduplicate names.
+- **Size-aware** naming: pass normalized area to pick terms (e.g., "Mare/Thalassa" vs "Sea/Ocean"; "Mere/Loch/Tarn" vs "Lake"). See `/src/modules/names.js` and `REALISTIC_HYDRONYMS_IMPLEMENTATION.md`.
+- **Size-based zoom filtering**: Features appear based on area thresholds and zoom level:
+  - **Oceans**: Always visible
+  - **Lakes**: Tiny (50+) at zoom 2x, Small (200+) at zoom 1x, Medium (800+) at zoom 0.5x, All at zoom 4x
+  - **Islands**: Tiny (30+) at zoom 1.5x, Small (150+) at zoom 0.8x, Medium (600+) at zoom 0.4x, All at zoom 3x
+- **Collision avoidance**: Uses quadtree with spiral placement (20 attempts max). Priority: oceans > lakes > islands.
+- Render into `#labels` (under the zoomed group) in **world coords**. For constant-size labels, counter-scale by `1/t.k` on each text node.
+
+---
+
+## Known Issues / Don'ts
+- **Do not** switch D3 versions without a full test pass.
+- **Do not** move labels outside the zoomed world group.
+- **Do not** invent algorithms (e.g., oval masks, new noise types) unless the code already contains them.
+- **Do not** bypass dedup/collision checks "just to show the label". Fix thresholds instead.
+- **Do not** block the main thread on hover; keep the HUD lightweight.
+
+---
+
+## Testing & Verification
+- Run focused test pages: `test-labels-v2.html`, `test-labels-v2.1.html`, `test-svg-zoom.html`, `test-refine.html`, etc.
+- Ensure `runSelfTests()` passes: heights in-range, neighbor symmetry, optional river widths non-negative, etc.
+- Manually verify:
+  - Pan/zoom works smoothly.
+  - Hover cell info is correct at all zooms (screen→world math).
+  - Small island/lake labels appear when zoomed in enough; no duplicate hydronyms.
+  - Autofit centers land properly and applies the transform via the zoom behavior.
+
+---
+
+## Commit & PR Etiquette (for AI-assisted changes)
+- Keep diffs **surgical** and scoped to a single module when possible.
+- Include **WHY** in comments for any algorithmic change.
+- Update/extend self-tests if you change invariants.
+- Add a quick "How to verify" note in the PR description (which test page to load, what to expect).
+- Avoid mass reformatting—respect existing style to keep diffs readable.
+
+---
+
+## Handy Imports / Entry Points
+```js
+// main wiring
+import {{ RNG }} from './core/rng.js';
+import {{ Timers }} from './core/timers.js';
+import {{ ensureLayers, ensureLabelSubgroups }} from './render/layers.js';
+import {{ runSelfTests, renderSelfTestBadge, clamp01, ensureReciprocalNeighbors }} from './selftest.js';
+
+// generation pipeline
+import {{ poissonDiscSampler, buildVoronoi, detectNeighbors }} from './modules/geometry.js';
+import {{ randomMap }} from './modules/heightmap.js';
+import {{ markFeatures }} from './modules/features.js';
+import {{ makeNamer }} from './modules/names.js';
+import {{ drawCoastline }} from './modules/coastline.js';
+import {{ drawPolygons }} from './modules/rendering.js';
+import {{ attachInteraction }} from './modules/interaction.js';
+import {{ fitToLand }} from './modules/autofit.js';
+import {{ refineCoastlineAndRebuild }} from './modules/refine.js';
+import {{ buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom }} from './modules/labels.js';
+```
+*(Adjust `default` vs named exports to match actual modules; above is a quick reference.)*
+
+---
+
+## Project Defaults / Constants (keep stable unless asked)
+- **Sea level**: ~`0.2` (varies per call site; keep consistent across modules)
+- **Refine target spacing**: `~8` px (min spacing factor ~`0.75`)
+- **Map size**: as per the current SVG viewBox and initial width/height in `index.html`
+- **Label thresholds**: `minLakeArea: 0`, `minIslandArea: 0` (no minimum size - all features get names)
+
+---
+
+## "If you're about to… then do this"
+- …add a label? → Group by component, deduplicate, run collision, then zoom-filter, then render.
+- …change point sampling? → Re-run self-tests and verify neighbor symmetry; don't regress performance.
+- …tweak hover/HUD? → Guard with a flag; throttle with rAF; keep conversions via `zoomTransform`.
+- …autofit on load? → Use `computeLandBBox` and `fitToLand` with the bound `zoom` behavior.
