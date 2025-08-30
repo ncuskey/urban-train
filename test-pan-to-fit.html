@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Pan to Fit</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .error { color: red; }
+        .success { color: green; }
+        .info { color: blue; }
+        .warning { color: orange; }
+        
+        #test-svg {
+            border: 1px solid #ccc;
+            background: #f0f0f0;
+        }
+        
+        .controls {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        
+        button {
+            margin: 5px;
+            padding: 8px 16px;
+            background: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background: #0052a3;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Pan to Fit Functionality</h1>
+    
+    <div class="controls">
+        <button onclick="testPanToFit()">Test Pan to Fit</button>
+        <button onclick="resetView()">Reset View</button>
+        <button onclick="testSmallRect()">Test Small Rectangle</button>
+        <button onclick="testLargeText()">Test Large Text</button>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>SVG Test Area</h2>
+        <svg id="test-svg" width="600" height="400">
+            <g id="viewport">
+                <g id="world">
+                    <g id="map"></g>
+                    <g id="labels"></g>
+                </g>
+            </g>
+        </svg>
+    </div>
+
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script type="module">
+        // Import the functions we need to test
+        import { placeOceanLabelInRect } from './src/modules/labels.js';
+        
+        let currentRect = null;
+        let currentLabel = null;
+        
+        // Mock the tryPanToFit function for testing
+        function tryPanToFit(rect, labelPxWidth, viewport, t, nudge = 40) {
+            const [minX, minY, maxX, maxY] = viewport;
+            const rectW = rect.x1 - rect.x0;
+            
+            // Calculate how much more space we need
+            const neededWidth = labelPxWidth + 20;
+            const widthDeficit = neededWidth - rectW;
+            
+            if (widthDeficit <= 0) return false;
+            
+            // Try different pan directions
+            const panDirections = [
+                { dx: nudge, dy: 0, desc: 'right' },
+                { dx: -nudge, dy: 0, desc: 'left' },
+                { dx: 0, dy: nudge, desc: 'down' },
+                { dx: 0, dy: -nudge, desc: 'up' }
+            ];
+            
+            for (const { dx, dy, desc } of panDirections) {
+                const newMinX = minX + dx;
+                const newMaxX = maxX + dx;
+                const newMinY = minY + dy;
+                const newMaxY = maxY + dy;
+                
+                const newRectX0 = Math.max(rect.x0 + dx, newMinX);
+                const newRectX1 = Math.min(rect.x1 + dx, newMaxX);
+                const newRectW = newRectX1 - newRectX0;
+                
+                if (newRectW > rectW) {
+                    console.log(`[test] Would pan ${desc}: ${rectW.toFixed(0)}px → ${newRectW.toFixed(0)}px`);
+                    
+                    // Apply the pan
+                    const zoom = d3.select('svg').node().__ZOOM__;
+                    if (zoom) {
+                        const screenDx = dx * t.k;
+                        const screenDy = dy * t.k;
+                        
+                        svg.transition().duration(300).call(zoom.translateBy, screenDx, screenDy);
+                        return true;
+                    }
+                }
+            }
+            
+            return false;
+        }
+        
+        function setupZoom() {
+            const svg = d3.select('#test-svg');
+            
+            // Create zoom behavior
+            const zoom = d3.zoom()
+                .scaleExtent([0.5, 4])
+                .on('zoom', function() {
+                    const t = d3.event.transform;
+                    d3.select('#world').attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
+                });
+            
+            svg.call(zoom);
+            svg.node().__ZOOM__ = zoom;
+            
+            // Set initial transform
+            svg.call(zoom.transform, d3.zoomIdentity.translate(50, 50).scale(1));
+        }
+        
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+            d3.select('#map').selectAll('*').remove();
+            d3.select('#labels').selectAll('*').remove();
+        }
+        
+        function addResult(message, type = 'info') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = type;
+            div.innerHTML = message;
+            results.appendChild(div);
+        }
+        
+        function testPanToFit() {
+            clearResults();
+            setupZoom();
+            
+            const svg = d3.select('#test-svg');
+            
+            // Create a small rectangle that would force font size below minimum
+            const rect = { x0: 100, y0: 100, x1: 150, y1: 130 };
+            const label = { text: "Very Long Ocean Name That Needs More Space", x: 0, y: 0, fontSize: 28 };
+            
+            currentRect = rect;
+            currentLabel = label;
+            
+            // Visualize the rectangle
+            svg.select('#map').append('rect')
+                .attr('x', rect.x0).attr('y', rect.y0)
+                .attr('width', rect.x1 - rect.x0).attr('height', rect.y1 - rect.y0)
+                .attr('fill', 'none').attr('stroke', '#ff0000')
+                .attr('stroke-width', 2).attr('stroke-dasharray', '5,5');
+            
+            addResult('📊 Testing pan to fit with cramped rectangle', 'info');
+            addResult(`Rectangle: ${(rect.x1 - rect.x0).toFixed(0)}x${(rect.y1 - rect.y0).toFixed(0)}`, 'info');
+            addResult(`Text: "${label.text}"`, 'info');
+            
+            // Test the pan to fit logic
+            const t = d3.zoomTransform(svg.node());
+            const viewport = [0, 0, 600, 400];
+            const worldBounds = [
+                (0 - t.x) / t.k,
+                (0 - t.y) / t.k,
+                (viewport[2] - t.x) / t.k,
+                (viewport[3] - t.y) / t.k
+            ];
+            
+            // Measure text width
+            const tempText = svg.append('text')
+                .attr('x', -99999).attr('y', -99999)
+                .attr('font-size', 28).attr('font-weight', 700)
+                .text(label.text);
+            const textWidth = tempText.node().getComputedTextLength();
+            tempText.remove();
+            
+            addResult(`Text width: ${textWidth.toFixed(0)}px`, 'info');
+            
+            const panned = tryPanToFit(rect, textWidth, worldBounds, t);
+            
+            if (panned) {
+                addResult('✅ Pan to fit triggered successfully!', 'success');
+            } else {
+                addResult('❌ Pan to fit did not trigger', 'warning');
+            }
+        }
+        
+        function testSmallRect() {
+            clearResults();
+            setupZoom();
+            
+            const svg = d3.select('#test-svg');
+            
+            // Create an even smaller rectangle
+            const rect = { x0: 100, y0: 100, x1: 120, y1: 110 };
+            const label = { text: "Ocean", x: 0, y: 0, fontSize: 28 };
+            
+            // Visualize the rectangle
+            svg.select('#map').append('rect')
+                .attr('x', rect.x0).attr('y', rect.y0)
+                .attr('width', rect.x1 - rect.x0).attr('height', rect.y1 - rect.y0)
+                .attr('fill', 'none').attr('stroke', '#cc6600')
+                .attr('stroke-width', 2).attr('stroke-dasharray', '5,5');
+            
+            addResult('📊 Testing with very small rectangle', 'info');
+            addResult(`Rectangle: ${(rect.x1 - rect.x0).toFixed(0)}x${(rect.y1 - rect.y0).toFixed(0)}`, 'info');
+            
+            // Test placeOceanLabelInRect
+            const panned = placeOceanLabelInRect(label, rect, svg, { minFS: 16 });
+            
+            if (panned) {
+                addResult('✅ Pan to fit triggered for small rectangle!', 'success');
+            } else {
+                addResult('❌ Pan to fit did not trigger for small rectangle', 'warning');
+            }
+        }
+        
+        function testLargeText() {
+            clearResults();
+            setupZoom();
+            
+            const svg = d3.select('#test-svg');
+            
+            // Create a medium rectangle with very long text
+            const rect = { x0: 100, y0: 100, x1: 200, y1: 140 };
+            const label = { text: "Extremely Long Ocean Name That Will Definitely Need More Space Than Available", x: 0, y: 0, fontSize: 28 };
+            
+            // Visualize the rectangle
+            svg.select('#map').append('rect')
+                .attr('x', rect.x0).attr('y', rect.y0)
+                .attr('width', rect.x1 - rect.x0).attr('height', rect.y1 - rect.y0)
+                .attr('fill', 'none').attr('stroke', '#6600cc')
+                .attr('stroke-width', 2).attr('stroke-dasharray', '5,5');
+            
+            addResult('📊 Testing with very long text', 'info');
+            addResult(`Rectangle: ${(rect.x1 - rect.x0).toFixed(0)}x${(rect.y1 - rect.y0).toFixed(0)}`, 'info');
+            addResult(`Text: "${label.text}"`, 'info');
+            
+            // Test placeOceanLabelInRect
+            const panned = placeOceanLabelInRect(label, rect, svg, { minFS: 16 });
+            
+            if (panned) {
+                addResult('✅ Pan to fit triggered for long text!', 'success');
+            } else {
+                addResult('❌ Pan to fit did not trigger for long text', 'warning');
+            }
+        }
+        
+        function resetView() {
+            const svg = d3.select('#test-svg');
+            svg.call(d3.select('svg').node().__ZOOM__.transform, d3.zoomIdentity.translate(50, 50).scale(1));
+            addResult('🔄 View reset to initial position', 'info');
+        }
+        
+        // Initialize
+        setupZoom();
+        addResult('🚀 Test page loaded. Click buttons to test pan to fit functionality.', 'info');
+        
+        // Make functions globally available
+        window.testPanToFit = testPanToFit;
+        window.resetView = resetView;
+        window.testSmallRect = testSmallRect;
+        window.testLargeText = testLargeText;
+    </script>
+</body>
+</html>

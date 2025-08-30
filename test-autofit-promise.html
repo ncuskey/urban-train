@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Autofit Promise</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        button { padding: 10px 15px; margin: 5px; background: #007cba; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #005a87; }
+        .log { background: #f5f5f5; padding: 10px; border-radius: 3px; font-family: monospace; max-height: 300px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>Test Autofit Promise Implementation</h1>
+    
+    <div class="test-section">
+        <h3>Autofit Promise Test</h3>
+        <p>This test verifies that the autofit function returns a Promise and resolves correctly.</p>
+        <button onclick="testAutofitPromise()">Test Autofit Promise</button>
+        <button onclick="testAutoFitToWorld()">Test autoFitToWorld</button>
+        <div id="log" class="log"></div>
+    </div>
+
+    <script type="module">
+        import { fitToLand, autoFitToWorld } from './src/modules/autofit.js';
+        import { getVisibleWorldBounds } from './src/modules/labels.js';
+        
+        // Make functions globally available for testing
+        window.fitToLand = fitToLand;
+        window.autoFitToWorld = autoFitToWorld;
+        window.getVisibleWorldBounds = getVisibleWorldBounds;
+        
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${timestamp}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        window.testAutofitPromise = async function() {
+            log('Testing fitToLand Promise...');
+            
+            try {
+                // Mock data for testing
+                const mockSvg = { 
+                    transition: () => ({ 
+                        duration: () => ({ 
+                            on: (event, callback) => {
+                                if (event === 'end.autofit') {
+                                    setTimeout(callback, 100); // Simulate transition
+                                }
+                                return { call: () => {} };
+                            }
+                        })
+                    })
+                };
+                const mockZoom = {};
+                const mockPolygons = [
+                    [[0, 0], [100, 0], [100, 100], [0, 100]] // Mock polygon
+                ];
+                
+                const result = await fitToLand({
+                    svg: mockSvg,
+                    zoom: mockZoom,
+                    polygons: mockPolygons,
+                    width: 800,
+                    height: 600,
+                    duration: 100
+                });
+                
+                log('✅ fitToLand Promise resolved successfully');
+                log(`Result: ${result}`);
+            } catch (error) {
+                log(`❌ fitToLand Promise failed: ${error.message}`);
+            }
+        };
+        
+        window.testAutoFitToWorld = async function() {
+            log('Testing autoFitToWorld...');
+            
+            try {
+                // Mock data for testing
+                const mockSvg = { 
+                    transition: () => ({ 
+                        duration: () => ({ 
+                            on: (event, callback) => {
+                                if (event === 'end.autofit') {
+                                    setTimeout(callback, 100); // Simulate transition
+                                }
+                                return { call: () => {} };
+                            }
+                        })
+                    })
+                };
+                const mockZoom = {};
+                const worldBBox = { x: 0, y: 0, width: 800, height: 600 };
+                
+                const result = await autoFitToWorld(mockSvg, mockZoom, 800, 600, worldBBox, 100);
+                
+                log('✅ autoFitToWorld Promise resolved successfully');
+                log(`Result: ${result}`);
+            } catch (error) {
+                log(`❌ autoFitToWorld Promise failed: ${error.message}`);
+            }
+        };
+        
+        log('Test page loaded. Click buttons to test Promise-based autofit functions.');
+    </script>
+</body>
+</html>

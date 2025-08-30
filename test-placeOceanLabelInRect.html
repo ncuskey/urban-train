@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test placeOceanLabelInRect</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .error { color: red; }
+        .success { color: green; }
+        .info { color: blue; }
+        
+        #test-svg {
+            border: 1px solid #ccc;
+            background: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test placeOceanLabelInRect Function</h1>
+    
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>SVG Test Area</h2>
+        <svg id="test-svg" width="600" height="400">
+            <g id="viewport">
+                <g id="world">
+                    <g id="map"></g>
+                    <g id="labels">
+                        <g id="labels-features"></g>
+                    </g>
+                </g>
+            </g>
+        </svg>
+    </div>
+
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script type="module">
+        import { placeOceanLabelInRect } from './src/modules/labels.js';
+        
+        function runTest() {
+            const results = [];
+            const svg = d3.select('#test-svg');
+            
+            try {
+                // Test case 1: Large rectangle, short text
+                const rect1 = { x0: 50, y0: 50, x1: 250, y1: 150 };
+                const label1 = { text: "Ocean", x: 0, y: 0, fontSize: 28 };
+                
+                const panned1 = placeOceanLabelInRect(label1, rect1, svg);
+                results.push(`<div class="success">✅ Test 1: "${label1.text}" placed at (${label1.x.toFixed(1)}, ${label1.y.toFixed(1)}) with fontSize: ${label1.fontSize}</div>`);
+                results.push(`<div class="info">📊 Rectangle: ${(rect1.x1 - rect1.x0).toFixed(0)}x${(rect1.y1 - rect1.y0).toFixed(0)}, usable space: ${(rect1.x1 - rect1.x0 - 20).toFixed(0)}x${(rect1.y1 - rect1.y0 - 20).toFixed(0)}</div>`);
+                if (panned1) results.push(`<div class="warning">⚠️ Pan to fit triggered for test 1</div>`);
+                
+                // Visualize rectangle 1
+                svg.select('#map').append('rect')
+                    .attr('x', rect1.x0).attr('y', rect1.y0)
+                    .attr('width', rect1.x1 - rect1.x0).attr('height', rect1.y1 - rect1.y0)
+                    .attr('fill', 'none').attr('stroke', '#0066cc')
+                    .attr('stroke-width', 2).attr('stroke-dasharray', '5,5');
+                
+                // Visualize label 1
+                svg.select('#labels-features').append('text')
+                    .attr('x', label1.x).attr('y', label1.y)
+                    .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
+                    .attr('font-size', label1.fontSize).attr('font-weight', 700)
+                    .style('paint-order', 'stroke').style('stroke', '#000').style('stroke-width', 3).style('fill', '#fff')
+                    .text(label1.text);
+                
+                // Test case 2: Small rectangle, long text (should shrink)
+                const rect2 = { x0: 300, y0: 50, x1: 450, y1: 100 };
+                const label2 = { text: "Very Long Ocean Name That Should Shrink", x: 0, y: 0, fontSize: 28 };
+                
+                const panned2 = placeOceanLabelInRect(label2, rect2, svg);
+                
+                results.push(`<div class="success">✅ Test 2: "${label2.text}" placed at (${label2.x.toFixed(1)}, ${label2.y.toFixed(1)}) with fontSize: ${label2.fontSize}</div>`);
+                results.push(`<div class="info">📊 Rectangle: ${(rect2.x1 - rect2.x0).toFixed(0)}x${(rect2.y1 - rect2.y0).toFixed(0)}, usable space: ${(rect2.x1 - rect2.x0 - 20).toFixed(0)}x${(rect2.y1 - rect2.y0 - 20).toFixed(0)}</div>`);
+                if (panned2) results.push(`<div class="warning">⚠️ Pan to fit triggered for test 2</div>`);
+                
+                // Visualize rectangle 2
+                svg.select('#map').append('rect')
+                    .attr('x', rect2.x0).attr('y', rect2.y0)
+                    .attr('width', rect2.x1 - rect2.x0).attr('height', rect2.y1 - rect2.y0)
+                    .attr('fill', 'none').attr('stroke', '#cc6600')
+                    .attr('stroke-width', 2).attr('stroke-dasharray', '5,5');
+                
+                // Visualize label 2
+                svg.select('#labels-features').append('text')
+                    .attr('x', label2.x).attr('y', label2.y)
+                    .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
+                    .attr('font-size', label2.fontSize).attr('font-weight', 700)
+                    .style('paint-order', 'stroke').style('stroke', '#000').style('stroke-width', 3).style('fill', '#fff')
+                    .text(label2.text);
+                
+                // Test case 3: Very small rectangle (should hit minimum font size)
+                const rect3 = { x0: 50, y0: 200, x1: 150, y1: 230 };
+                const label3 = { text: "Tiny Ocean", x: 0, y: 0, fontSize: 28 };
+                
+                const panned3 = placeOceanLabelInRect(label3, rect3, svg);
+                
+                results.push(`<div class="success">✅ Test 3: "${label3.text}" placed at (${label3.x.toFixed(1)}, ${label3.y.toFixed(1)}) with fontSize: ${label3.fontSize}</div>`);
+                results.push(`<div class="info">📊 Rectangle: ${(rect3.x1 - rect3.x0).toFixed(0)}x${(rect3.y1 - rect3.y0).toFixed(0)}, usable space: ${(rect3.x1 - rect3.x0 - 20).toFixed(0)}x${(rect3.y1 - rect3.y0 - 20).toFixed(0)}</div>`);
+                if (panned3) results.push(`<div class="warning">⚠️ Pan to fit triggered for test 3</div>`);
+                
+                // Visualize rectangle 3
+                svg.select('#map').append('rect')
+                    .attr('x', rect3.x0).attr('y', rect3.y0)
+                    .attr('width', rect3.x1 - rect3.x0).attr('height', rect3.y1 - rect3.y0)
+                    .attr('fill', 'none').attr('stroke', '#6600cc')
+                    .attr('stroke-width', 2).attr('stroke-dasharray', '5,5');
+                
+                // Visualize label 3
+                svg.select('#labels-features').append('text')
+                    .attr('x', label3.x).attr('y', label3.y)
+                    .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
+                    .attr('font-size', label3.fontSize).attr('font-weight', 700)
+                    .style('paint-order', 'stroke').style('stroke', '#000').style('stroke-width', 3).style('fill', '#fff')
+                    .text(label3.text);
+                
+                results.push(`<div class="info">📊 All tests completed successfully!</div>`);
+                
+            } catch (error) {
+                results.push(`<div class="error">❌ Error: ${error.message}</div>`);
+                console.error('Test error:', error);
+            }
+            
+            return results;
+        }
+        
+        // Run tests and display results
+        const results = runTest();
+        document.getElementById('results').innerHTML = results.join('');
+    </script>
+</body>
+</html>

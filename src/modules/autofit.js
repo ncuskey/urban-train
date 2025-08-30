@@ -42,6 +42,7 @@ export function computeLandBBox(polygons, { seaLevel = 0.2, preferFeatureType = 
  * Uses the existing zoom behavior bound to the SVG.
  * - Keeps default behavior unchanged unless called.
  * - Respects zoom.scaleExtent() min/max.
+ * - Returns a Promise that resolves when the transition completes.
  */
 export function fitToLand({
   svg,
@@ -54,10 +55,10 @@ export function fitToLand({
   margin = 0.08,     // 8% padding on all sides
   duration = 600
 }) {
-  if (!svg || !polygons || !polygons.length) return;
+  if (!svg || !polygons || !polygons.length) return Promise.resolve();
 
   const bbox = computeLandBBox(polygons, { seaLevel, preferFeatureType });
-  if (!bbox) return;
+  if (!bbox) return Promise.resolve();
 
   // Guard against degenerate bbox
   const bboxW = Math.max(1e-6, bbox.w);
@@ -80,9 +81,33 @@ export function fitToLand({
   const tx = (width  / 2) - k * bbox.cx;
   const ty = (height / 2) - k * bbox.cy;
 
-  // Apply transform via the same zoom behavior bound to SVG, so on('zoom') fires
-  svg
-    .transition()
-    .duration(duration)
-    .call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
+  // Return a Promise that resolves when the transition completes
+  return new Promise(resolve => {
+    const tr = svg
+      .transition()
+      .duration(duration);
+    
+    tr.on('end.autofit', resolve).on('interrupt.autofit', resolve);
+    tr.call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
+  });
+}
+
+/**
+ * Auto-fit to world bounds with Promise-based completion.
+ * This function matches the user's specification for the main.js integration.
+ */
+export function autoFitToWorld(svg, zoom, w, h, worldBBox, duration = 400) {
+  const k = Math.min(
+    (w - 64) / (worldBBox.width  || 1),
+    (h - 64) / (worldBBox.height || 1)
+  );
+  const tx = (w  - k * (worldBBox.x + worldBBox.width  / 2));
+  const ty = (h  - k * (worldBBox.y + worldBBox.height / 2));
+  const t  = d3.zoomIdentity.translate(tx, ty).scale(k);
+
+  return new Promise(resolve => {
+    const tr = svg.transition().duration(duration);
+    tr.on('end.autofit', resolve).on('interrupt.autofit', resolve);
+    tr.call(zoom.transform, t);
+  });
 }

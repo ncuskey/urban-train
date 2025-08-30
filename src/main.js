@@ -11,10 +11,10 @@ import { markFeatures } from "./modules/features.js";
 import { makeNamer } from "./modules/names.js";
 import { drawCoastline } from "./modules/coastline.js";
 import { drawPolygons, toggleBlur } from "./modules/rendering.js";
-import { attachInteraction } from "./modules/interaction.js";
-import { fitToLand } from './modules/autofit.js';
+import { attachInteraction, getVisibleWorldBounds, padBounds } from "./modules/interaction.js";
+import { fitToLand, autoFitToWorld } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
-import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels } from "./modules/labels.js";
+import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels } from "./modules/labels.js";
 
 // === Minimal Perf HUD ==========================================
 const Perf = (() => {
@@ -44,10 +44,135 @@ const Perf = (() => {
 
 // Global state object for seed management
 const state = {
-  seed: Math.floor(Math.random() * 1000000) // Random seed for initial generation
+  seed: Math.floor(Math.random() * 1000000), // Random seed for initial generation
+  getCellAtXY: null, // Will be set after Voronoi/refine
+  seaLevel: 0.2
 };
 
-// Spatial picking system (no DOM hit-testing)
+// Build robust XY→cell accessor using simple nearest-neighbor search (D3 v5 compatible)
+function buildXYAccessor(cells) {
+  if (!cells || cells.length === 0) {
+    console.warn('[accessor] No cells provided to buildXYAccessor');
+    return null;
+  }
+  
+  // Extract centroids for nearest-neighbor search
+  const points = cells.map((cell, index) => {
+    // Calculate centroid from polygon vertices
+    let cx = 0, cy = 0, count = 0;
+    if (cell && cell.length > 0) {
+      cell.forEach(vertex => {
+        if (vertex && vertex.length >= 2) {
+          cx += vertex[0];
+          cy += vertex[1];
+          count++;
+        }
+      });
+    }
+    return {
+      x: count > 0 ? cx / count : 0,
+      y: count > 0 ? cy / count : 0,
+      index
+    };
+  });
+  
+  // Return accessor function using simple nearest-neighbor search
+  return (x, y) => {
+    let nearest = null;
+    let minDist = Infinity;
+    
+    for (const point of points) {
+      const dx = point.x - x;
+      const dy = point.y - y;
+      const dist = dx * dx + dy * dy; // squared distance (faster than sqrt)
+      
+      if (dist < minDist) {
+        minDist = dist;
+        nearest = cells[point.index];
+      }
+    }
+    
+    return nearest;
+  };
+}
+
+// Create water test function using the accessor
+function makeIsWater(getCellAtXY, seaLevel) {
+  return function isWaterAt(x, y) {
+    const cell = getCellAtXY(x, y);
+    if (!cell) return false; // no cell → treat as not-water
+    
+    // Handle different cell data structures
+    let height = null;
+    let featureType = null;
+    
+    if (cell) {
+      // Try different property names for height
+      height = cell.height ?? cell.data?.height ?? null;
+      featureType = cell.featureType ?? cell.data?.featureType ?? null;
+      
+      // If still null, try accessing the polygon directly via index
+      if (height === null && cell.index !== undefined) {
+        const polygon = window.currentPolygons?.[cell.index];
+        if (polygon) {
+          height = polygon.height;
+          featureType = polygon.featureType;
+        }
+      }
+    }
+    
+    // Return true if water and not a lake (exclude lakes from ocean placement)
+    return !!cell && height !== null && height <= seaLevel && featureType !== "Lake";
+  };
+}
+
+// Helper to get visible world bounds after current zoom/pan (with explicit width/height)
+function getVisibleWorldBoundsWithSize(svg, zoom, width, height) {
+  const t = d3.zoomTransform(svg.node());
+  // Inverse-transform the viewport corners into world space:
+  const topLeft = t.invert([0, 0]);
+  const bottomRight = t.invert([width, height]);
+  return [topLeft[0], topLeft[1], bottomRight[0], bottomRight[1]];
+}
+
+// Place ocean label at a specific spot (circle-based placement)
+function placeOceanLabelAtSpot(oceanLabel, spot, svg) {
+  oceanLabel.x = spot.x;
+  oceanLabel.y = spot.y;
+  oceanLabel.fontSize = spot.fontSize; // Store the computed font size
+  
+  // Add fixed and keepWithin properties for collision solver
+  const halfW = measureTextWidth(svg, oceanLabel.text, { fontSize: spot.fontSize }) / 2;
+  oceanLabel.fixed = true; // ⬅ immovable
+  oceanLabel.keepWithin = {
+    cx: spot.x,
+    cy: spot.y,
+    r: Math.max(spot.radius - halfW - 6, 0) // margin inside empty circle
+  };
+  
+  console.log(`[labels] Ocean "${oceanLabel.text}" placed at widest water: (${spot.x.toFixed(1)}, ${spot.y.toFixed(1)}) radius: ${spot.radius.toFixed(1)}, fontSize: ${spot.fontSize}`);
+  
+  // Log the decision details
+  console.log('[ocean] spot', { 
+    x: spot.x.toFixed(1), 
+    y: spot.y.toFixed(1), 
+    r: spot.radius.toFixed(1), 
+    fs: spot.fontSize 
+  });
+  
+  // Temporarily draw the largest empty circle to visually validate
+  d3.select('#world').append('circle')
+    .attr('cx', spot.x).attr('cy', spot.y).attr('r', spot.radius)
+    .attr('fill', 'none').attr('stroke', '#fff')
+    .attr('stroke-dasharray', '4 4').attr('opacity', 0.5)
+    .attr('class', 'debug-circle');
+}
+
+
+
+// Spatial picking system (no DOM hit-testing) - DEPRECATED: Now using buildXYAccessor
+// Keeping for backward compatibility with existing code
+// ⚠️ NOTE: This is NOT used for ocean label placement anymore
 let spatialIndex;
 function buildPickingIndex(cells) {
   // Build simple spatial index from cell centroids
@@ -157,6 +282,12 @@ function afterGenerate() {
   updateCellsRaster();
   // Disable pointer events on heavy layers (use spatial picking instead)
   d3.select('.mapCells').style('pointer-events', 'none');
+  
+  // Also ensure the XY accessor is built for ocean label placement
+  if (!state.getCellAtXY && window.currentPolygons) {
+    state.getCellAtXY = buildXYAccessor(window.currentPolygons);
+    console.log(`[afterGenerate] Built XY accessor for ${window.currentPolygons.length} cells`);
+  }
 }
 
 // Global transform tracking for coordinate space conversions
@@ -194,7 +325,7 @@ console.timeEnd('generate');
 console.groupEnd();
 
 // general function; run onload of to start from scratch
-function generate(count) {
+async function generate(count) {
   timers.clear();
   timers.mark('generate');
 
@@ -205,6 +336,12 @@ function generate(count) {
   const existingLabels = d3.select('#labels');
   if (!existingLabels.empty()) {
     existingLabels.selectAll('*').remove();
+  }
+  
+  // Clear any debug circles from previous generation
+  const existingDebugCircles = d3.selectAll('.debug-circle');
+  if (!existingDebugCircles.empty()) {
+    existingDebugCircles.remove();
   }
 
   var svg = d3.select("svg"),
@@ -332,6 +469,14 @@ function generate(count) {
     }
     // =====================================================================
     
+    // Build robust XY accessor after refine/Voronoi (when cells have x,y,height,featureType)
+    state.getCellAtXY = buildXYAccessor(polygons);
+    if (!state.getCellAtXY) {
+      console.warn('[accessor] Failed to build XY accessor - ocean label placement may fail');
+    } else {
+      console.log(`[accessor] Built XY accessor for ${polygons.length} cells`);
+    }
+    
     // Sanity check: verify heights are preserved
     (function logHeightStats(tag, polys){
       let c = 0, min = Infinity, max = -Infinity, sum = 0;
@@ -351,7 +496,7 @@ function generate(count) {
       rng
     });
     
-    // Build & place feature labels - no minimum size for lakes/islands
+    // Build feature labels (without ocean placement for now)
     const featureLabels = buildFeatureLabels({
       polygons,
       mapWidth,
@@ -406,6 +551,9 @@ function generate(count) {
       console.log(`[labels] oceans=${featureLabels.filter(l=>l.kind==='ocean').length}, lakes=${featureLabels.filter(l=>l.kind==='lake').length}, islands=${featureLabels.filter(l=>l.kind==='island').length}, placed=${placedFeatures.length}`);
     }
     
+    // Store featureLabels for later use in ocean placement
+    window.__featureLabels = featureLabels;
+    
     // Old label system removed - using new feature labels
     drawCoastline({
       polygons,
@@ -418,6 +566,10 @@ function generate(count) {
       lakecoast,
       oceanLayer
     });
+    
+    // Ocean label placement moved to after autofit completes
+    // We'll place ocean labels after autofit completes, not here
+
     drawPolygons({
       polygons,
       color,
@@ -460,7 +612,157 @@ function generate(count) {
 
   // OPTIONAL: auto-fit after generation
   const AUTO_FIT = true;
-  if (AUTO_FIT) window.fitLand();
+  if (AUTO_FIT) {
+    console.log('[autofit] Starting autofit to land...');
+    // Auto-fit to land and then place ocean labels
+    await window.fitLand();
+    console.log('[autofit] Autofit completed, now placing ocean labels...');
+    
+    // Alternative: Use autoFitToWorld for more control
+    // const worldBBox = { x: 0, y: 0, width: mapWidth, height: mapHeight };
+    // await autoFitToWorld(svgSel, interact.zoom, mapWidth, mapHeight, worldBBox, 400);
+    
+    // Now place ocean labels with the correct post-autofit bounds
+    // Use the stored featureLabels from earlier in the generation
+    const featureLabels = window.__featureLabels || [];
+    const oceanLabels = featureLabels.filter(l => l.kind === 'ocean');
+    
+    console.log('[ocean] DEBUG: After autofit, featureLabels available:', {
+      stored: !!window.__featureLabels,
+      count: featureLabels.length,
+      oceanCount: oceanLabels.length,
+      sample: oceanLabels.slice(0, 2).map(l => ({ kind: l.kind, text: l.text }))
+    });
+    
+    if (oceanLabels.length > 0) {
+      console.log('[ocean] 🎯 Placing ocean labels after autofit with correct bounds');
+      
+      // Get the post-autofit visible world bounds
+      const [x0, y0, x1, y1] = getVisibleWorldBoundsFromLabels(svgSel, mapWidth, mapHeight);
+      const visibleWorld = [x0, y0, x1, y1];
+      
+      console.log('[ocean] DEBUG: Post-autofit bounds:', {
+        bounds: visibleWorld,
+        svgWidth: mapWidth,
+        svgHeight: mapHeight
+      });
+      
+      // Guard call order - don't run rectangle search until accessor exists
+      if (typeof state.getCellAtXY !== 'function') {
+        console.warn('[ocean] getCellAtXY not ready; using fallback circle-based placement.');
+        
+        // Fallback to circle-based placement
+        for (const oceanLabel of oceanLabels) {
+          const t = d3.zoomTransform(svgSel.node());
+          const paddedBounds = padBounds(visibleWorld, 32, t.k);
+          
+          // Create water test function for this ocean label
+          const isWaterAt = makeIsWater((x, y) => diagram.find(x, y), 0.2);
+          
+          const spot = findOceanLabelSpot({
+            svg: svgSel,
+            getCellAtXY: (x, y) => diagram.find(x, y),
+            isWaterAt: isWaterAt,
+            bounds: paddedBounds,
+            text: oceanLabel.text,
+            baseFontSize: 28,
+            minFontSize: 16,
+            coastStep: 4,
+            gridStep: 16,
+            refinements: [8, 4, 2],
+            margin: 10
+          });
+          
+          if (spot) {
+            placeOceanLabelAtSpot(oceanLabel, spot, svgSel);
+          } else {
+            console.log(`[labels] Ocean "${oceanLabel.text}" using centroid: (${oceanLabel.x.toFixed(1)}, ${oceanLabel.y.toFixed(1)}) - no suitable spot found`);
+          }
+        }
+      } else {
+        // Primary: Use rectangle-based placement with post-autofit bounds
+        console.log('[ocean] 🎯 Primary path: Using rectangle-based ocean label placement with post-autofit bounds');
+        const t = d3.zoomTransform(svgSel.node());
+        const paddedBounds = padBounds(visibleWorld, 32, t.k);
+        
+        // Create water test function using the accessor
+        const isWaterAt = makeIsWater(state.getCellAtXY, state.seaLevel);
+        
+        const rect = findOceanLabelRect({
+          bounds: paddedBounds,
+          step: 8,               // sampling resolution
+          edgePad: 12,           // keep off hard edges
+          coastPad: 6,           // inset from coastline
+          getCellAtXY: state.getCellAtXY,
+          isWaterAt
+        });
+
+        console.log('[ocean] Rectangle finder debug:', {
+          bounds: paddedBounds,
+          rect: rect,
+          sanity: rect ? `✅ Found ${rect.x1 - rect.x0}x${rect.y1 - rect.y0} rectangle from ${rect.corner} corner` : '❌ No rectangle found'
+        });
+
+        if (rect) {
+          // Place ocean labels in the rectangle
+          console.log(`[ocean] ✅ Using rectangle-based placement for ${oceanLabels.length} ocean label(s)`);
+          let anyPanned = false;
+          for (const oceanLabel of oceanLabels) {
+            const panned = placeOceanLabelInRect(oceanLabel, rect, svgSel);
+            if (panned) anyPanned = true;
+          }
+          
+          // If any label caused panning, wait for the pan to complete and then recalculate
+          if (anyPanned) {
+            console.log('[ocean] Panning occurred, will recalculate labels after pan completes');
+            // The pan transition will trigger a zoom event, which can trigger label recalculation
+            // For now, we'll let the current labels stand and let the user manually trigger recalculation
+          }
+          
+          // Debug visualization of the rectangle
+          d3.select('#world').append('rect')
+            .attr('x', rect.x0).attr('y', rect.y0)
+            .attr('width', rect.x1 - rect.x0).attr('height', rect.y1 - rect.y0)
+            .attr('fill', 'none').attr('stroke', '#ff0000')
+            .attr('stroke-width', 2).attr('stroke-dasharray', '6 4').attr('opacity', 0.4)
+            .attr('class', 'debug-rect');
+        } else {
+          console.warn('[ocean] ❌ No suitable rectangle found; using fallback circle-based placement.');
+          
+          // Fallback to circle-based placement
+          console.log(`[ocean] ⚠️ Fallback: Using circle-based placement for ${oceanLabels.length} ocean label(s)`);
+          for (const oceanLabel of oceanLabels) {
+            const t = d3.zoomTransform(svgSel.node());
+            const paddedBounds = padBounds(visibleWorld, 32, t.k);
+            
+            // Create water test function for this ocean label
+            const isWaterAt = makeIsWater((x, y) => diagram.find(x, y), 0.2);
+            
+            const spot = findOceanLabelSpot({
+              svg: svgSel,
+              getCellAtXY: (x, y) => diagram.find(x, y),
+              isWaterAt: isWaterAt,
+              bounds: paddedBounds,
+              text: oceanLabel.text,
+              baseFontSize: 28,
+              minFontSize: 16,
+              coastStep: 4,
+              gridStep: 16,
+              refinements: [8, 4, 2],
+              margin: 10
+            });
+            
+            if (spot) {
+              console.log(`[ocean] 🔄 Fallback: Placing "${oceanLabel.text}" at widest water spot`);
+              placeOceanLabelAtSpot(oceanLabel, spot, svgSel);
+            } else {
+              console.log(`[labels] Ocean "${oceanLabel.text}" using centroid: (${oceanLabel.x.toFixed(1)}, ${oceanLabel.y.toFixed(1)}) - no suitable spot found`);
+            }
+          }
+        }
+      }
+    }
+  }
 
 
 
@@ -527,6 +829,25 @@ function generate(count) {
 
 
 
+
+// Simple ocean label placement function using post-autofit bounds
+function placeOceanLabel() {
+  const [x0, y0, x1, y1] = getVisibleWorldBoundsFromLabels(d3.select('#svgRoot'), mapWidth, mapHeight);
+  const rect = findOceanLabelRect({
+    bounds: [x0, y0, x1, y1],  // <- visible bounds after autofit
+    step: 8,
+    edgePad: 12,
+    coastPad: 6,
+    getCellAtXY: state.getCellAtXY,
+    isWaterAt: makeIsWater(state.getCellAtXY, state.seaLevel)
+  });
+  if (rect) {
+    const oceanLabels = featureLabels.filter(l => l.kind === 'ocean');
+    for (const oceanLabel of oceanLabels) {
+      placeOceanLabelInRect(oceanLabel, rect, svgSel);
+    }
+  }
+}
 
 // Generate a completely new random map with a fresh seed
 function generateRandomMap(count = 5) {

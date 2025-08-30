@@ -94,7 +94,7 @@ For comprehensive debugging and testing, see the `/dev/` directory:
 - **`labels.js`**: Label generation, placement, and zoom filtering
 - **`names.js`**: Fantasy hydronyms and island names
 - **`interaction.js`**: Pan/zoom and hover HUD
-- **`autofit.js`**: Land bounding box and fit-to-view
+- **`autofit.js`**: Land bounding box, Promise-based fit-to-view, and autoFitToWorld
 
 ### **Data Flow**
 1. **Seed & Sampling** → `rng`, `poissonDiscSampler`
@@ -103,7 +103,8 @@ For comprehensive debugging and testing, see the `/dev/` directory:
 4. **Features** → `markFeatures` (sets `featureType`, components)
 5. **Labels** → `buildFeatureLabels` → `placeLabelsAvoidingCollisions` → `filterByZoom`
 6. **Interaction** → `attachInteraction` (zoom, hover HUD)
-7. **Autofit** → `fitToLand` (uses `computeLandBBox`)
+7. **Autofit** → `fitToLand` (Promise-based, uses `computeLandBBox`)
+8. **Ocean Labels** → Placed after autofit with correct post-transform bounds
 
 ## Configuration
 
@@ -125,6 +126,19 @@ For comprehensive debugging and testing, see the `/dev/` directory:
   maxCombinations: 1000, // Maximum combinations to try
   offsetDistance: 0.6  // 60% of label size for offsets
 }
+```
+
+### **Promise-Based Autofit**
+```javascript
+// fitToLand now returns a Promise for proper sequencing
+await fitToLand({
+  svg, zoom, polygons, width, height,
+  seaLevel: 0.2, preferFeatureType: true,
+  margin: 0.08, duration: 600
+});
+
+// Ocean labels placed after autofit with correct bounds
+const [x0, y0, x1, y1] = getVisibleWorldBounds(svg, width, height);
 ```
 
 ## Performance

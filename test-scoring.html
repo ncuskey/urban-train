@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Rectangle Scoring</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .error { color: red; }
+        .success { color: green; }
+        .info { color: blue; }
+        
+        #test-svg {
+            border: 1px solid #ccc;
+            background: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Rectangle Scoring Function</h1>
+    
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>SVG Test Area</h2>
+        <svg id="test-svg" width="600" height="400">
+            <g id="viewport">
+                <g id="world">
+                    <g id="map"></g>
+                    <g id="labels"></g>
+                </g>
+            </g>
+        </svg>
+    </div>
+
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script type="module">
+        // Import the scoring function (we'll define it here for testing)
+        function scoreRectForLabel(rect, desiredTextWidth, desiredLineHeight, pad = 10) {
+            const usableW = Math.max(0, rect.w - pad * 2);
+            const usableH = Math.max(0, rect.h - pad * 2);
+            // prefer wider boxes and penalize skinny ones
+            return Math.min(usableW / desiredTextWidth, usableH / desiredLineHeight) * Math.sqrt(usableW * usableH);
+        }
+        
+        function runTest() {
+            const results = [];
+            const svg = d3.select('#test-svg');
+            
+            try {
+                const desiredTextWidth = 200;
+                const desiredLineHeight = 28 * 1.2;
+                
+                // Test different rectangle shapes
+                const testRects = [
+                    { name: "Wide rectangle", w: 300, h: 80, color: "#0066cc" },
+                    { name: "Tall rectangle", w: 100, h: 200, color: "#cc6600" },
+                    { name: "Square rectangle", w: 150, h: 150, color: "#6600cc" },
+                    { name: "Large rectangle", w: 250, h: 120, color: "#00cc66" },
+                    { name: "Small rectangle", w: 80, h: 60, color: "#cc0066" }
+                ];
+                
+                let yOffset = 50;
+                const scores = [];
+                
+                testRects.forEach((testRect, index) => {
+                    const x = 50 + (index % 2) * 250;
+                    const y = yOffset + Math.floor(index / 2) * 120;
+                    
+                    const rect = {
+                        x0: x, y0: y, x1: x + testRect.w, y1: y + testRect.h,
+                        w: testRect.w, h: testRect.h
+                    };
+                    
+                    const score = scoreRectForLabel(rect, desiredTextWidth, desiredLineHeight);
+                    scores.push({ name: testRect.name, score, rect, color: testRect.color });
+                    
+                    // Visualize rectangle
+                    svg.select('#map').append('rect')
+                        .attr('x', rect.x0).attr('y', rect.y0)
+                        .attr('width', rect.w).attr('height', rect.h)
+                        .attr('fill', 'none').attr('stroke', testRect.color)
+                        .attr('stroke-width', 2).attr('stroke-dasharray', '5,5');
+                    
+                    // Add label
+                    svg.select('#labels').append('text')
+                        .attr('x', rect.x0 + rect.w / 2).attr('y', rect.y0 + rect.h / 2)
+                        .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
+                        .attr('font-size', 12).attr('fill', testRect.color)
+                        .text(`${testRect.name}\nScore: ${score.toFixed(1)}`);
+                });
+                
+                // Sort by score and display results
+                scores.sort((a, b) => b.score - a.score);
+                
+                results.push(`<div class="info">📊 Rectangle scoring results (sorted by score):</div>`);
+                scores.forEach((item, index) => {
+                    const rank = index + 1;
+                    results.push(`<div class="success">${rank}. ${item.name}: ${item.score.toFixed(1)} (${item.rect.w}x${item.rect.h})</div>`);
+                });
+                
+                results.push(`<div class="info">📊 Desired text width: ${desiredTextWidth}px, line height: ${desiredLineHeight.toFixed(1)}px</div>`);
+                results.push(`<div class="info">📊 Formula: min(usableW/textW, usableH/lineH) * sqrt(usableW * usableH)</div>`);
+                
+            } catch (error) {
+                results.push(`<div class="error">❌ Error: ${error.message}</div>`);
+                console.error('Test error:', error);
+            }
+            
+            return results;
+        }
+        
+        // Run tests and display results
+        const results = runTest();
+        document.getElementById('results').innerHTML = results.join('');
+    </script>
+</body>
+</html>

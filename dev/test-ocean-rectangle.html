@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Ocean Rectangle Finder Test</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .error { color: red; }
+        .success { color: green; }
+        .info { color: blue; }
+        .warning { color: orange; }
+        
+        #test-svg {
+            border: 1px solid #ccc;
+            background: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Ocean Rectangle Finder Test</h1>
+    
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>SVG Test Area</h2>
+        <svg id="test-svg" width="600" height="400">
+            <g id="viewport">
+                <g id="world">
+                    <g id="map"></g>
+                    <g id="labels">
+                        <g id="labels-features"></g>
+                    </g>
+                </g>
+            </g>
+        </svg>
+    </div>
+
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script type="module">
+        // Import the functions we need to test
+        import { findOceanLabelRect, placeOceanLabelInRect } from '../src/modules/labels.js';
+        
+        // Mock the functions that would normally come from main.js
+        function buildXYAccessor(cells) {
+            if (!cells || cells.length === 0) {
+                console.warn('[accessor] No cells provided to buildXYAccessor');
+                return null;
+            }
+            
+            // Extract centroids for nearest-neighbor search
+            const points = cells.map((cell, index) => {
+                // Calculate centroid from polygon vertices
+                let cx = 0, cy = 0, count = 0;
+                if (cell && cell.length > 0) {
+                    cell.forEach(vertex => {
+                        if (vertex && vertex.length >= 2) {
+                            cx += vertex[0];
+                            cy += vertex[1];
+                            count++;
+                        }
+                    });
+                }
+                return {
+                    x: count > 0 ? cx / count : 0,
+                    y: count > 0 ? cy / count : 0,
+                    index
+                };
+            });
+            
+            // Return accessor function using simple nearest-neighbor search
+            return (x, y) => {
+                let nearest = null;
+                let minDist = Infinity;
+                
+                for (const point of points) {
+                    const dx = point.x - x;
+                    const dy = point.y - y;
+                    const dist = dx * dx + dy * dy; // squared distance (faster than sqrt)
+                    
+                    if (dist < minDist) {
+                        minDist = dist;
+                        nearest = cells[point.index];
+                    }
+                }
+                
+                return nearest;
+            };
+        }
+        
+        function makeIsWater(getCellAtXY, seaLevel) {
+            return function isWaterAt(x, y) {
+                const cell = getCellAtXY(x, y);
+                if (!cell) return false; // no cell → treat as not-water
+                
+                // Handle different cell data structures
+                let height = null;
+                let featureType = null;
+                
+                if (cell) {
+                    // Try different property names for height
+                    height = cell.height ?? cell.data?.height ?? null;
+                    featureType = cell.featureType ?? cell.data?.featureType ?? null;
+                    
+                    // If still null, try accessing the polygon directly via index
+                    if (height === null && cell.index !== undefined) {
+                        const polygon = window.currentPolygons?.[cell.index];
+                        if (polygon) {
+                            height = polygon.height;
+                            featureType = polygon.featureType;
+                        }
+                    }
+                }
+                
+                // Return true if water and not a lake (exclude lakes from ocean placement)
+                return !!cell && height !== null && height <= seaLevel && featureType !== "Lake";
+            };
+        }
+        
+        // Create mock polygons for testing
+        function createMockPolygons() {
+            const polygons = [];
+            const mapWidth = 600;
+            const mapHeight = 400;
+            
+            // Create ocean polygons (touch boundary)
+            for (let i = 0; i < 4; i++) {
+                const x = i * 150;
+                const y = i % 2 === 0 ? 0 : mapHeight - 100;
+                
+                polygons.push([
+                    [x, y],
+                    [x + 150, y],
+                    [x + 150, y + 100],
+                    [x, y + 100]
+                ]);
+                // Add properties to the polygon array
+                const poly = polygons[polygons.length - 1];
+                poly.height = 0.1; // Water
+                poly.featureType = "Ocean";
+                poly.neighbors = [];
+            }
+            
+            // Create some land polygons (islands) in the middle
+            for (let i = 0; i < 3; i++) {
+                const x = 200 + (i * 100);
+                const y = 150 + (i * 50);
+                
+                polygons.push([
+                    [x, y],
+                    [x + 80, y],
+                    [x + 80, y + 80],
+                    [x, y + 80]
+                ]);
+                // Add properties to the polygon array
+                const poly = polygons[polygons.length - 1];
+                poly.height = 0.8; // Land
+                poly.featureType = "Island";
+                poly.neighbors = [];
+            }
+            
+            return polygons;
+        }
+        
+        // Run tests
+        function runTests() {
+            const results = [];
+            
+            try {
+                const svg = d3.select('#test-svg');
+                const polygons = createMockPolygons();
+                
+                // Store polygons globally for the accessor
+                window.currentPolygons = polygons;
+                
+                // Build the XY accessor
+                const getCellAtXY = buildXYAccessor(polygons);
+                if (!getCellAtXY) {
+                    results.push(`<div class="error">❌ Failed to build XY accessor</div>`);
+                    return results;
+                }
+                
+                results.push(`<div class="success">✅ Built XY accessor for ${polygons.length} cells</div>`);
+                
+                // Create water test function
+                const isWaterAt = makeIsWater(getCellAtXY, 0.2);
+                results.push(`<div class="success">✅ Created water test function</div>`);
+                
+                // Test water detection at various points
+                const testPoints = [
+                    { x: 75, y: 50, expected: true, desc: "ocean center" },
+                    { x: 200, y: 150, expected: false, desc: "island center" },
+                    { x: 300, y: 200, expected: false, desc: "island center" },
+                    { x: 0, y: 0, expected: false, desc: "outside bounds" }
+                ];
+                
+                for (const point of testPoints) {
+                    const isWater = isWaterAt(point.x, point.y);
+                    const status = isWater === point.expected ? 'success' : 'error';
+                    const icon = isWater === point.expected ? '✅' : '❌';
+                    results.push(`<div class="${status}">${icon} Water test at (${point.x}, ${point.y}) - ${point.desc}: ${isWater} (expected ${point.expected})</div>`);
+                }
+                
+                // Test ocean rectangle finder
+                const bounds = [0, 0, 600, 400];
+                const rect = findOceanLabelRect({
+                    bounds: bounds,
+                    step: 8,
+                    edgePad: 2,
+                    coastPad: 6,
+                    getCellAtXY: getCellAtXY,
+                    isWaterAt: isWaterAt
+                });
+                
+                if (rect) {
+                    const labelScore = rect.labelScore ? rect.labelScore.toFixed(1) : 'N/A';
+                    results.push(`<div class="success">✅ Found ocean rectangle: area=${rect.area.toFixed(0)}, corner=${rect.corner}, touchesCoast=${rect.touchesCoast}, labelScore=${labelScore}</div>`);
+                    results.push(`<div class="info">📊 Rectangle bounds: (${rect.x0.toFixed(0)}, ${rect.y0.toFixed(0)}) to (${rect.x1.toFixed(0)}, ${rect.y1.toFixed(0)})</div>`);
+                    results.push(`<div class="info">📊 Rectangle size: ${rect.w.toFixed(0)}x${rect.h.toFixed(0)}</div>`);
+                    
+                    // Test the new placeOceanLabelInRect function
+                    const oceanLabel = {
+                        text: "Mare Thalassa",
+                        x: 0,
+                        y: 0,
+                        fontSize: 28
+                    };
+                    
+                    placeOceanLabelInRect(oceanLabel, rect, svg);
+                    
+                    results.push(`<div class="success">✅ Placed ocean label: "${oceanLabel.text}" at (${oceanLabel.x.toFixed(1)}, ${oceanLabel.y.toFixed(1)}) with fontSize: ${oceanLabel.fontSize}</div>`);
+                    
+                    // Visualize the label
+                    svg.select('#labels-features').append('text')
+                        .attr('x', oceanLabel.x)
+                        .attr('y', oceanLabel.y)
+                        .attr('text-anchor', 'middle')
+                        .attr('dominant-baseline', 'middle')
+                        .attr('font-size', oceanLabel.fontSize)
+                        .attr('font-weight', 700)
+                        .style('paint-order', 'stroke')
+                        .style('stroke', '#000')
+                        .style('stroke-width', 3)
+                        .style('fill', '#fff')
+                        .text(oceanLabel.text);
+                    
+                    // Visualize the rectangle
+                    svg.select('#map').append('rect')
+                        .attr('x', rect.x0)
+                        .attr('y', rect.y0)
+                        .attr('width', rect.w)
+                        .attr('height', rect.h)
+                        .attr('fill', 'none')
+                        .attr('stroke', '#ff0000')
+                        .attr('stroke-width', 2)
+                        .attr('stroke-dasharray', '5,5');
+                        
+                } else {
+                    results.push(`<div class="error">❌ No ocean rectangle found</div>`);
+                }
+                
+                // Visualize the polygons
+                polygons.forEach((poly, i) => {
+                    const color = poly.height <= 0.2 ? '#0066cc' : '#8B4513';
+                    const path = 'M' + poly.map(p => p.join(',')).join('L') + 'Z';
+                    
+                    svg.select('#map').append('path')
+                        .attr('d', path)
+                        .attr('fill', color)
+                        .attr('stroke', '#000')
+                        .attr('stroke-width', 1)
+                        .attr('opacity', 0.7);
+                });
+                
+            } catch (error) {
+                results.push(`<div class="error">❌ Error: ${error.message}</div>`);
+                console.error('Test error:', error);
+            }
+            
+            return results;
+        }
+        
+        // Run tests and display results
+        const results = runTests();
+        document.getElementById('results').innerHTML = results.join('');
+    </script>
+</body>
+</html>

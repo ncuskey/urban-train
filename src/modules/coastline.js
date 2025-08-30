@@ -92,10 +92,15 @@ export function drawCoastline({
       var rem = edgesOfFeature.indexOf(next[0]);
       edgesOfFeature.splice(rem, 1);
     }
-    svg.select("#shape").append("path").attr("d", path(coast))
-      .attr("fill", "black");
     islandBack.append("path").attr("d", path(coast));
     coastline.append("path").attr("d", path(coast));
+    
+    // Create or update the shape mask for ocean layer
+    let shapeGroup = svg.select("#shape");
+    if (shapeGroup.empty()) {
+      shapeGroup = svg.append("g").attr("id", "shape");
+    }
+    shapeGroup.append("path").attr("d", path(coast)).attr("fill", "black");
     number += 1;
     edgesOfFeature = $.grep(line, function(e) {
       return (e.type == type && e.number === number);

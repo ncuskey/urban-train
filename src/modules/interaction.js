@@ -2,6 +2,19 @@
 import { updateLabelZoom, updateLabelVisibility } from './labels.js';
 import { filterByZoom } from './labels.js';
 
+export function getVisibleWorldBounds(svg) {
+  const t = d3.zoomTransform(svg.node());
+  const w = +svg.attr('width'), h = +svg.attr('height');
+  const minX = (0 - t.x) / t.k, minY = (0 - t.y) / t.k;
+  const maxX = (w - t.x) / t.k, maxY = (h - t.y) / t.k;
+  return [minX, minY, maxX, maxY];
+}
+
+export function padBounds([minX, minY, maxX, maxY], padPx, k) {
+  const p = padPx / (k || 1);
+  return [minX + p, minY + p, maxX - p, maxY - p];
+}
+
 let svg, gTarget, zoom, currentTransform = d3.zoomIdentity;
 
 export function attachInteraction({
