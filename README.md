@@ -19,6 +19,7 @@ A web-based procedural map generator that creates Voronoi-based terrain with int
 - **Size-based zoom filtering**: Features appear progressively based on area and zoom level
 - **Robust error handling**: Multiple safety layers prevent crashes from invalid data
 - **Ocean seeding**: Labels start inside their designated rectangles for faster convergence
+- **Consistent styling**: Ocean labels use the same CSS styling as other labels for visual consistency
 
 ### 🎯 **Interactive Features**
 - **Pan and zoom** with smooth performance

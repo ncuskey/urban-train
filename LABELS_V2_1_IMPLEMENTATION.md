@@ -36,6 +36,51 @@ const lim = {
 };
 ```
 
+### Ocean Label Styling Consistency
+Ocean labels now use consistent CSS-based styling instead of inline styles:
+
+#### Before (Inline Styling Issues)
+- **Font mismatch**: Ocean labels appeared in different fonts due to screen overlay placement
+- **Inline styles**: Hardcoded colors, strokes, and font properties scattered throughout JS
+- **Maintenance burden**: Style changes required updating multiple JavaScript functions
+
+#### After (CSS-Based Styling)
+- **Global consistency**: Ocean labels use the same `.place-label` CSS rules as other labels
+- **White text**: All ocean labels now use consistent white fill with black stroke
+- **Font consistency**: Ocean labels inherit the same font family as other labels
+- **Maintainable**: All styling centralized in CSS, easy to modify globally
+
+#### Implementation Details
+```css
+/* Global label styling - applies to all labels including ocean overlay */
+.place-label {
+  fill: white;
+  stroke: black;
+  stroke-width: 0.5px;
+  font-family: Arial, sans-serif;
+  font-weight: bold;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+  pointer-events: none;
+}
+
+/* Ocean-specific overrides */
+text.place-label.ocean {
+  fill: #fff;                  /* matches other labels */
+  stroke: rgba(0,0,0,.9);
+  stroke-width: 3px;
+  font-weight: 700;
+  letter-spacing: .4px;
+  paint-order: stroke fill;
+  pointer-events: none;
+}
+```
+
+#### JavaScript Changes
+- **`placeOceanLabelCentered`**: Removed inline styling, now only sets `font-size`
+- **`placeOceanLabelAt`**: Updated to use CSS classes instead of inline styles
+- **Font size cap**: Enforced `MAX_OCEAN_FONT_PX = 24` constant for consistent sizing
+- **CSS classes**: Ocean labels get `place-label ocean` classes for proper styling
+
 ### Label BBox Estimation Optimization
 The system uses a pragmatic approach for label width estimation:
 

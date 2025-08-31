@@ -2237,14 +2237,12 @@ export function placeOceanLabelAt(cx, cy, maxWidth, oceanLabel, svg, opts = {}) 
   }
   
   const label = screenLabelsGroup.append('text')
+    .attr('class', 'place-label ocean')
     .attr('x', cx)
     .attr('y', cy)
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'middle')
     .attr('font-size', fs)
-    .attr('font-weight', 700)
-    .attr('fill', '#1a4a8a')
-    .attr('opacity', 0.8)
     .text(oceanLabel.text);
 
   console.log(`[ocean] Placed label "${oceanLabel.text}" at screen coords (${cx.toFixed(1)}, ${cy.toFixed(1)}) with font size ${fs}px`);
@@ -2312,12 +2310,12 @@ export function placeOceanLabelCentered(parentSel, name, rectLike, fallback = nu
 
   // clamp settings
   const MIN_PX = 18;
-  const MAX_PX = 56; // ← pick your ceiling (try 48–64)
+  const MAX_OCEAN_FONT_PX = 24; // ← pick your ceiling (try 48–64)
 
   // provisional based on rect height
-  const provisional = Math.max(MIN_PX, Math.min(MAX_PX, R.height * 0.6));
+  const provisional = Math.max(MIN_PX, Math.min(MAX_OCEAN_FONT_PX, R.height * 0.6));
 
-  // create text (force white inline so it can't be overridden)
+  // create text (let CSS handle styling)
   const text = parentSel.append('text')
     .attr('class', 'place-label ocean')
     .attr('text-anchor', 'middle')
@@ -2325,12 +2323,6 @@ export function placeOceanLabelCentered(parentSel, name, rectLike, fallback = nu
     .attr('x', cx)
     .attr('y', cy)
     .text(name)
-    .style('fill', '#fff')                 // ← force white
-    .style('stroke', 'rgba(0,0,0,.9)')
-    .style('stroke-width', '3px')
-    .style('paint-order', 'stroke fill')
-    .style('font-weight', 700)
-    .style('letter-spacing', '.4px')
     .style('font-size', `${provisional}px`);
 
   // fit to rect, then clamp again
@@ -2340,7 +2332,7 @@ export function placeOceanLabelCentered(parentSel, name, rectLike, fallback = nu
   const scale = Math.min(1, maxW / bbox.width, maxH / bbox.height);
 
   const base = parseFloat(text.style('font-size'));
-  const fitted = Math.max(MIN_PX, Math.min(MAX_PX, base * scale));
+  const fitted = Math.max(MIN_PX, Math.min(MAX_OCEAN_FONT_PX, base * scale));
   text.style('font-size', `${fitted}px`);
 
   // re-center (after size change)

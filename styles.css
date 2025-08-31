@@ -71,7 +71,7 @@ svg {
   opacity: 0.8;
 }
 
-/* Label styling */
+/* Label styling - now global for all labels */
 .place-label {
   fill: white;
   stroke: black;
@@ -111,12 +111,6 @@ text.place-label.ocean {
   fill: #2d5016;
   stroke: #1a2f0d;
   font-weight: 900;
-}
-
-.place-label.ocean {
-  fill: #1e3a8a;
-  stroke: #1e40af;
-  font-weight: 700;
 }
 
 .place-label.lake {
