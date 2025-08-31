@@ -264,3 +264,7 @@ text.place-label.ocean {
   fill: #2d5016;
   font-weight: 900;
 }
+
+/* CSS safety: prevent stale display:none inheritance */
+#labels-world .feature-label { display: unset; }
+#labels-overlay .feature-label { display: unset; }

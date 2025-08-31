@@ -1,5 +1,5 @@
 // d3 is global; do not import it.
-import { updateLabelZoom, updateLabelVisibility } from './labels.js';
+import { updateLabelZoom, updateLabelVisibility, updateOverlayOceanLabel } from './labels.js';
 import { filterByZoom } from './labels.js';
 
 // Add a tiny accessor so other modules can safely read current zoom.
@@ -91,15 +91,16 @@ export function attachInteraction({
       if (window.__labelsPlaced && window.__labelsPlaced.features) {
         updateLabelVisibility({
           svg,
-          groupId: 'labels-features',
+          groupId: 'labels-world',
           placed: window.__labelsPlaced.features,
           k: t.k,
           filterByZoom
         });
-        updateLabelZoom({ svg, groupId: 'labels-features' });
+        updateLabelZoom({ svg, groupId: 'labels-world' });
       }
       
-      // Ocean labels now in world space - no need to clear screen labels on zoom/pan
+      // Update ocean labels (overlay-only, no world label interference)
+      updateOverlayOceanLabel(t.k);
     });
 
   svg.call(zoom).style('cursor','grab');     // bind zoom to svg

@@ -300,3 +300,46 @@ function tooCloseToAny(l, kept, minSepWorld) {
 
 **Files Changed**:
 - `src/modules/labels.js` - Added dynamic budget functions and updated `filterByZoom` with gating logic
+
+### CSS Safety and Debug Features (2025-08-30)
+
+**Issue**: Labels could inherit stale `display: none` from CSS, and there was no way to force-unhide labels for debugging purposes.
+
+**Solutions**:
+
+#### P9: CSS Safety - Prevent Stale Display Inheritance
+Added explicit CSS rules to restore display for labels:
+```css
+/* CSS safety: prevent stale display:none inheritance */
+#labels-world .feature-label { display: unset; }
+#labels-overlay .feature-label { display: unset; }
+```
+
+**Benefits**:
+- Prevents labels from being hidden due to inherited CSS
+- Uses `display: unset` to reset any inherited display restrictions
+- Applies to both world and overlay label containers
+
+#### P10: Optional Belt-and-Suspenders Unhide (Debug Flag)
+Added debug flag-controlled unhide functionality in `renderOceanOnly()`:
+```javascript
+if (window.DBG && window.DBG.safety === true) {
+  d3.select('#labels-world').selectAll('g.feature-label')
+    .style('display', null)
+    .attr('opacity', null);
+}
+```
+
+**Usage**:
+- Disabled by default for production
+- Enable with: `window.DBG = { safety: true }` in browser console
+- Force-unhides all world labels by clearing display and opacity restrictions
+
+**Benefits**:
+- Provides debugging safety net without affecting production
+- Can be enabled temporarily to diagnose label visibility issues
+- Clears both `display` and `opacity` restrictions
+
+**Files Changed**:
+- `styles.css` - Added CSS safety rules at end of file
+- `src/modules/labels.js` - Added debug flag unhide functionality in `renderOceanOnly()`

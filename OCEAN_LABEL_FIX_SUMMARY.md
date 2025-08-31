@@ -99,10 +99,51 @@ if (!state.getCellAtXY && window.currentPolygons) {
 ### Manual Testing
 1. Open `http://localhost:8000/` in browser
 2. Generate a new map
-3. Check console for:
-   - `[accessor] Built XY accessor for X cells`
-   - `[ocean] Rectangle finder debug:` with valid rectangle data
-   - No more `[ocean] spatialIndex is empty or null` errors
+3. Verify ocean labels appear in appropriate ocean areas
+4. Test zoom/pan to ensure labels remain properly positioned
+
+## Recent Additions (P9-P10)
+
+### P9: CSS Safety - Prevent Stale Display Inheritance
+**Problem**: Labels could inherit stale `display: none` from CSS, causing them to be hidden unexpectedly.
+
+**Solution**: Added explicit CSS rules to restore display for labels:
+```css
+/* CSS safety: prevent stale display:none inheritance */
+#labels-world .feature-label { display: unset; }
+#labels-overlay .feature-label { display: unset; }
+```
+
+**Location**: `styles.css` (end of file)
+
+**Benefits**:
+- Prevents labels from being hidden due to inherited CSS
+- Uses `display: unset` to reset any inherited display restrictions
+- Applies to both world and overlay label containers
+
+### P10: Optional Belt-and-Suspenders Unhide (Debug Flag)
+**Problem**: As a temporary safety net, need a way to force-unhide world labels after ocean pass.
+
+**Solution**: Added debug flag-controlled unhide functionality:
+```javascript
+if (window.DBG && window.DBG.safety === true) {
+  d3.select('#labels-world').selectAll('g.feature-label')
+    .style('display', null)
+    .attr('opacity', null);
+}
+```
+
+**Location**: `src/modules/labels.js` in `renderOceanOnly()` function
+
+**Usage**:
+- Disabled by default for production
+- Enable with: `window.DBG = { safety: true }` in browser console
+- Force-unhides all world labels by clearing display and opacity restrictions
+
+**Benefits**:
+- Provides debugging safety net without affecting production
+- Can be enabled temporarily to diagnose label visibility issues
+- Clears both `display` and `opacity` restrictions
 
 ### Expected Results
 - Corner debug logs should show `cell=true` (non-null) with real height and featureType

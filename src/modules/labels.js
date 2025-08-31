@@ -12,6 +12,38 @@
 // Helpers to convert between screen pixels and world coords
 import {getZoomState} from './interaction.js';
 
+// Disjoint key functions for world vs ocean labels
+const keyWorld = d => `w:${d.kind}:${d.id}`;
+const keyOcean = d => `ocean:${d.id || 0}`;
+
+// Overlay-only updater for ocean labels (no world label interference)
+export function updateOverlayOceanLabel(k) {
+  // Recompute font size/position for ocean text if you need to respond to zoom k.
+  // Must scope only to #labels-overlay.
+  const overlay = d3.select('#labels-overlay');
+  if (!overlay.empty()) {
+    // Ocean labels are in screen space, so they don't need zoom scaling
+    // But we can update font sizes if needed for readability
+    overlay.selectAll('text.ocean-text')
+      .style('font-size', d => {
+        // Keep ocean labels at a consistent screen size regardless of zoom
+        return (d.baseFontPx || 28) + 'px';
+      });
+  }
+}
+
+export function ensureLabelLayers(svg) {
+  let root = svg.select('#labels-root');
+  if (root.empty()) root = svg.append('g').attr('id', 'labels-root');
+  let world = root.select('#labels-world');
+  if (world.empty()) world = root.append('g').attr('id', 'labels-world');
+  let overlay = root.select('#labels-overlay');
+  if (overlay.empty()) {
+    overlay = root.append('g').attr('id', 'labels-overlay');
+    overlay.style('pointer-events','none');
+  }
+}
+
 function assertOceanWithinRect(textSel, rectPx, pad=2) {
   const n = textSel.node();
   if (!n) return;
@@ -525,7 +557,7 @@ function fitOceanLabelToRect(oceanLabel, rect, svg) {
   // Debug logging after ocean fit-to-rect finalizes size
   if (LABEL_DEBUG) {
     // Try to find the ocean label group if already bound, otherwise log datum
-    const g = d3.select('#labels-features').selectAll('g.label');
+    const g = d3.select('#labels-world').selectAll('g.label');
     logProbe('ocean-fit:final-size', g);
   }
   
@@ -2067,24 +2099,24 @@ export function filterByZoom(placed, k) {
     return [];
   }
   
+  // Filter out ocean labels - they're handled separately in overlay
+  const worldOnly = placed.filter(l => l.kind !== 'ocean');
+  
   // Bucket by kind (placed is already sorted by priority and area)
-  const buckets = { ocean: [], lake: [], island: [], other: [] };
-  for (const l of placed) {
+  const buckets = { lake: [], island: [], other: [] };
+  for (const l of worldOnly) {
     if (l?.kind) {
       (buckets[l.kind] ?? buckets.other).push(l);
     }
   }
 
-  // Get dynamic budgets based on zoom level
+  // Get dynamic budgets based on zoom level (ocean budget not used for world labels)
   const budgets = labelBudgetByZoom(k);
   console.log('[labels] dynamic budgets', budgets);
 
   // Apply gating for island and lake labels (size + separation)
   const z = d3.zoomTransform(d3.select('#world').node() || d3.select('svg').node());
   const visible = [];
-
-  // Ocean labels (always show 1)
-  visible.push(...buckets.ocean.slice(0, budgets.ocean));
 
   // Island labels with gating
   const islandCandidates = buckets.island
@@ -2113,11 +2145,10 @@ export function filterByZoom(placed, k) {
   visible.push(...keptLakes);
 
   // Debug logging
-  console.log(`[labels] zoom filter: k=${k.toFixed(2)}, total=${placed.length}, visible=${visible.length}`);
-  console.log(`[labels] budgets: ocean=${budgets.ocean}, island=${budgets.island}, lake=${budgets.lake}`);
-  console.log(`[labels] buckets: ocean=${buckets.ocean.length}, island=${buckets.island.length}, lake=${buckets.lake.length}`);
+  console.log(`[labels] zoom filter: k=${k.toFixed(2)}, total=${worldOnly.length}, visible=${visible.length}`);
+  console.log(`[labels] budgets: island=${budgets.island}, lake=${budgets.lake}`);
+  console.log(`[labels] buckets: island=${buckets.island.length}, lake=${buckets.lake.length}`);
   console.log(`[labels] visible by kind:`, {
-    ocean: buckets.ocean.slice(0, budgets.ocean).length,
     island: keptIslands.length,
     lake: keptLakes.length
   });
@@ -2166,20 +2197,20 @@ export function debugLabels() {
     console.log('[labels] No obvious issues detected');
   }
   
-  // LOD Debug: Check current visibility state
+  // LOD Debug: Check current visibility state (world labels only)
   const currentK = window.currentTransform ? window.currentTransform.k : 1;
-  const visible = filterByZoom(placed, currentK);
-  console.log(`[labels] Current LOD state: k=${currentK.toFixed(2)}, visible=${visible.length}/${placed.length}`);
+  const worldOnly = placed.filter(l => l.kind !== 'ocean');
+  const visible = filterByZoom(worldOnly, currentK);
+  console.log(`[labels] Current LOD state: k=${currentK.toFixed(2)}, visible=${visible.length}/${worldOnly.length} (world labels only)`);
   
-  // Show visible vs hidden breakdown
-  const visibleByKind = { ocean: [], lake: [], island: [] };
+  // Show visible vs hidden breakdown (world labels only)
+  const visibleByKind = { lake: [], island: [] };
   visible.forEach(l => {
     const kind = l?.kind || 'other';
     if (visibleByKind[kind]) visibleByKind[kind].push(l);
   });
   
-  console.log('[labels] Currently visible by kind:', {
-    ocean: visibleByKind.ocean.length,
+  console.log('[labels] Currently visible by kind (world labels):', {
     lake: visibleByKind.lake.length,
     island: visibleByKind.island.length
   });
@@ -2302,13 +2333,13 @@ export function renderNonOceanLabels(gAll, labels) {
     return;
   }
 
-  // Ensure labels-all layer exists
+  // Ensure labels-world layer exists
   if (gAll.empty()) {
-    gAll = d3.select('svg').append('g').attr('id', 'labels-all');
+    gAll = d3.select('#labels-world');
   }
 
   // Render non-ocean labels using existing renderLabels logic
-  renderLabels({ svg: d3.select('svg'), placed: nonOceanLabels, groupId: 'labels-all' });
+  renderLabels({ svg: d3.select('svg'), placed: nonOceanLabels, groupId: 'labels-world' });
 }
 
 // Render all labels once with keyed join (hidden by default)
@@ -2327,7 +2358,7 @@ export function renderLabels({ svg, placed, groupId }) {
   
   // Keyed join on stable IDs - filter out null/undefined elements
   const validPlaced = placed.filter(Boolean);
-  const sel = g.selectAll('g.label').data(validPlaced, function(d) { return d && d.id ? d.id : (d && d.text ? d.text : Math.random()); });
+  const sel = g.selectAll('g.label').data(validPlaced, keyWorld);
   
   // Remove old labels
   sel.exit().remove();
@@ -2554,7 +2585,7 @@ export function renderLabels({ svg, placed, groupId }) {
   
   // Debug overlay: show final boxes behind text
   if (window.DEBUG && DEBUG_LABEL_BOXES) {
-    const dbg = d3.select('#labels-debug').selectAll('rect').data(placed.filter(Boolean), function(d) { return d && d.id ? d.id : (d && d.text ? d.text : Math.random()); });
+    const dbg = d3.select('#labels-debug').selectAll('rect').data(placed.filter(Boolean), keyWorld);
     dbg.enter().append('rect')
       .attr('fill', 'none')
       .attr('stroke', '#000')
@@ -2593,10 +2624,10 @@ export function renderLabels({ svg, placed, groupId }) {
 }
 
 // On zoom: update transform with scaling (idempotent)
-export function updateLabelZoom({ svg, groupId = 'labels-features' }) {
+export function updateLabelZoom({ svg, groupId = 'labels-world' }) {
   const worldNode = d3.select('#world').node() || svg.node();
   const k = d3.zoomTransform(worldNode).k;
-  const g = svg.select(`#${groupId}`);
+  const g = d3.select('#labels-world');
 
   // Idempotent: rebuild transform from scratch every time
   g.selectAll('g.label')
@@ -2628,30 +2659,33 @@ export function updateLabelVisibility({ svg, groupId, placed, k, filterByZoom })
     return;
   }
   
-  const visible = new Set(filterByZoom(placed, k).map(function(d) { return d && d.id ? d.id : null; }).filter(Boolean));
-  svg.select(`#${groupId}`)
+  // Filter out ocean labels - they're handled separately in overlay
+  const worldOnly = placed.filter(l => l.kind !== 'ocean');
+  
+  const visible = new Set(filterByZoom(worldOnly, k).map(function(d) { return d && d.id ? d.id : null; }).filter(Boolean));
+  d3.select('#labels-world')
     .selectAll('g.label text')
     .classed('is-visible', function(d) { return d && d.id && visible.has(d.id); });
   
   // Quick self-check: log zoom level and visible count
-  console.log(`[LOD] k=${k.toFixed(2)}, visible=${visible.size}/${placed.length} labels`);
+  console.log(`[LOD] k=${k.toFixed(2)}, visible=${visible.size}/${worldOnly.length} labels`);
   
-  // Debug breakdown by kind
-  const buckets = { ocean: [], lake: [], island: [], other: [] };
-  for (const l of placed) {
+  // Debug breakdown by kind (world labels only)
+  const buckets = { lake: [], island: [], other: [] };
+  for (const l of worldOnly) {
     if (l?.kind) {
       (buckets[l.kind] ?? buckets.other).push(l);
     }
   }
   
-  const visibleByKind = { ocean: [], lake: [], island: [], other: [] };
-  for (const l of placed) {
+  const visibleByKind = { lake: [], island: [], other: [] };
+  for (const l of worldOnly) {
     if (l?.id && visible.has(l.id)) {
       (visibleByKind[l?.kind] ?? visibleByKind.other).push(l);
     }
   }
   
-  console.log(`[LOD] Breakdown: ocean=${visibleByKind.ocean.length}/${buckets.ocean.length}, lake=${visibleByKind.lake.length}/${buckets.lake.length}, island=${visibleByKind.island.length}/${buckets.island.length}`);
+  console.log(`[LOD] Breakdown: lake=${visibleByKind.lake.length}/${buckets.lake.length}, island=${visibleByKind.island.length}/${buckets.island.length}`);
 }
 
 /**
@@ -3188,6 +3222,31 @@ export function drawDebugOceanRect(pxRect) {
   console.log(`[ocean] Debug rect clamped to viewport: ${clamped.width}x${clamped.height} at (${clamped.x},${clamped.y})`);
 }
 
+// Minimal, screen-space ocean renderer
+function renderOceanOverlay(rectPx, text) {
+  const sel = d3.select('#labels-overlay')
+    .selectAll('g.ocean-label')
+    .data([{ id: 0, rectPx, text }], d => `ocean:${d.id}`);
+
+  const gEnter = sel.enter().append('g')
+    .attr('class', 'feature-label ocean-label');
+
+  gEnter.append('text').attr('class','ocean-text');
+
+  const g = gEnter.merge(sel);
+  g.attr('transform', `translate(${rectPx.x},${rectPx.y})`);
+
+  g.select('text')
+    .text(d => d.text)
+    .attr('x', rectPx.w/2)
+    .attr('y', rectPx.h/2)
+    .attr('text-anchor','middle')
+    .attr('dominant-baseline','middle')
+    .style('display', null);
+
+  sel.exit().remove();
+}
+
 // Render ocean labels only (separate layer to avoid affecting other labels)
 export function renderOceanOnly(gOcean, oceanDatum, rectPx) {
   if (!oceanDatum || !oceanDatum.text) {
@@ -3196,46 +3255,24 @@ export function renderOceanOnly(gOcean, oceanDatum, rectPx) {
     return;
   }
 
-  // Ensure ocean label layer exists and is on top
-  if (gOcean.empty()) {
-    gOcean = d3.select('svg').append('g').attr('id', 'labels-ocean');
-  }
-  gOcean.raise();
-
-  // Create or update ocean text element
-  const oceanText = gOcean.selectAll('text.ocean')
-    .data([oceanDatum], d => d.id || 'ocean')
-    .join(
-      enter => enter.append('text')
-        .attr('class', 'ocean')
-        .attr('text-anchor', 'middle')
-        .attr('dominant-baseline', 'middle')
-        .style('font-family', labelFontFamily())
-        .style('font-weight', '700')
-        .style('fill', '#1a365d')
-        .style('stroke', '#ffffff')
-        .style('stroke-width', '2px')
-        .style('paint-order', 'stroke')
-        .text(d => d.text),
-      update => update,
-      exit => exit.remove()
-    );
-
-  // Place text in the SAT rectangle (screen space)
-  placeTextInRect(oceanText, rectPx, { space: 'px' });
-  
-  // Ensure ocean labels are on top (above raster layer)
-  d3.select('#labels-ocean').raise();
+  // Use the minimal overlay renderer
+  renderOceanOverlay(rectPx, oceanDatum.text);
   
   console.log(`[ocean] Rendered ocean label in screen space at rect: ${rectPx.w}x${rectPx.h} at (${rectPx.x},${rectPx.y})`);
+  
+  if (window.DBG && window.DBG.safety === true) {
+    d3.select('#labels-world').selectAll('g.feature-label')
+      .style('display', null)
+      .attr('opacity', null);
+  }
 }
 
 // Place ocean label in screen space using SAT rectangle
 export function placeOceanLabelInScreenSpace(rectPx, oceanText, svg) {
   // Ensure ocean label layer exists
-  let gOcean = svg.select('#labels-ocean');
+  let gOcean = svg.select('#labels-overlay');
   if (gOcean.empty()) {
-    gOcean = svg.append('g').attr('id', 'labels-ocean');
+    gOcean = svg.append('g').attr('id', 'labels-overlay');
   }
   
   // Ensure it's on top
@@ -3321,8 +3358,8 @@ export function clearScreenLabels() {
 }
 
 // Remove any previously placed ocean labels
-export function clearExistingOceanLabels(rootSel = d3.select('#labels')) {
-  try { rootSel.selectAll('text.label.ocean').remove(); } catch (e) {}
+export function clearExistingOceanLabels(rootSel = d3.select('#labels-overlay')) {
+  try { rootSel.selectAll('g.ocean-label').remove(); } catch (e) {}
 }
 
 // Normalize rectangle to consistent {x, y, width, height} format
@@ -3600,4 +3637,17 @@ export function getSALabelerStatus() {
     enabled: USE_SA_LABELER,
     description: USE_SA_LABELER ? 'SA labeler is active' : 'Original system is active'
   };
+}
+
+// DEBUG: count world vs overlay label nodes
+export function __debugCountLabels() {
+  const world = d3.select('#labels-world').selectAll('g.feature-label');
+  const overlay = d3.select('#labels-overlay').selectAll('g.ocean-label');
+  const on = s => s.filter(function(){ return this.style.display !== 'none' }).size();
+  console.table({
+    world_nodes: world.size(),
+    world_visible: on(world),
+    overlay_nodes: overlay.size(),
+    overlay_visible: on(overlay)
+  });
 }
