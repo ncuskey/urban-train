@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Counter-Scaling Labels</title>
+    <style>
+        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+        .test-container { margin-bottom: 30px; }
+        .test-label { font-weight: bold; margin-bottom: 10px; }
+        .test-description { margin-bottom: 10px; color: #666; }
+        svg { border: 1px solid #ccc; margin: 10px 0; }
+        .label { cursor: pointer; }
+        .label text { user-select: none; }
+        .controls { margin: 20px 0; }
+        button { margin: 5px; padding: 8px 16px; }
+        .info { background: #f0f0f0; padding: 10px; border-radius: 5px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Test Counter-Scaling Labels</h1>
+    
+    <div class="test-container">
+        <div class="test-label">Test 1: Basic Counter-Scaling</div>
+        <div class="test-description">
+            This test verifies that labels maintain constant screen size while zooming.
+            Zoom in/out and verify that label text and halos stay the same pixel size.
+        </div>
+        <div class="info">
+            <strong>Expected behavior:</strong><br>
+            - Labels should move with the map when panning<br>
+            - Labels should maintain constant screen size when zooming<br>
+            - Halo stroke width should stay constant<br>
+            - No font-size changes should occur during zoom
+        </div>
+        <div class="controls">
+            <button onclick="testZoom(0.5)">Zoom Out 0.5x</button>
+            <button onclick="testZoom(1.0)">Zoom 1.0x</button>
+            <button onclick="testZoom(2.0)">Zoom In 2.0x</button>
+            <button onclick="testZoom(4.0)">Zoom In 4.0x</button>
+            <button onclick="resetZoom()">Reset Zoom</button>
+        </div>
+        <svg id="test1" width="600" height="400" viewBox="0 0 600 400">
+            <g id="world" transform="translate(300,200) scale(1)">
+                <g id="labels-world">
+                    <g class="label" transform="translate(100,50)">
+                        <text class="stroke" x="0" y="0" text-anchor="middle" dominant-baseline="central" 
+                              vector-effect="non-scaling-stroke" style="paint-order: stroke; font-size: 24px; fill: white; stroke: black; stroke-width: 2px;">Test Label 1</text>
+                        <text class="fill" x="0" y="0" text-anchor="middle" dominant-baseline="central" 
+                              vector-effect="non-scaling-stroke" style="font-size: 24px; fill: black;">Test Label 1</text>
+                    </g>
+                    <g class="label" transform="translate(-100,-50)">
+                        <text class="stroke" x="0" y="0" text-anchor="middle" dominant-baseline="central" 
+                              vector-effect="non-scaling-stroke" style="paint-order: stroke; font-size: 20px; fill: white; stroke: black; stroke-width: 2px;">Test Label 2</text>
+                        <text class="fill" x="0" y="0" text-anchor="middle" dominant-baseline="central" 
+                              vector-effect="non-scaling-stroke" style="font-size: 20px; fill: black;">Test Label 2</text>
+                    </g>
+                    <g class="label" transform="translate(0,100)">
+                        <text class="stroke" x="0" y="0" text-anchor="middle" dominant-baseline="central" 
+                              vector-effect="non-scaling-stroke" style="paint-order: stroke; font-size: 18px; fill: white; stroke: black; stroke-width: 2px;">Test Label 3</text>
+                        <text class="fill" x="0" y="0" text-anchor="middle" dominant-baseline="central" 
+                              vector-effect="non-scaling-stroke" style="font-size: 18px; fill: black;">Test Label 3</text>
+                    </g>
+                </g>
+            </g>
+        </svg>
+    </div>
+
+    <div class="test-container">
+        <div class="test-label">Test 2: Pan and Zoom</div>
+        <div class="test-description">
+            This test verifies that labels move correctly with the map and maintain size during pan/zoom operations.
+        </div>
+        <div class="info">
+            <strong>Instructions:</strong><br>
+            1. Click and drag to pan the map<br>
+            2. Use mouse wheel or buttons to zoom<br>
+            3. Verify labels move with the map and maintain size
+        </div>
+        <div class="controls">
+            <button onclick="panTo(0,0)">Center</button>
+            <button onclick="panTo(100,50)">Pan to Label 1</button>
+            <button onclick="panTo(-100,-50)">Pan to Label 2</button>
+            <button onclick="panTo(0,100)">Pan to Label 3</button>
+        </div>
+        <svg id="test2" width="600" height="400" viewBox="0 0 600 400">
+            <g id="world2" transform="translate(300,200) scale(1)">
+                <g id="labels-world2">
+                    <g class="label" transform="translate(100,50)">
+                        <text class="stroke" x="0" y="0" text-anchor="middle" dominant-baseline="central" 
+                              vector-effect="non-scaling-stroke" style="paint-order: stroke; font-size: 24px; fill: white; stroke: black; stroke-width: 2px;">Test Label 1</text>
+                        <text class="fill" x="0" y="0" text-anchor="middle" dominant-baseline="central" 
+                              vector-effect="non-scaling-stroke" style="font-size: 24px; fill: black;">Test Label 1</text>
+                    </g>
+                    <g class="label" transform="translate(-100,-50)">
+                        <text class="stroke" x="0" y="0" text-anchor="middle" dominant-baseline="central" 
+                              vector-effect="non-scaling-stroke" style="paint-order: stroke; font-size: 20px; fill: white; stroke: black; stroke-width: 2px;">Test Label 2</text>
+                        <text class="fill" x="0" y="0" text-anchor="middle" dominant-baseline="central" 
+                              vector-effect="non-scaling-stroke" style="font-size: 20px; fill: black;">Test Label 2</text>
+                    </g>
+                    <g class="label" transform="translate(0,100)">
+                        <text class="stroke" x="0" y="0" text-anchor="middle" dominant-baseline="central" 
+                              vector-effect="non-scaling-stroke" style="paint-order: stroke; font-size: 18px; fill: white; stroke: black; stroke-width: 2px;">Test Label 3</text>
+                        <text class="fill" x="0" y="0" text-anchor="middle" dominant-baseline="central" 
+                              vector-effect="non-scaling-stroke" style="font-size: 18px; fill: black;">Test Label 3</text>
+                    </g>
+                </g>
+            </g>
+        </svg>
+    </div>
+
+    <div class="info">
+        <strong>Implementation Notes:</strong><br>
+        - Labels are positioned using transform attributes on the &lt;g&gt; elements<br>
+        - Counter-scaling is applied via scale(1/k) in the transform<br>
+        - vector-effect="non-scaling-stroke" keeps halo width constant<br>
+        - paint-order="stroke" ensures halo renders behind text
+    </div>
+
+    <script>
+        // Simple zoom and pan implementation for testing
+        let currentTransform = { k: 1, x: 300, y: 200 };
+        
+        function testZoom(k) {
+            currentTransform.k = k;
+            applyTransform('test1');
+            applyTransform('test2');
+        }
+        
+        function panTo(x, y) {
+            currentTransform.x = 300 - x * currentTransform.k;
+            currentTransform.y = 200 - y * currentTransform.k;
+            applyTransform('test2');
+        }
+        
+        function resetZoom() {
+            currentTransform = { k: 1, x: 300, y: 200 };
+            applyTransform('test1');
+            applyTransform('test2');
+        }
+        
+        function applyTransform(svgId) {
+            const svg = document.getElementById(svgId);
+            const world = svg.querySelector('#world, #world2');
+            const labels = svg.querySelector('#labels-world, #labels-world2');
+            
+            // Apply transform to world (map)
+            world.setAttribute('transform', `translate(${currentTransform.x},${currentTransform.y}) scale(${currentTransform.k})`);
+            
+            // Apply counter-scaling to labels
+            const inv = 1 / currentTransform.k;
+            const labelGroups = labels.querySelectorAll('.label');
+            labelGroups.forEach(group => {
+                const d = group.__data__ || {};
+                const x = d.placed && Number.isFinite(d.placed.x) ? d.placed.x : (d.x || 0);
+                const y = d.placed && Number.isFinite(d.placed.y) ? d.placed.y : (d.y || 0);
+                const a = d.angle || 0;
+                
+                // Extract original position from current transform
+                const currentTransform = group.getAttribute('transform');
+                const match = currentTransform.match(/translate\(([^,]+),([^)]+)\)/);
+                if (match) {
+                    const origX = parseFloat(match[1]);
+                    const origY = parseFloat(match[2]);
+                    
+                    // Apply counter-scaling while preserving original position
+                    const transform = `translate(${origX},${origY}) scale(${inv}) rotate(${a})`;
+                    group.setAttribute('transform', transform);
+                }
+            });
+        }
+        
+        // Add mouse wheel zoom support
+        document.querySelectorAll('svg').forEach(svg => {
+            svg.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                currentTransform.k = Math.max(0.5, Math.min(4, currentTransform.k * delta));
+                applyTransform(svg.id);
+            });
+            
+            // Add pan support
+            let isPanning = false;
+            let startX, startY;
+            
+            svg.addEventListener('mousedown', (e) => {
+                isPanning = true;
+                startX = e.clientX - currentTransform.x;
+                startY = e.clientY - currentTransform.y;
+                svg.style.cursor = 'grabbing';
+            });
+            
+            svg.addEventListener('mousemove', (e) => {
+                if (isPanning) {
+                    currentTransform.x = e.clientX - startX;
+                    currentTransform.y = e.clientY - startY;
+                    applyTransform(svg.id);
+                }
+            });
+            
+            svg.addEventListener('mouseup', () => {
+                isPanning = false;
+                svg.style.cursor = 'grab';
+            });
+            
+            svg.addEventListener('mouseleave', () => {
+                isPanning = false;
+                svg.style.cursor = 'grab';
+            });
+        });
+        
+        // Initialize
+        resetZoom();
+    </script>
+</body>
+</html>

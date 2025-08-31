@@ -2384,6 +2384,8 @@ export function renderOceanInWorld(svg, text) {
   const t = gOcean.selectAll('text').data([0]).join('text')
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'middle')
+    .attr('vector-effect', 'non-scaling-stroke')
+    .style('paint-order', 'stroke')
     .text(text);
   
   // Set font size based on available space
@@ -2449,8 +2451,11 @@ export function renderLabels({ svg, placed, groupId }) {
   const enter = sel.enter().append('g').attr('class', 'label');
   
   // Add stroke and fill text elements
-  enter.append('text').attr('class', 'stroke');
-  enter.append('text').attr('class', 'fill');
+  enter.append('text').attr('class', 'stroke')
+    .attr('vector-effect', 'non-scaling-stroke')
+    .style('paint-order', 'stroke');
+  enter.append('text').attr('class', 'fill')
+    .attr('vector-effect', 'non-scaling-stroke');
   
   // Update all labels (enter + update)
   const merged = enter.merge(sel);
@@ -2707,7 +2712,8 @@ export function renderLabels({ svg, placed, groupId }) {
   console.log('[labels] overlaps after SA:', countOverlaps(validPlaced));
 }
 
-// On zoom: update font sizes only (labels are inside zoomed world layer)
+// On zoom: labels are now counter-scaled by the zoom handler, so no font-size changes needed
+// This function is kept for compatibility but no longer performs any scaling operations
 export function updateLabelZoom({ svg, groupId = 'labels-world' }) {
   const worldNode = d3.select('#world').node() || svg.node();
   const k = d3.zoomTransform(worldNode).k;
@@ -2717,31 +2723,8 @@ export function updateLabelZoom({ svg, groupId = 'labels-world' }) {
   // From here on, operate only on non-ocean labels.
   const sel = g.selectAll('.label').filter(d => d && d.kind !== 'ocean');
 
-  // Non-ocean labels are inside the zoomed world layer.
-  // 1) NO per-label transforms - let the world layer handle zooming
-  // 2) Only change font-size to make labels grow with zoom
-  const BETA = 1.0; // try 0.90 if you want slightly slower growth
-
-  // Keep strokes crisp with zoom
-  sel.selectAll('text.stroke')
-    .style('stroke-width', d => (d.baseStrokePx ? d.baseStrokePx / k : 2 / k));
-  
-  // Update font sizes - non-ocean labels grow with zoom
-  sel.selectAll('text.stroke, text.fill')
-    .style('font-size', d => {
-      const px = Math.max(1, Math.round(d.fontPx * Math.pow(k, BETA)));
-      return px + 'px';
-    });
-  
-        // Verify zoom behavior with targeted logging - commented out to reduce spam
-      // if (window.DBG && window.DBG.labels) {
-      //   sel.each(function(d) {
-      //     if (!d) return;
-      //     const t = d3.select(this).attr("transform") || "";
-      //     const fs = d3.select(this).select("text").style("font-size");
-      //     console.log("[zoom]", { k, id: d.id, kind: d.kind, transform: t, fontSize: fs });
-      //   });
-      // }
+  // Labels are now counter-scaled by the zoom handler to maintain constant screen size
+  // No font-size changes needed - the counter-scaling handles this automatically
   
   // Debug logging inside updateLabelZoom (after applying transform)
   if (LABEL_DEBUG) {
@@ -3396,7 +3379,9 @@ function renderOceanOverlay(rectPx, text) {
     .attr('class', 'feature-label ocean-label')
     .attr('id', 'ocean-label'); // Add stable ID for reprojection
 
-  gEnter.append('text').attr('class','ocean-text');
+  gEnter.append('text').attr('class','ocean-text')
+    .attr('vector-effect', 'non-scaling-stroke')
+    .style('paint-order', 'stroke');
 
   const g = gEnter.merge(sel);
   g.attr('transform', `translate(${rectPx.x},${rectPx.y})`);
@@ -3495,6 +3480,8 @@ export function placeOceanLabelAt(cx, cy, maxWidth, oceanLabel, svg, opts = {}) 
     .attr('y', cy)
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'middle')
+    .attr('vector-effect', 'non-scaling-stroke')
+    .style('paint-order', 'stroke')
     .style('font-size', `${fs}px`)
     .text(oceanLabel.text)
     .classed('ocean', true)

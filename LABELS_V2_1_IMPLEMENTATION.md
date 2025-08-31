@@ -110,6 +110,58 @@ renderOceanInWorld(svg, text);           // Creates ocean label in world space
 - **Zoom consistency**: Labels scale naturally with the map using parent group transforms
 - **Simplified architecture**: Ocean labels follow same pattern as other labels
 
+### Counter-Scaling Implementation (Latest)
+
+**Overview:**
+Labels now maintain constant on-screen size during pan/zoom operations through intelligent counter-scaling applied to individual label groups.
+
+**How It Works:**
+1. **Map zooming**: The `#world` and `#labels-world` groups receive normal zoom transforms (translate + scale)
+2. **Label counter-scaling**: Each individual label group gets an additional `scale(1/k)` to counteract the zoom
+3. **Result**: Labels move with the map but maintain constant screen size and halo width
+
+**Implementation Details:**
+```javascript
+// In zoomed() function (interaction.js)
+const inv = 1 / Math.max(0.5, Math.min(32, t.k)); // Guard against extreme zooms
+gLabels.selectAll('g.label')
+  .each(function(d) {
+    const currentTransform = d3.select(this).attr('transform') || '';
+    const match = currentTransform.match(/translate\(([^,]+),([^)]+)\)/);
+    
+    if (match) {
+      const origX = parseFloat(match[1]);
+      const origY = parseFloat(match[2]);
+      const a = d.angle || 0;
+      
+      // Apply counter-scaling while preserving original position
+      const transform = `translate(${origX},${origY}) scale(${inv}) rotate(${a})`;
+      d3.select(this).attr('transform', transform);
+    }
+  });
+```
+
+**Vector-Effect Attributes:**
+All text elements now include SVG attributes for consistent rendering:
+```javascript
+// Applied to all text elements during creation
+.attr('vector-effect', 'non-scaling-stroke')  // Halo stroke width stays constant
+.style('paint-order', 'stroke')              // Halo renders behind text
+```
+
+**Benefits:**
+- ✅ **Constant label size**: Labels never change pixel size during zoom
+- ✅ **Perfect tracking**: Labels move exactly with the map during pan/zoom
+- ✅ **Crisp halos**: Stroke widths remain constant at all zoom levels
+- ✅ **Performance**: No font-size recalculations during zoom
+- ✅ **Compatibility**: Existing label positioning and collision logic unchanged
+
+**Safety Features:**
+- **Zoom level guards**: Counter-scaling clamped to reasonable bounds (0.5x to 32x)
+- **Defensive positioning**: Extracts original position from current transform attributes
+- **Rotation preservation**: Maintains any existing label rotation during counter-scaling
+- **Debug logging**: Console output when counter-scaling is applied (when `window.DBG.labels` enabled)
+
 ### Label BBox Estimation Optimization
 The system uses a pragmatic approach for label width estimation:
 

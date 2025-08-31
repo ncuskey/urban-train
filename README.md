@@ -20,12 +20,14 @@ A web-based procedural map generator that creates Voronoi-based terrain with int
 - **Fit-to-rect functionality**: Ocean labels automatically scale font size and use two-line breaks to fit within their boundaries
 - **Multiline support**: Ocean labels can break into two lines for better fit with proper line spacing
 - **Size-based zoom filtering**: Features appear progressively based on area and zoom level
+- **Counter-scaling labels**: Labels maintain constant on-screen size during pan/zoom operations
 - **Robust error handling**: Multiple safety layers prevent crashes from invalid data
 - **Consistent font styling**: All labels use unified CSS font variables for consistent appearance
 - **Accurate text measurement**: Font measurements match rendered text exactly using CSS variables
 
 ### 🎯 **Interactive Features**
 - **Pan and zoom** with smooth performance
+- **Counter-scaling labels**: Labels maintain constant screen size during zoom operations
 - **Hover HUD** with feature information
 - **Autofit to land** for optimal initial view
 - **Performance monitoring** with built-in timers

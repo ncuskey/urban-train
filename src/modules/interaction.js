@@ -69,13 +69,10 @@ export function attachInteraction({
   svg.on('.zoom', null);
   
   // v5-safe zoom handler
-  function onZoom() {
-    // `this` is the element the zoom behavior is bound to (the <svg>)
+  function zoomed() {
+    const t = d3.event.transform;          // d3 v5
     const svgSel = d3.select(this);
-    const t = (d3.event && d3.event.transform)
-      ? d3.event.transform
-      : d3.zoomTransform(svgSel.node()); // fallback, just in case
-
+    
     currentTransform = t;
     window.currentTransform = currentTransform; // Global transform tracking
     
@@ -90,6 +87,38 @@ export function attachInteraction({
     d3.select('#labels-world')
       .attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
 
+    // NEW: counter-scale label groups so their screen size stays constant
+    // Guard against extreme zoom levels to prevent extreme inverse scale values
+    const inv = 1 / Math.max(0.5, Math.min(32, t.k));
+    const gLabels = d3.select('#labels-world');
+    if (!gLabels.empty()) {
+      const labelCount = gLabels.selectAll('g.label').size();
+      if (labelCount > 0) {
+        gLabels.selectAll('g.label')
+          .each(function(d) {
+            if (!d) return;
+            // Get the current transform to extract the original position
+            const currentTransform = d3.select(this).attr('transform') || '';
+            const match = currentTransform.match(/translate\(([^,]+),([^)]+)\)/);
+            
+            if (match) {
+              const origX = parseFloat(match[1]);
+              const origY = parseFloat(match[2]);
+              const a = d.angle || 0;            // preserve rotation if used
+              
+              // Apply counter-scaling while preserving original position
+              const transform = `translate(${origX},${origY}) scale(${inv}) rotate(${a})`;
+              d3.select(this).attr('transform', transform);
+            }
+          });
+        
+        // Debug logging for counter-scaling
+        if (window.DBG?.labels) {
+          console.debug(`[zoom] Applied counter-scaling (1/${t.k.toFixed(2)} = ${inv.toFixed(3)}) to ${labelCount} labels`);
+        }
+      }
+    }
+
     // Update visibility + inverse scale for feature labels
     if (window.__labelsPlaced && window.__labelsPlaced.features) {
       updateLabelVisibility({
@@ -101,9 +130,6 @@ export function attachInteraction({
       });
       updateLabelZoom({ svg: svgSel, groupId: 'labels-world' });
     }
-
-    // Scale non-ocean labels by k (if your function expects just k, pass t.k)
-    // updateLabelZoom(t.k); // Uncomment if you want to pass just k
 
     // Ocean labels now move with the parent group - no manual positioning needed
     
@@ -127,7 +153,7 @@ export function attachInteraction({
       [-100, -100],
       [r.width + 100, r.height + 100]
     ])
-    .on('zoom', onZoom);
+    .on('zoom', zoomed);
 
   svg.call(zoom)
      .on('dblclick.zoom', null)
