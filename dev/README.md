@@ -240,6 +240,134 @@ http://localhost:8000/dev/test-event-surface.html
 - Spatial picking accuracy
 - Performance of interactive features
 
+## Additional Test Pages
+
+### `test-counter-scaling.html`
+**Purpose**: Testing counter-scaling label implementation
+
+**How to run**:
+```bash
+http://localhost:8000/dev/test-counter-scaling.html
+```
+
+**Tests**:
+- Counter-scaling behavior during zoom operations
+- Label size consistency across zoom levels
+- Pan and zoom interaction with labels
+- Vector-effect attributes for constant halo width
+
+### `test-ocean-placement-verification.html`
+**Purpose**: Testing ocean label placement verification
+
+**How to run**:
+```bash
+http://localhost:8000/dev/test-ocean-placement-verification.html
+```
+
+**Tests**:
+- Ocean label placement accuracy
+- Rectangle boundary validation
+- Placement verification algorithms
+- Debug visualization and reporting
+
+### `test-fantasy-fonts.html`
+**Purpose**: Testing fantasy font system
+
+**How to run**:
+```bash
+http://localhost:8000/dev/test-fantasy-fonts.html
+```
+
+**Tests**:
+- Fantasy font loading and rendering
+- Font family switching
+- Typography consistency
+- Font performance and fallbacks
+
+### `test-idempotent-zoom.html`
+**Purpose**: Testing idempotent zoom behavior
+
+**How to run**:
+```bash
+http://localhost:8000/dev/test-idempotent-zoom.html
+```
+
+**Tests**:
+- Zoom operation idempotency
+- Transform consistency
+- State preservation during zoom
+- Performance of repeated zoom operations
+
+### `test-ocean-rectangle.html`
+**Purpose**: Testing ocean rectangle calculations
+
+**How to run**:
+```bash
+http://localhost:8000/dev/test-ocean-rectangle.html
+```
+
+**Tests**:
+- Ocean rectangle computation
+- Boundary detection algorithms
+- Rectangle optimization
+- Visual validation of rectangles
+
+### `test-autofit-improvements.html`
+**Purpose**: Testing autofit system improvements
+
+**How to run**:
+```bash
+http://localhost:8000/dev/test-autofit-improvements.html
+```
+
+**Tests**:
+- Autofit algorithm enhancements
+- Land bounding box calculations
+- Viewport optimization
+- Performance improvements
+
+### `test-pan-to-fit.html`
+**Purpose**: Testing pan-to-fit functionality
+
+**How to run**:
+```bash
+http://localhost:8000/dev/test-pan-to-fit.html
+```
+
+**Tests**:
+- Pan-to-fit algorithm
+- Coordinate calculations
+- Viewport adjustments
+- Smooth transitions
+
+### `test-placeOceanLabelInRect.html`
+**Purpose**: Testing ocean label placement within rectangles
+
+**How to run**:
+```bash
+http://localhost:8000/dev/test-placeOceanLabelInRect.html
+```
+
+**Tests**:
+- Ocean label placement algorithms
+- Rectangle boundary constraints
+- Text fitting and scaling
+- Placement optimization
+
+### `test-scoring.html`
+**Purpose**: Testing scoring system for label placement
+
+**How to run**:
+```bash
+http://localhost:8000/dev/test-scoring.html
+```
+
+**Tests**:
+- Scoring algorithms
+- Energy function calculations
+- Optimization metrics
+- Performance evaluation
+
 ## Quick Start
 
 1. **Start development server**:
@@ -293,14 +421,33 @@ window.toggleLabels();
 
 ```
 dev/
-├── README.md              # This file
-├── debug-labels.js        # Console debugging script
-├── test-labels-v2.1.html  # Comprehensive label testing
-├── test-collision-zoom.html # Collision avoidance testing
-├── test-label-zoom.html   # Zoom behavior testing
-├── test-names.html        # Fantasy naming testing
-├── test-refine.html       # Coastline refinement testing
-├── test-svg-zoom.html     # SVG zoom testing
-├── test-event-capture.html # Event handling testing
-└── test-event-surface.html # Interactive surface testing
+├── README.md                           # This file
+├── debug-labels.js                     # Console debugging script
+├── test-labels-v2.1.html              # Comprehensive label testing
+├── test-labels-v2.html                 # Labels v2 system testing
+├── test-collision-zoom.html            # Collision avoidance testing
+├── test-label-zoom.html                # Zoom behavior testing
+├── test-names.html                     # Fantasy naming testing
+├── test-refine.html                    # Coastline refinement testing
+├── test-svg-zoom.html                  # SVG zoom testing
+├── test-event-capture.html             # Event handling testing
+├── test-event-surface.html             # Interactive surface testing
+├── test-ocean-rectangle.html           # Ocean rectangle testing
+├── test-counter-scaling.html           # Counter-scaling label testing
+├── test-ocean-placement-verification.html # Ocean placement verification
+├── test-fantasy-fonts.html             # Fantasy fonts testing
+├── test-idempotent-zoom.html           # Idempotent zoom testing
+├── test-performance-guardrails.html    # Performance guardrails testing
+├── test-ocean-polishing.html           # Ocean label polishing testing
+├── test-sa-integration.html            # SA labeler integration testing
+├── test-anneal-labels.html             # Annealer wrapper testing
+├── test-label-metrics.html             # Label metrics testing
+├── test-d3-labeler.html                # D3-Labeler plugin testing
+├── test-feature-flag.html              # Feature flag testing
+├── test-sat-ocean-placement.html       # SAT ocean placement testing
+├── test-autofit-improvements.html      # Autofit improvements testing
+├── test-autofit-promise.html           # Autofit promise testing
+├── test-pan-to-fit.html                # Pan to fit testing
+├── test-placeOceanLabelInRect.html     # Ocean label rect placement testing
+└── test-scoring.html                   # Scoring system testing
 ```
