@@ -30,15 +30,18 @@ export function computeLabelMetrics({ svg, labels }) {
       l = fitOceanLabelToRect(l, l.keepWithinRect, svg);
     }
     
-    const font = l.fontSize || (
-      l.kind === 'ocean'  ? 28 :
-      l.kind === 'lake'   ? 14 :
-      l.kind === 'island' ? 12 : 12
-    );
+    // Set baseline font size if not already set
+    if (l.baseFontPx == null) {
+      l.baseFontPx = l.fontSize || (
+        l.kind === 'ocean'  ? 28 :
+        l.kind === 'lake'   ? 14 :
+        l.kind === 'island' ? 12 : 12
+      );
+    }
     
     // Use the fitted dimensions if available, otherwise measure
-    const width = l.width || measureTextWidth(svg, l.multiline ? l.text.split('\n')[0] : l.text, { fontSize: font, weight: 700 });
-    const height = l.height || Math.max(10, Math.round(font * (l.multiline ? 2.4 : 0.9)));
+    const width = l.width || measureTextWidth(svg, l.multiline ? l.text.split('\n')[0] : l.text, { fontSize: l.baseFontPx, weight: 700 });
+    const height = l.height || Math.max(10, Math.round(l.baseFontPx * (l.multiline ? 2.4 : 0.9)));
 
     // Seed ocean labels inside their chosen rectangle
     if (l.kind === 'ocean' && l.keepWithinRect) {
@@ -48,7 +51,7 @@ export function computeLabelMetrics({ svg, labels }) {
 
       const result = {
         ...l,
-        font,
+        font: l.baseFontPx,
         // start box top-left inside the rectangle
         x: startX,
         y: startY,
@@ -70,7 +73,7 @@ export function computeLabelMetrics({ svg, labels }) {
 
     return {
       ...l,
-      font,
+      font: l.baseFontPx,
       // initial guess stays at current centroid
       x: l.x,
       y: l.y,
@@ -176,16 +179,16 @@ function fitOceanLabelToRect(oceanLabel, rect, svg) {
       const line1 = words.slice(0, bestBreak).join(' ');
       const line2 = words.slice(bestBreak).join(' ');
       oceanLabel.text = line1 + '\n' + line2;
-      oceanLabel.fontSize = fontSize;
+      oceanLabel.baseFontPx = fontSize;
       oceanLabel.multiline = true;
     } else {
       // Fallback: use minimum font size with single line
-      oceanLabel.fontSize = minFontSize;
+      oceanLabel.baseFontPx = minFontSize;
       oceanLabel.multiline = false;
     }
   } else {
     // Single line fits
-    oceanLabel.fontSize = fontSize;
+    oceanLabel.baseFontPx = fontSize;
     oceanLabel.multiline = false;
   }
   
@@ -194,11 +197,11 @@ function fitOceanLabelToRect(oceanLabel, rect, svg) {
   
   // Recalculate label dimensions with new font size
   const finalWidth = measureTextWidth(svg, oceanLabel.multiline ? oceanLabel.text.split('\n')[0] : oceanLabel.text, { 
-    fontSize: oceanLabel.fontSize, 
+    fontSize: oceanLabel.baseFontPx, 
     family: labelFontFamily(), 
     weight: 700 
   });
-  const finalHeight = oceanLabel.multiline ? oceanLabel.fontSize * 2.4 : oceanLabel.fontSize * 1.2;
+  const finalHeight = oceanLabel.multiline ? oceanLabel.baseFontPx * 2.4 : oceanLabel.baseFontPx * 1.2;
   
   oceanLabel.width = finalWidth;
   oceanLabel.height = finalHeight;
@@ -428,6 +431,14 @@ export function annealLabels({ labels, bounds, sweeps = 400, svg }) {
       l.placed.x = l.x - l.width / 2;
       l.placed.y = l.y - l.height / 2;
     }
+    
+    // Ensure baseline font size is set for idempotent zoom updates
+    if (l.baseFontPx == null) {
+      l.baseFontPx = l.font || 28;
+    }
+    if (l.baseStrokePx == null) {
+      l.baseStrokePx = 2;
+    }
   }
   return labels;
 }
@@ -563,7 +574,7 @@ export function placeOceanLabelInRect(oceanLabel, rect, svg, opts = {}) {
   // Update the ocean label object
   oceanLabel.x = cx;
   oceanLabel.y = cy;
-  oceanLabel.fontSize = fs;
+  oceanLabel.baseFontPx = fs;
   oceanLabel.fixed = true;
   oceanLabel.keepWithinRect = { 
     x0: rect.x0 + pad, 
@@ -1959,6 +1970,13 @@ export function renderLabels({ svg, placed, groupId }) {
   // Update all labels (enter + update)
   const merged = enter.merge(sel);
   
+  // Set baseline font sizes (persist on datum)
+  merged.each(function(d) {
+    // baseline font (persist on datum). For oceans, this may come from fit-to-rect.
+    if (d.baseFontPx == null) d.baseFontPx = d.fontPx || d.font || 28; // pick your default
+    if (d.baseStrokePx == null) d.baseStrokePx = 2;          // default outline
+  });
+  
   // Set position and transform
   merged.attr('transform', function(d) {
     if (!d) return 'translate(0,0)'; // Safety guard
@@ -1978,7 +1996,7 @@ export function renderLabels({ svg, placed, groupId }) {
       textElement
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'central')
-        .attr('font-size', d.font || 16)
+        .style('font-size', d => `${d.baseFontPx}px`)
         .classed('is-visible', false)
         .classed('ocean', d.kind === 'ocean')
         .classed('lake', d.kind === 'lake')
@@ -2008,7 +2026,7 @@ export function renderLabels({ svg, placed, groupId }) {
       textElement
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'central')
-        .attr('font-size', d.font || 16)
+        .style('font-size', d => `${d.baseFontPx}px`)
         .classed('is-visible', false)
         .classed('ocean', d.kind === 'ocean')
         .classed('lake', d.kind === 'lake')
@@ -2071,21 +2089,19 @@ export function renderLabels({ svg, placed, groupId }) {
   console.log('[labels] overlaps after SA:', countOverlaps(validPlaced));
 }
 
-// On zoom: update transform with scaling
-export function updateLabelZoom({ svg, groupId, k }) {
-  // last-resort guard: ensure k is finite and positive
-  const safeK = Number.isFinite(k) && k > 0 ? k : 1;
-  
-  svg.select(`#${groupId}`).selectAll('g.label')
-    .attr('transform', function(d) {
-      if (!d) return 'translate(0,0) scale(1)'; // Safety guard
-      const p = labelDrawXY(d);
-      const labelScale = d && d.scale ? d.scale : 1.0;
-      // last-resort guard: never return NaN
-      const x = safe(p.x, 0);
-      const y = safe(p.y, 0);
-      return `translate(${x},${y}) scale(${labelScale / safeK})`;
-    });
+// On zoom: update transform with scaling (idempotent)
+export function updateLabelZoom({ svg, groupId = 'labels-features' }) {
+  const worldNode = d3.select('#world').node() || svg.node();
+  const k = d3.zoomTransform(worldNode).k;
+  const g = svg.select(`#${groupId}`);
+
+  // Idempotent: rebuild transform from scratch every time
+  g.selectAll('g.label')
+    .attr('transform', d => `translate(${d.x},${d.y}) scale(${1 / k})`);
+
+  // Keep strokes crisp with zoom; do NOT change font-size here
+  g.selectAll('text.stroke')
+    .style('stroke-width', d => (d.baseStrokePx ? d.baseStrokePx / k : 2 / k));
 }
 
 // Real LOD: compute the visible set and toggle class
@@ -2672,7 +2688,7 @@ export function placeOceanLabelAt(cx, cy, maxWidth, oceanLabel, svg, opts = {}) 
     .attr('y', cy)
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'middle')
-    .attr('font-size', fs)
+    .style('font-size', `${fs}px`)
     .text(oceanLabel.text);
 
   console.log(`[ocean] Placed label "${oceanLabel.text}" at screen coords (${cx.toFixed(1)}, ${cy.toFixed(1)}) with font size ${fs}px`);

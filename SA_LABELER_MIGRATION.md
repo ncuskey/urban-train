@@ -96,7 +96,8 @@ Use `test-feature-flag.html` to verify the flag is working:
 - [x] Created test page `test-ocean-polishing.html` with visualization
 
 ### ✅ Step 6: LOD & Zoom Transforms Unchanged (COMPLETED)
-- [x] `updateLabelZoom()` and `updateLabelVisibility()` remain unchanged
+- [x] `updateLabelVisibility()` remains unchanged
+- [x] `updateLabelZoom()` updated for idempotent styling (see LABEL_FIXES.md)
 - [x] Inverse-scale transforms preserved exactly as-is
 - [x] Bucketed `filterByZoom()` function unchanged
 - [x] All existing LOD and zoom functionality maintained

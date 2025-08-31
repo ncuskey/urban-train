@@ -185,6 +185,26 @@ window.toggleLabelScaling();
 
 ## Recent Bug Fixes
 
+### Idempotent Label Zoom Styling (2025-08-30)
+
+**Issue**: After ocean label placement, island and lake label font sizes were compounding across zoom updates, causing unwanted font growth and inconsistent rendering.
+
+**Root Cause**: 
+- `updateLabelZoom` was using compound transforms and reading existing font styles
+- Font sizes were being multiplied across multiple zoom update passes
+- No baseline font size persistence on label data
+
+**Solution**:
+1. **Idempotent transform updates**: `updateLabelZoom` now rebuilds transforms from scratch using `scale(1/k)`
+2. **Baseline font persistence**: Set `baseFontPx` and `baseStrokePx` on label datum in `renderLabels`
+3. **Deterministic font sizing**: Font sizes derived from baseline, not compounded from existing styles
+4. **Ocean label baseline**: `fitOceanLabelToRect` sets `baseFontPx` instead of transient `fontSize`
+5. **Simplified zoom updates**: `updateLabelZoom` gets zoom level internally, no `k` parameter needed
+
+**Files Changed**:
+- `src/modules/labels.js` - Updated `updateLabelZoom`, `renderLabels`, `fitOceanLabelToRect`, `computeLabelMetrics`, `annealLabels`
+- `src/modules/interaction.js` - Updated `updateLabelZoom` calls to remove `k` parameter
+
 ### ReferenceError: d is not defined (2025-08-30)
 
 **Issue**: The `renderLabels` function was throwing a ReferenceError when trying to access properties on `d` in D3 callbacks, particularly when the `placed` array contained `undefined` or `null` elements.

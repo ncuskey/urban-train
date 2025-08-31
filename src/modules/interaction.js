@@ -84,7 +84,7 @@ export function attachInteraction({
           k: t.k,
           filterByZoom
         });
-        updateLabelZoom({ svg, groupId: 'labels-features', k: t.k });
+        updateLabelZoom({ svg, groupId: 'labels-features' });
       }
       
       // Ocean labels now in world space - no need to clear screen labels on zoom/pan
