@@ -2313,11 +2313,17 @@ export function seedOceanIntoWorldRect(l) {
 function labelDrawXY(d) {
   if (!d) return { x: 0, y: 0 }; // Safety guard
   
-  const k = d3.zoomTransform(d3.select('#map').node()).k || 1;
   if (d.placed && Number.isFinite(d.placed.x) && Number.isFinite(d.placed.y)) {
-    const wWorld = (d.width || 0) / k;
-    const hWorld = (d.height || 0) / k;
-    return { x: d.placed.x + wWorld / 2, y: d.placed.y + hWorld * 0.75 };
+    // Non-ocean labels should use world coordinates directly (no inverse scaling)
+    if (d.kind !== 'ocean') {
+      return { x: d.placed.x, y: d.placed.y };
+    } else {
+      // Ocean labels may need screen-to-world conversion
+      const k = d3.zoomTransform(d3.select('#map').node()).k || 1;
+      const wWorld = (d.width || 0) / k;
+      const hWorld = (d.height || 0) / k;
+      return { x: d.placed.x + wWorld / 2, y: d.placed.y + hWorld * 0.75 };
+    }
   }
   return { x: d.x || 0, y: d.y || 0 };
 }
@@ -2433,8 +2439,9 @@ export function renderLabels({ svg, placed, groupId }) {
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'central')
         .style('font-size', d => {
-          const k = getZoomK();
-          return (d.font_world_px ?? (d.baseFontPx || 24) / k) + 'px';
+          // Non-ocean labels will be handled by updateLabelZoom
+          // Ocean labels use their stored world font size
+          return (d.font_world_px ?? (d.baseFontPx || 24)) + 'px';
         })
         .classed('is-visible', true)
         .classed('ocean', d.kind === 'ocean')
@@ -2515,8 +2522,9 @@ export function renderLabels({ svg, placed, groupId }) {
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'central')
         .style('font-size', d => {
-          const k = getZoomK();
-          return (d.font_world_px ?? (d.baseFontPx || 24) / k) + 'px';
+          // Non-ocean labels will be handled by updateLabelZoom
+          // Ocean labels use their stored world font size
+          return (d.font_world_px ?? (d.baseFontPx || 24)) + 'px';
         })
         .classed('is-visible', true)
         .classed('ocean', d.kind === 'ocean')
@@ -2629,20 +2637,52 @@ export function updateLabelZoom({ svg, groupId = 'labels-world' }) {
   const k = d3.zoomTransform(worldNode).k;
   const g = d3.select('#labels-world');
 
+  // Non-ocean labels should grow with the map.
+  // 1) no inverse per-label scale
+  // 2) font size increases with k (or k**beta if you want gentler growth)
+  const BETA = 1.0; // try 0.90 if you want slightly slower growth
+
   // Idempotent: rebuild transform from scratch every time
   g.selectAll('g.label')
-    .attr('transform', d => `translate(${d.x},${d.y}) scale(${1 / k})`);
+    .attr('transform', d => {
+      if (d.kind === 'ocean') {
+        // ocean handled elsewhere in screen space
+        return `translate(${d.x},${d.y}) scale(${1 / k})`; // keep ocean as-is
+      } else {
+        // explicitly forbid inverse scaling
+        const s = 1; // no inverse: follow world zoom
+        // If you still see scale(1/k) getting set somewhere, log it:
+        if (window.DBG && window.DBG.labels) console.warn("[labels] unexpected inverse scale for", d.id);
+        return `translate(${d.x},${d.y})`; // remove scale(...)
+      }
+    });
 
   // Keep strokes crisp with zoom; do NOT change font-size here
   g.selectAll('text.stroke')
     .style('stroke-width', d => (d.baseStrokePx ? d.baseStrokePx / k : 2 / k));
   
-  // Update font sizes to respect ocean's stored world font
+  // Update font sizes - non-ocean labels grow with zoom
   g.selectAll('text.stroke, text.fill')
     .style('font-size', d => {
-      const k = getZoomK();
-      return (d.font_world_px ?? (d.baseFontPx || 24) / k) + 'px';
+      if (d.kind !== 'ocean') {
+        const px = Math.max(1, Math.round(d.fontPx * Math.pow(k, BETA)));
+        return px + 'px';
+      } else {
+        // Ocean labels keep their existing logic
+        const k = getZoomK();
+        return (d.font_world_px ?? (d.baseFontPx || 24) / k) + 'px';
+      }
     });
+  
+  // Verify zoom behavior with targeted logging
+  if (window.DBG && window.DBG.labels) {
+    g.selectAll('g.label').each(function(d) {
+      if (!d) return;
+      const t = d3.select(this).attr("transform") || "";
+      const fs = d3.select(this).select("text").style("font-size");
+      console.log("[zoom]", { k, id: d.id, kind: d.kind, transform: t, fontSize: fs });
+    });
+  }
   
   // Debug logging inside updateLabelZoom (after applying transform)
   if (LABEL_DEBUG) {

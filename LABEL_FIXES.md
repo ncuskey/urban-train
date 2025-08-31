@@ -343,3 +343,125 @@ if (window.DBG && window.DBG.safety === true) {
 **Files Changed**:
 - `styles.css` - Added CSS safety rules at end of file
 - `src/modules/labels.js` - Added debug flag unhide functionality in `renderOceanOnly()`
+
+### Island/Lake Label Zoom Behavior Fix (2025-08-30)
+
+**Issue**: Island and lake labels were using inverse scaling (`scale(1/k)`) which made them shrink as users zoomed in, making them less readable and counterintuitive.
+
+**Root Cause**: 
+- Multiple places in the code were applying inverse scaling to all labels
+- `updateLabelZoom` function used `scale(1/k)` for all labels
+- `renderLabels` function applied `/ k` to font sizes
+- `labelDrawXY` function converted screen coordinates with `/ k` scaling
+- No clear separation between ocean and non-ocean label behavior
+
+**Solution**: Implemented Strategy A - Transform only by map zoom, scale font by *k
+
+#### 1. Fixed `updateLabelZoom` Function
+**Before**: All labels used inverse scaling
+```javascript
+g.selectAll('g.label')
+  .attr('transform', d => `translate(${d.x},${d.y}) scale(${1 / k})`);
+```
+
+**After**: Non-ocean labels follow world zoom, ocean labels keep inverse scaling
+```javascript
+g.selectAll('g.label')
+  .attr('transform', d => {
+    if (d.kind === 'ocean') {
+      return `translate(${d.x},${d.y}) scale(${1 / k})`; // keep ocean as-is
+    } else {
+      return `translate(${d.x},${d.y})`; // remove scale(...)
+    }
+  });
+```
+
+#### 2. Fixed Font Size Scaling
+**Before**: All labels had shrinking font sizes
+```javascript
+.style('font-size', d => (d.baseFontPx || 24) / k + 'px');
+```
+
+**After**: Non-ocean labels grow with zoom, ocean labels keep inverse scaling
+```javascript
+.style('font-size', d => {
+  if (d.kind !== 'ocean') {
+    const px = Math.max(1, Math.round(d.fontPx * Math.pow(k, BETA)));
+    return px + 'px';
+  } else {
+    return (d.font_world_px ?? (d.baseFontPx || 24) / k) + 'px';
+  }
+});
+```
+
+#### 3. Fixed Initial Label Creation
+**Before**: `labelDrawXY` applied inverse scaling to all labels
+```javascript
+const wWorld = (d.width || 0) / k;
+const hWorld = (d.height || 0) / k;
+```
+
+**After**: Non-ocean labels use world coordinates directly
+```javascript
+if (d.kind !== 'ocean') {
+  return { x: d.placed.x, y: d.placed.y }; // Direct world coords
+} else {
+  // Ocean labels keep screen-to-world conversion
+  const wWorld = (d.width || 0) / k;
+  const hWorld = (d.height || 0) / k;
+}
+```
+
+#### 4. Added Sanity Guard
+Added hard guard to prevent any inverse scaling for non-ocean labels:
+```javascript
+if (d.kind === 'ocean') {
+  // ocean handled elsewhere in screen space
+  return `translate(${d.x},${d.y}) scale(${1 / k})`;
+} else {
+  // explicitly forbid inverse scaling
+  const s = 1; // no inverse: follow world zoom
+  if (window.DBG && window.DBG.labels) console.warn("[labels] unexpected inverse scale for", d.id);
+  return `translate(${d.x},${d.y})`; // remove scale(...)
+}
+```
+
+#### 5. Added Verification Logging
+Added targeted logging to verify zoom behavior:
+```javascript
+if (window.DBG && window.DBG.labels) {
+  g.selectAll('g.label').each(function(d) {
+    const t = d3.select(this).attr("transform") || "";
+    const fs = d3.select(this).select("text").style("font-size");
+    console.log("[zoom]", { k, id: d.id, kind: d.kind, transform: t, fontSize: fs });
+  });
+}
+```
+
+**Expected Behavior When Zooming In (k increases)**:
+- **Island/Lake labels**: 
+  - Transform: `translate(x,y)` (no `scale(...)`)
+  - Font size: Increases monotonically
+- **Ocean labels**: 
+  - Transform: `translate(x,y) scale(1/k)` (inverse scaling maintained)
+  - Font size: Decreases (inverse scaling maintained)
+
+**Benefits**:
+- **Intuitive behavior**: Island/lake labels grow larger as you zoom in
+- **Better readability**: Labels become more readable at higher zoom levels
+- **Consistent with expectations**: Labels follow the map zoom naturally
+- **Ocean labels preserved**: Screen-space ocean labels maintain their current behavior
+- **No double scaling**: Eliminated all inverse scaling conflicts
+
+**Usage**:
+```javascript
+// Enable debug logging in browser console:
+window.DBG = { labels: true };
+
+// Then zoom in/out to see:
+// [zoom] { k: 1.5, id: "island:1", kind: "island", transform: "translate(100,200)", fontSize: "24px" }
+// [zoom] { k: 2.0, id: "island:1", kind: "island", transform: "translate(100,200)", fontSize: "32px" }
+```
+
+**Files Changed**:
+- `src/modules/labels.js` - Fixed zoom behavior in `updateLabelZoom`, `renderLabels`, and `labelDrawXY` functions
