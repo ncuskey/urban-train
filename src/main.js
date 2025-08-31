@@ -14,7 +14,7 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction, getVisibleWorldBounds, padBounds } from "./modules/interaction.js";
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
-import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, placeOceanLabelAt, clearScreenLabels, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect } from "./modules/labels.js";
+import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, placeOceanLabelAt, clearScreenLabels, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, seedOceanIntoWorldRect } from "./modules/labels.js";
 
 // === Minimal Perf HUD ==========================================
 const Perf = (() => {
@@ -545,7 +545,9 @@ async function generate(count) {
     // Ensure every label has width/height before placement
     ensureMetrics(featureLabels, svgSel);
     
-    const placedFeatures = placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels });
+    // Initial placement excludes ocean labels (they'll be placed after autofit)
+    const nonOceanLabels = featureLabels.filter(l => l.kind !== 'ocean');
+    const placedFeatures = placeLabelsAvoidingCollisions({ svg: svgSel, labels: nonOceanLabels });
     
     if (window.DEBUG) {
       console.log('[labels] DEBUG: After collision avoidance:', {
@@ -752,64 +754,69 @@ async function generate(count) {
         if (pxRect) {
           console.log(`[ocean] ✅ Using SAT-based placement for ${oceanLabels.length} ocean label(s)`);
           
-          // before placing anything
-          const screenLayer =
-            (window.debugOverlays && window.debugOverlays.overlayScreen) || d3.select('svg');
-
-          // nuke ANY previous ocean labels in both layers
-          screenLayer.selectAll('text.place-label.ocean').remove();
-          d3.select('#labels').selectAll('text.place-label.ocean').remove();
+          // Set the world keep-in rect on the ocean label datum
+          const ocean = featureLabels.find(l => l.kind === 'ocean');
+          if (ocean && pxRect?.keepWithinRect) {
+            ocean.keepWithinRect = pxRect.keepWithinRect; // WORLD rect
+            // Give the solver a sane starting point in WORLD coords
+            seedOceanIntoWorldRect(ocean);
+          }
 
           // Draw debug rectangle
           drawDebugOceanRect(pxRect);
           
-          // SAT's best rect (may be [x,y,w,h] or {x,y,w,h}/{x,y,width,height})
-          const best = pxRect;
-
-          // fallback: top third of viewport
-          const fallback = { x: 0, y: 0, width: mapWidth, height: Math.round(mapHeight / 3) };
-
-          const name = (oceanLabels[0]?.text) || 'The Pale Sea';
-
-          placeOceanLabelCentered(screenLayer, name, best, fallback);
+          // Now run the normal label system to place all labels including oceans
+          console.log('[ocean] 🎯 Running normal label system with ocean constraints...');
+          
+          // Ensure metrics are computed for the updated ocean labels
+          ensureMetrics(featureLabels, svgSel);
+          
+          // Run collision avoidance (now includes oceans with keepWithinRect)
+          const placedFeatures = placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels });
+          
+          // Render all labels including oceans
+          renderLabels({ svg: svgSel, placed: placedFeatures, groupId: 'labels-features' });
+          
+          // Update visibility and zoom
+          const k0 = (d3.zoomTransform(svgSel.node()).k || 1);
+          updateLabelVisibility({
+            svg: svgSel,
+            groupId: 'labels-features',
+            placed: placedFeatures,
+            k: k0,
+            filterByZoom
+          });
+          
+          // Store updated labels
+          window.__labelsPlaced = { features: placedFeatures };
+          
         } else {
-          console.warn('[ocean] ❌ No suitable SAT rectangle found; using fallback circle-based placement.');
+          console.warn('[ocean] ❌ No suitable SAT rectangle found; ocean labels will use default placement.');
           
-          // Clear any existing screen labels before placing new ones
-          clearScreenLabels();
+          // Run normal label system without ocean constraints
+          console.log('[ocean] 🔄 Running normal label system without ocean constraints...');
           
-          // Fallback to circle-based placement
-          console.log(`[ocean] ⚠️ Fallback: Using circle-based placement for ${oceanLabels.length} ocean label(s)`);
-          for (const oceanLabel of oceanLabels) {
-            const t = d3.zoomTransform(svgSel.node());
-            const [x0, y0, x1, y1] = getVisibleWorldBoundsFromLabels(svgSel, mapWidth, mapHeight);
-            const visibleWorld = [x0, y0, x1, y1];
-            const paddedBounds = padBounds(visibleWorld, 32, t.k);
-            
-            // Create water test function for this ocean label
-            const isWaterAt = makeIsWater((x, y) => diagram.find(x, y), 0.2);
-            
-            const spot = findOceanLabelSpot({
-              svg: svgSel,
-              getCellAtXY: (x, y) => diagram.find(x, y),
-              isWaterAt: isWaterAt,
-              bounds: paddedBounds,
-              text: oceanLabel.text,
-              baseFontSize: 28,
-              minFontSize: 16,
-              coastStep: 4,
-              gridStep: 16,
-              refinements: [8, 4, 2],
-              margin: 10
-            });
-            
-            if (spot) {
-              console.log(`[ocean] 🔄 Fallback: Placing "${oceanLabel.text}" at widest water spot`);
-              placeOceanLabelAtSpot(oceanLabel, spot, svgSel);
-            } else {
-              console.log(`[labels] Ocean "${oceanLabel.text}" using centroid: (${oceanLabel.x.toFixed(1)}, ${oceanLabel.y.toFixed(1)}) - no suitable spot found`);
-            }
-          }
+          // Ensure metrics are computed
+          ensureMetrics(featureLabels, svgSel);
+          
+          // Run collision avoidance
+          const placedFeatures = placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels });
+          
+          // Render all labels
+          renderLabels({ svg: svgSel, placed: placedFeatures, groupId: 'labels-features' });
+          
+          // Update visibility and zoom
+          const k0 = (d3.zoomTransform(svgSel.node()).k || 1);
+          updateLabelVisibility({
+            svg: svgSel,
+            groupId: 'labels-features',
+            k: k0,
+            placed: placedFeatures,
+            filterByZoom
+          });
+          
+          // Store updated labels
+          window.__labelsPlaced = { features: placedFeatures };
         }
       }
     }

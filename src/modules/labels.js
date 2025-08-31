@@ -923,7 +923,7 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
     
     // Step 1: Process lake/island clusters with performance guardrails
     for (const cluster of clusters) {
-      const members = cluster.filter(l => l.kind !== 'ocean'); // oceans later
+      const members = USE_SA_FOR_OCEANS ? cluster : cluster.filter(l => l.kind !== 'ocean');
       if (!members.length) continue;
       
       // Skip annealing for clusters of size 1-2 (no benefit)
@@ -1587,7 +1587,7 @@ function seedOceanIntoRect(oceanLabel) {
 }
 
 // Seed ocean label inside world rectangle (world coordinates)
-function seedOceanIntoWorldRect(l) {
+export function seedOceanIntoWorldRect(l) {
   const r = l.keepWithinRect;        // world coords!
   const k = d3.zoomTransform(d3.select('#map').node()).k || 1;
 
@@ -1656,7 +1656,10 @@ export function renderLabels({ svg, placed, groupId }) {
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'central')
     .attr('font-size', d => d.font || 16) // Use computed font size from metrics
-    .classed('is-visible', false); // Hidden by default
+    .classed('is-visible', false) // Hidden by default
+    .classed('ocean', d.kind === 'ocean') // Add ocean class for styling
+    .classed('lake', d.kind === 'lake') // Add lake class for styling
+    .classed('island', d.kind === 'island'); // Add island class for styling
   
   // Update fill text
   merged.select('text.fill')
@@ -1664,7 +1667,10 @@ export function renderLabels({ svg, placed, groupId }) {
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'central')
     .attr('font-size', d => d.font || 16) // Use computed font size from metrics
-    .classed('is-visible', false); // Hidden by default
+    .classed('is-visible', false) // Hidden by default
+    .classed('ocean', d.kind === 'ocean') // Add ocean class for styling
+    .classed('lake', d.kind === 'lake') // Add lake class for styling
+    .classed('island', d.kind === 'island'); // Add island class for styling
   
   if (window.DEBUG) console.log('[labels] DEBUG: Rendered', merged.size(), 'labels');
   

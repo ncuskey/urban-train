@@ -200,3 +200,41 @@ text.place-label.ocean {
   opacity: 0.95;
   font-family: var(--label-font);
 }
+
+/* Ocean label styling in new system */
+#labels-features g.label text.stroke.ocean {
+  stroke: rgba(0,0,0,.9);
+  stroke-width: 3px;
+  opacity: 0.8;
+}
+
+#labels-features g.label text.fill.ocean {
+  fill: #fff;
+  font-weight: 700;
+  letter-spacing: .4px;
+  opacity: 1;
+}
+
+/* Lake label styling in new system */
+#labels-features g.label text.stroke.lake {
+  stroke: #0c4a6e;
+  stroke-width: 2px;
+  opacity: 0.7;
+}
+
+#labels-features g.label text.fill.lake {
+  fill: #0369a1;
+  font-weight: 700;
+}
+
+/* Island label styling in new system */
+#labels-features g.label text.stroke.island {
+  stroke: #1a2f0d;
+  stroke-width: 2px;
+  opacity: 0.7;
+}
+
+#labels-features g.label text.fill.island {
+  fill: #2d5016;
+  font-weight: 900;
+}
