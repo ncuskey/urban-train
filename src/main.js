@@ -629,7 +629,7 @@ async function generate(count) {
     if (!labelsGroup.empty()) {
       labelsGroup.raise();
     }
-    $('.circles').hide();
+    document.querySelectorAll('.circles').forEach(el => el.style.display = 'none');
   }
 
   // Wire up post-generation setup
@@ -799,8 +799,14 @@ async function generate(count) {
         // Primary: Use SAT-based placement with post-autofit bounds
         console.log('[ocean] 🎯 Primary path: Using SAT-based ocean label placement with post-autofit bounds');
         
+        // Calculate dynamic step size based on viewport dimensions
+        const vw = viewportBounds[2] - viewportBounds[0];
+        const vh = viewportBounds[3] - viewportBounds[1];
+        const maxDim = Math.max(vw, vh);
+        const step = Math.max(8, Math.min(14, Math.round(maxDim / 120)));
+        
         // Use the new SAT-based rectangle finder with viewport bounds
-        const pxRect = findOceanLabelRectAfterAutofit(viewportBounds, state.getCellAtXY, state.seaLevel, 8, 1);
+        const pxRect = findOceanLabelRectAfterAutofit(viewportBounds, state.getCellAtXY, state.seaLevel, step, 1);
         
         if (pxRect) {
           console.log(`[ocean] ✅ Using SAT-based placement for ${oceanLabels.length} ocean label(s)`);
@@ -822,7 +828,7 @@ async function generate(count) {
           }
 
           // Draw debug rectangle
-          drawDebugOceanRect(pxRect);
+          if (LABEL_DEBUG) drawDebugOceanRect(pxRect);
           
           // Set up world layer for all labels
           const gAll = svgSel.select('#labels-world');    // islands + lakes + ocean (world layer)
@@ -930,7 +936,7 @@ async function generate(count) {
   console.groupEnd();
 
   // redraw all polygons on SeaInput change 
-  $("#seaInput").change(function() {
+  document.getElementById("seaInput").addEventListener("change", function() {
     // Ocean labels now handled by normal label system - no need to clear screen labels
     
     drawPolygons({
@@ -947,7 +953,7 @@ async function generate(count) {
   });
 
   // Draw of remove blur polygons on intup change
-  $("#blurInput").change(function() {
+  document.getElementById("blurInput").addEventListener("change", function() {
     toggleBlur({
       polygons,
       color,
@@ -960,7 +966,7 @@ async function generate(count) {
 
 
   // Draw of remove blur polygons on intup change
-  $("#strokesInput").change(function() {
+  document.getElementById("strokesInput").addEventListener("change", function() {
     toggleStrokes();
   });
 
@@ -1012,7 +1018,9 @@ function toggleOptions() {
 
 // Toggle blob centers visibility
 function toggleBlobCenters() {
-  $('.circles').toggle();
+  document.querySelectorAll('.circles').forEach(el => {
+    el.style.display = el.style.display === 'none' ? '' : 'none';
+  });
 }
 
 // Toggle label scaling mode - DISABLED: Now using per-label transforms

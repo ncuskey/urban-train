@@ -34,12 +34,28 @@ python3 -m http.server 8000
 
 2. Open `index.html`. Use **Random map**, **Options**, and the checkboxes to explore.
 
+### Development & CI
+
+**Local serve commands:**
+```bash
+npx http-server -p 8000 -c-1 .
+# or
+python3 -m http.server 8000
+```
+
+**Test commands:**
+```bash
+npm ci
+npm run prepare
+npm test
+```
+
 ### External libraries
 
 * **D3 v5** (CDN) – pan/zoom, selections.
-* **jQuery 3.6** (CDN) – a small amount of DOM convenience.
-* **d3‑labeler** (vendored) – currently **not used** in production placement. Kept for experimentation; can be removed if desired. (Script is still included in `index.html`; safe to remove.)
 * **Google Fonts** via CSS `@import` (fantasy typefaces).
+
+> Note: jQuery and d3-labeler were removed as unused dependencies.
 
 ---
 
@@ -125,10 +141,8 @@ python3 -m http.server 8000
 
 ## Known limitations / TODO
 
-* d3‑labeler vendor is unused; consider removing script tag in `index.html`.
 * Some edge cases for ocean rectangle search near tiny archipelagos can be slow; heuristics can be tuned.
-* jQuery use can be removed with small DOM refactors.
-* Add automated CI regression (headless) for label collisions and LOD thresholds.
+* Automated CI regression testing is now available for label collisions and LOD thresholds.
 
 ---
 

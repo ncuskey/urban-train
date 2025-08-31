@@ -55,7 +55,7 @@ export function drawCoastline({
   // find and draw continuous coastline (island/ocean)
   var number = 0;
   var type = "Island";
-  var edgesOfFeature = $.grep(line, function(e) {
+  var edgesOfFeature = line.filter(function(e) {
     return (e.type == type && e.number === number);
   });
   while (edgesOfFeature.length > 0) {
@@ -74,7 +74,7 @@ export function drawCoastline({
       y: spl[1]
     });
     for (var i = 0; end !== start && i < 2000; i++) {
-      var next = $.grep(edgesOfFeature, function(e) {
+      var next = edgesOfFeature.filter(function(e) {
         return (e.start == end || e.end == end);
       });
       if (next.length > 0) {
@@ -102,14 +102,14 @@ export function drawCoastline({
     }
     shapeGroup.append("path").attr("d", path(coast)).attr("fill", "black");
     number += 1;
-    edgesOfFeature = $.grep(line, function(e) {
+    edgesOfFeature = line.filter(function(e) {
       return (e.type == type && e.number === number);
     });
   }
   // find and draw continuous coastline (lake/island)
   number = 0;
   type = "Lake";
-  edgesOfFeature = $.grep(line, function(e) {
+  edgesOfFeature = line.filter(function(e) {
     return (e.type == type && e.number === number);
   });
   while (edgesOfFeature.length > 0) {
@@ -129,7 +129,7 @@ export function drawCoastline({
       y: spl[1]
     });
     for (var i = 0; end !== start && i < 2000; i++) {
-      var next = $.grep(edgesOfFeature, function(e) {
+      var next = edgesOfFeature.filter(function(e) {
         return (e.start == end || e.end == end);
       });
       if (next.length > 0) {
@@ -147,7 +147,7 @@ export function drawCoastline({
       var rem = edgesOfFeature.indexOf(next[0]);
       edgesOfFeature.splice(rem, 1);
     }
-    edgesOfFeature = $.grep(line, function(e) {
+    edgesOfFeature = line.filter(function(e) {
       return (e.type == type && e.number === number);
     });
     lakecoast.append("path").attr("d", path(coast));

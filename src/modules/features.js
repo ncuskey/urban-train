@@ -55,7 +55,7 @@ export function markFeatures({
     number = 0,
     greater = 0,
     less = 0;
-  var unmarked = $.grep(polygons, function(e) {
+  var unmarked = polygons.filter(function(e) {
     return (!e.featureType);
   });
   while (unmarked.length > 0) {
@@ -133,7 +133,7 @@ export function markFeatures({
         }
       });
     }
-    unmarked = $.grep(polygons, function(e) {
+    unmarked = polygons.filter(function(e) {
       return (!e.featureType);
     });
   }

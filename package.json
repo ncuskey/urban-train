@@ -1,0 +1,14 @@
+{
+  "name": "urban-train",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "prepare": "npx playwright install --with-deps || true",
+    "serve": "http-server -p 8000 -c-1 .",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.45.0",
+    "http-server": "^14.1.1"
+  }
+}

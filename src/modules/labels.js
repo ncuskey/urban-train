@@ -98,12 +98,12 @@ function asSel(svgOrSel) {
 }
 
 // Safety toggles for easy rollback
-export const USE_SA_LABELER = true;       // master switch
+export const USE_SA_LABELER = false;       // master switch - disabled to remove d3-labeler dependency
 // Ocean labels now always participate in SA collision avoidance
 export const DEBUG_LABEL_BOXES = false;   // show rects behind text
 
 // --- DEBUG CONFIG ---
-export const LABEL_DEBUG = true;  // flip to false to silence logs
+export const LABEL_DEBUG = false;  // flip to true to enable debug drawing/logs
 let __labelProbeId = null; // chosen once per run
 let __lastProbe = null; // cache for last probe state
 
