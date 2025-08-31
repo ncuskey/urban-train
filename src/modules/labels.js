@@ -44,6 +44,17 @@ export function ensureLabelLayers(svg) {
   }
 }
 
+// ensureScreenLabelLayer(svg)
+export function ensureScreenLabelLayer(svg) {
+  let root = svg.select('#screen-labels');
+  if (root.empty()) {
+    root = svg.append('g')
+      .attr('id','screen-labels')
+      .attr('pointer-events','none'); // never intercept wheel/pan
+  }
+  return root;
+}
+
 function assertOceanWithinRect(textSel, rectPx, pad=2) {
   const n = textSel.node();
   if (!n) return;
@@ -147,6 +158,22 @@ export function getZoomK() {
   const world = d3.select('#world').node() || d3.select('svg').node();
   return d3.zoomTransform(world).k || 1;
 }
+
+// --- Ocean anchor storage (stable on the <svg> node) ---
+function setOceanAnchor(svg, anchor) {
+  const host = svg.node();
+  host.__oceanWorldAnchor = anchor || null;
+}
+function getOceanAnchor(svg) {
+  return svg.node().__oceanWorldAnchor || null;
+}
+function setOceanRectPx(svg, rectPx) {
+  svg.node().__oceanRectPx = rectPx || null;
+}
+function getOceanRectPx(svg) {
+  return svg.node().__oceanRectPx || null;
+}
+export { getOceanAnchor, setOceanAnchor, getOceanRectPx, setOceanRectPx };
 
 // Keep ocean labels away from edges by this many screen pixels
 const OCEAN_EDGE_PAD_PX = 24; // tweak 20–32 to taste
@@ -3191,6 +3218,25 @@ export function findOceanLabelRectAfterAutofit(
   bestPx.keepWithinRect = {...rWorld, units: 'world'}; // use this for placement
   
   DBG.ocean && console.log('[ocean] Stored world rect:', rWorld);
+  
+  // Store the world anchor for re-projection
+  const anchor = { x: rWorld.x + rWorld.w * 0.5, y: rWorld.y + rWorld.h * 0.5 };
+  const rectPx = { w: bestPx.w, h: bestPx.h };
+  
+  // Save on the SVG (primary) and screen-labels (fallback)
+  const svgSel = d3.select('svg');
+  const svgNode = svgSel.node();
+  const rootNode = svgSel.select('#screen-labels').node();
+  if (svgNode) { svgNode.__oceanWorldAnchor = anchor; svgNode.__oceanRectPx = rectPx; }
+  if (rootNode) { rootNode.__oceanWorldAnchor = anchor; rootNode.__oceanRectPx = rectPx; }
+  console.debug('[ocean] anchor stored', {
+    onSvg: !!(svgNode && svgNode.__oceanWorldAnchor),
+    onRoot: !!(rootNode && rootNode.__oceanWorldAnchor),
+    anchor,
+    svgNodeId: svgNode?.id || 'no-id',
+    rootNodeId: rootNode?.id || 'no-id'
+  });
+  
   return bestPx;
 }
 
@@ -3260,7 +3306,8 @@ function renderOceanOverlay(rectPx, text) {
     .data([{ id: 0, rectPx, text }], d => `ocean:${d.id}`);
 
   const gEnter = sel.enter().append('g')
-    .attr('class', 'feature-label ocean-label');
+    .attr('class', 'feature-label ocean-label')
+    .attr('id', 'ocean-label'); // Add stable ID for reprojection
 
   gEnter.append('text').attr('class','ocean-text');
 
@@ -3349,26 +3396,75 @@ export function placeOceanLabelAt(cx, cy, maxWidth, oceanLabel, svg, opts = {}) 
 
   // Place the actual label in screen coordinates (outside the zoomed world group)
   // This ensures the label appears at the correct screen position regardless of zoom
-  let screenLabelsGroup = svg.select('#screen-labels');
-  if (screenLabelsGroup.empty()) {
-    // Create screen-labels group if it doesn't exist (outside the viewport/world zoom)
-    screenLabelsGroup = svg.append('g').attr('id', 'screen-labels');
-    // Ensure it's above other elements but below HUD
-    screenLabelsGroup.raise();
-  }
+  const screenLabelsGroup = ensureScreenLabelLayer(svg);
+  // Ensure it's above other elements but below HUD
+  screenLabelsGroup.raise();
   
-  const label = screenLabelsGroup.append('text')
+  // the screen-space ocean text
+  const oceanText = screenLabelsGroup.append('text')
+    .attr('id', 'ocean-label')
     .attr('class', 'place-label ocean')
     .attr('x', cx)
     .attr('y', cy)
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'middle')
     .style('font-size', `${fs}px`)
-    .text(oceanLabel.text);
+    .text(oceanLabel.text)
+    .classed('ocean', true)
+    .attr('data-ocean', '1')
+    .attr('transform', null); // IMPORTANT: keep only x/y, no transforms
+
+  // --- persist world-space anchor and rect size for zoom re-projection ---
+  // world anchor at rect center
+  const wr = worldRect || rectWorld || oceanLabel?.rectWorld;
+  console.debug('[ocean] anchor storage check', { 
+    hasWorldRect: !!worldRect, 
+    hasRectWorld: !!rectWorld, 
+    hasOceanLabelRect: !!oceanLabel?.rectWorld,
+    wr: wr 
+  });
+  if (wr) {
+    const anchor = { x: wr.x + wr.w * 0.5, y: wr.y + wr.h * 0.5 };
+    const rectPx = { w: rectPx?.w ?? rectPx?.width ?? 0, h: rectPx?.h ?? rectPx?.height ?? 0 };
+    
+    // Save on the SVG (primary) and screen-labels (fallback)
+    const svgNode = svg.node();
+    const rootNode = screenLabelsGroup.node();
+    if (svgNode) { svgNode.__oceanWorldAnchor = anchor; svgNode.__oceanRectPx = rectPx; }
+    if (rootNode) { rootNode.__oceanWorldAnchor = anchor; rootNode.__oceanRectPx = rectPx; }
+    console.debug('[ocean] anchor stored', {
+      onSvg: !!(svgNode && svgNode.__oceanWorldAnchor),
+      onRoot: !!(rootNode && rootNode.__oceanWorldAnchor),
+      anchor,
+      svgNodeId: svgNode?.id || 'no-id',
+      rootNodeId: rootNode?.id || 'no-id'
+    });
+  } else {
+    // last-resort fallback (should almost never hit)
+    const t = d3.zoomTransform(svg.node());
+    const anchor = { x: (cx - t.x) / t.k, y: (cy - t.y) / t.k };
+    const svgNode = svg.node();
+    const rootNode = screenLabelsGroup.node();
+    if (svgNode) { svgNode.__oceanWorldAnchor = anchor; }
+    if (rootNode) { rootNode.__oceanWorldAnchor = anchor; }
+  }
 
   console.log(`[ocean] Placed label "${oceanLabel.text}" at screen coords (${cx.toFixed(1)}, ${cy.toFixed(1)}) with font size ${fs}px`);
   
-  return label;
+  // Create debug rect if needed
+  if (window.DBG?.labels && rectPx && (rectPx.w || rectPx.width)) {
+    const pxW = rectPx.w ?? rectPx.width ?? 0;
+    const pxH = rectPx.h ?? rectPx.height ?? 0;
+    screenLabelsGroup.append('rect')
+      .attr('id', 'ocean-rect')
+      .attr('class', 'ocean-bbox')
+      .attr('x', cx - pxW/2)
+      .attr('y', cy - pxH/2)
+      .attr('width', pxW)
+      .attr('height', pxH);
+  }
+  
+  return oceanText;
 }
 
 // Clear debug overlays (call this on zoom/pan)
@@ -3382,10 +3478,49 @@ export function clearDebugOverlays() {
 // Clear screen labels (call this on zoom/pan to reposition labels)
 export function clearScreenLabels() {
   const svg = d3.select('svg');
-  const screenLabels = svg.select('#screen-labels');
-  if (!screenLabels.empty()) {
-    screenLabels.selectAll('*').remove();
+  const screenLabels = ensureScreenLabelLayer(svg);
+  screenLabels.selectAll('*').remove();
+}
+
+// Reposition the ocean screen label based on the current zoom transform.
+// Keeps size constant (no scaling), only translates to the projected world anchor.
+export function updateOceanLabelScreenPosition(svg, transform) {
+  const t = transform ?? d3.zoomTransform(svg.node());
+
+  // try SVG first, then #screen-labels fallback
+  const svgNode  = svg.node();
+  const rootNode = svg.select('#screen-labels').node();
+  const anchor   = (svgNode && svgNode.__oceanWorldAnchor)
+                || (rootNode && rootNode.__oceanWorldAnchor);
+  const rectPx   = (svgNode && svgNode.__oceanRectPx)
+                || (rootNode && rootNode.__oceanRectPx);
+
+  if (!anchor) {
+    if (window.DBG?.labels) console.debug('[ocean] reproj skipped: no anchor on svg or #screen-labels');
+    return;
   }
+
+  const sx = t.applyX(anchor.x);
+  const sy = t.applyY(anchor.y);
+
+  const labelSel = svg.select('#ocean-label');
+  if (labelSel.empty()) {
+    if (window.DBG?.labels) console.debug('[ocean] reproj skipped: #ocean-label not found');
+    return;
+  }
+
+  // Update the group's transform to position the ocean label
+  labelSel.attr('transform', `translate(${sx},${sy})`);
+
+  const rectSel = svg.select('#ocean-rect');
+  if (!rectSel.empty() && rectPx) {
+    rectSel.attr('x', sx - rectPx.w / 2)
+           .attr('y', sy - rectPx.h / 2)
+           .attr('width', rectPx.w)
+           .attr('height', rectPx.h);
+  }
+
+  if (window.DBG?.labels) console.debug('[ocean] reproj', { k: t.k, x: t.x, y: t.y, anchor, sx, sy });
 }
 
 // Remove any previously placed ocean labels

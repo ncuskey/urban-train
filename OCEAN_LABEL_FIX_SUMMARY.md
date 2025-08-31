@@ -407,3 +407,160 @@ labelsWorld.attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
 - `src/modules/labels.js` - Fixed ocean label exclusion, removed per-label transforms, fixed LOD area computation
 - `src/modules/interaction.js` - Added `#labels-world` to zoom transform
 - `styles.css` - Added crisp outline CSS for ocean labels
+
+## Recent Additions (P19-P22): Ocean Label Positioning System
+
+### P19-P22: World-Space Anchor with Screen-Space Reprojection
+**Problem**: Ocean labels needed to be positioned in screen space but remain anchored to their world-space coordinates during zoom and pan operations.
+
+**Root Cause**: Ocean labels were being placed in screen space but had no mechanism to track their world-space anchor or reproject during zoom/pan.
+
+**Solution**: Implemented a complete world-space anchor storage and screen-space reprojection system
+
+#### P19: World-Space Anchor Storage
+**Added anchor storage when ocean label is placed:**
+```javascript
+// Store the world anchor for re-projection
+const anchor = { x: rWorld.x + rWorld.w * 0.5, y: rWorld.y + rWorld.h * 0.5 };
+const rectPx = { w: bestPx.w, h: bestPx.h };
+
+// Save on the SVG (primary) and screen-labels (fallback)
+const svgSel = d3.select('svg');
+const svgNode = svgSel.node();
+const rootNode = svgSel.select('#screen-labels').node();
+if (svgNode) { svgNode.__oceanWorldAnchor = anchor; svgNode.__oceanRectPx = rectPx; }
+if (rootNode) { rootNode.__oceanWorldAnchor = anchor; rootNode.__oceanRectPx = rectPx; }
+```
+
+**Location**: `src/modules/labels.js` in the SAT-based ocean placement function
+
+**Benefits**:
+- **Stable storage**: Anchor stored on SVG node (primary) and screen-labels node (fallback)
+- **World coordinates**: Uses true world-space coordinates from the computed rectangle
+- **Redundant storage**: Dual storage ensures anchor persists even if one layer is rebuilt
+- **Debug logging**: Detailed logs show where anchor is stored and its coordinates
+
+#### P20: Screen-Space Reprojection Function
+**Added `updateOceanLabelScreenPosition` function:**
+```javascript
+export function updateOceanLabelScreenPosition(svg, transform) {
+  const t = transform ?? d3.zoomTransform(svg.node());
+
+  // try SVG first, then #screen-labels fallback
+  const svgNode  = svg.node();
+  const rootNode = svg.select('#screen-labels').node();
+  const anchor   = (svgNode && svgNode.__oceanWorldAnchor)
+                || (rootNode && rootNode.__oceanWorldAnchor);
+  const rectPx   = (svgNode && svgNode.__oceanRectPx)
+                || (rootNode && rootNode.__oceanRectPx);
+
+  if (!anchor) {
+    if (window.DBG?.labels) console.debug('[ocean] reproj skipped: no anchor on svg or #screen-labels');
+    return;
+  }
+
+  const sx = t.applyX(anchor.x);
+  const sy = t.applyY(anchor.y);
+
+  const labelSel = svg.select('#ocean-label');
+  if (labelSel.empty()) {
+    if (window.DBG?.labels) console.debug('[ocean] reproj skipped: #ocean-label not found');
+    return;
+  }
+
+  // Update the group's transform to position the ocean label
+  labelSel.attr('transform', `translate(${sx},${sy})`);
+}
+```
+
+**Location**: `src/modules/labels.js`
+
+**Benefits**:
+- **Robust anchor retrieval**: Tries SVG node first, then screen-labels as fallback
+- **Tolerant to missing data**: Gracefully handles missing anchor or label element
+- **D3 v5 compatible**: Uses `d3.zoomTransform()` and `transform.applyX/Y()`
+- **Idempotent**: Can be called multiple times without side effects
+- **Debug logging**: Clear logs for troubleshooting bail-out scenarios
+
+#### P21: Zoom Handler Integration
+**Added reprojection call to zoom handler:**
+```javascript
+// Reposition screen-space ocean label (order matters: world labels first, then ocean)
+updateOceanLabelScreenPosition(svg, t);// screen-space ocean follows its world anchor
+
+// ❌ DO NOT call updateOverlayOceanLabel(...) - that rebuilds during zoom
+// ❌ DO NOT call clearScreenLabels(svg) - that clears the saved anchor
+
+console.debug('[zoom svg identity]', {
+  anchor: svg.node().__oceanWorldAnchor,
+  svgId: svg.node().id || 'no-id',
+  svgNode: svg.node()
+});
+```
+
+**Location**: `src/modules/interaction.js` in the `onZoomed` function
+
+**Benefits**:
+- **Proper order**: Called after world label updates but before any clearing operations
+- **Prevents rebuilding**: Explicitly avoids calls that would clear or rebuild ocean labels
+- **Stable SVG instance**: Uses the same SVG selection instance for consistency
+- **Debug verification**: Logs show anchor accessibility in zoom handler
+
+#### P22: Stable Element IDs and Layer Management
+**Added stable IDs and layer utilities:**
+```javascript
+// Ocean label with stable ID
+const oceanText = screenLabelsGroup.append('text')
+  .attr('id', 'ocean-label')
+  .attr('class', 'place-label ocean')
+  // ... other attributes
+
+// Ensure screen-space layer exists and is properly positioned
+export function ensureScreenLabelLayer(svg) {
+  let root = svg.select('#screen-labels');
+  if (root.empty()) {
+    root = svg.append('g')
+      .attr('id','screen-labels')
+      .attr('pointer-events','none'); // never intercept wheel/pan
+  }
+  return root;
+}
+```
+
+**Location**: `src/modules/labels.js`
+
+**Benefits**:
+- **Stable selection**: Uses `id="ocean-label"` for reliable element selection
+- **Proper layer structure**: `#screen-labels` is a sibling of zoomed world group
+- **No pointer events**: Prevents interference with zoom/pan operations
+- **Unique layer**: Ensures only one screen-labels layer exists
+
+**Expected Behavior**:
+- **Ocean labels**: Stay anchored to their world position during zoom/pan
+- **Smooth repositioning**: Labels move smoothly with world content
+- **No clearing/rebuilding**: Labels persist across zoom operations
+- **Proper anchoring**: Labels maintain their relationship to ocean features
+- **Debug visibility**: Console logs show anchor storage and reprojection
+
+**Benefits**:
+- **Stable positioning**: Ocean labels remain correctly positioned relative to their world anchor
+- **No zoom artifacts**: Eliminates "jumping" or position drift during zoom/pan
+- **Performance**: Efficient reprojection without rebuilding elements
+- **Robust storage**: Dual anchor storage ensures persistence across layer operations
+- **Debug-friendly**: Comprehensive logging for troubleshooting
+
+**Files Changed**:
+- `src/modules/labels.js` - Added anchor storage, reprojection function, stable IDs, and layer utilities
+- `src/modules/interaction.js` - Added reprojection call to zoom handler
+- `src/modules/labels.js` - Updated `renderOceanOverlay` to use stable IDs
+
+**Usage**:
+```javascript
+// Enable debug logging in browser console:
+window.DBG = { labels: true };
+
+// Then zoom/pan to see:
+// [ocean] anchor stored {onSvg: true, onRoot: false, anchor: {x: 123, y: 108}, ...}
+// [zoom svg identity] {anchor: {x: 123, y: 108}, svgId: 'no-id', svgNode: svg}
+// [ocean] reproj { k: 1.5, x: 100, y: 50, anchor: {x: 123, y: 108}, sx: 284, sy: 212 }
+```

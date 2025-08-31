@@ -1,5 +1,5 @@
 // d3 is global; do not import it.
-import { updateLabelZoom, updateLabelVisibility, updateOverlayOceanLabel } from './labels.js';
+import { updateLabelZoom, updateLabelVisibility, updateOverlayOceanLabel, clearDebugOverlays, clearScreenLabels, updateOceanLabelScreenPosition } from './labels.js';
 import { filterByZoom } from './labels.js';
 
 // Add a tiny accessor so other modules can safely read current zoom.
@@ -30,14 +30,14 @@ export function padBounds([minX, minY, maxX, maxY], padPx, k) {
 let svg, gTarget, zoom, currentTransform = d3.zoomIdentity;
 
 export function attachInteraction({
-  svg: svgParam,            // d3 selection of the root <svg>
+  svg: svgParam,            // d3 selection of the root <svg> (same instance used for anchor storage)
   viewbox,        // d3 selection of the <g> that is transformed by zoomed()
   diagram,        // the current d3-voronoi diagram (for diagram.find)
   polygons,       // polygons array (read-only here)
   hud: { cellEl, heightEl, featureEl } // DOM nodes or selections used in moved()
   // any additional flags you currently read in moved(), keep the signature minimal otherwise
 }) {
-  svg = svgParam;
+  svg = svgParam; // store the same SVG instance used elsewhere for anchor storage
 
   // Transform target (the group that contains the whole map)
   gTarget = d3.select('#world');
@@ -101,8 +101,18 @@ export function attachInteraction({
         updateLabelZoom({ svg, groupId: 'labels-world' });
       }
       
-      // Update ocean labels (overlay-only, no world label interference)
-      updateOverlayOceanLabel(t.k);
+      // Reposition screen-space ocean label (order matters: world labels first, then ocean)
+      updateOceanLabelScreenPosition(svg, t);// screen-space ocean follows its world anchor
+      
+      // ❌ DO NOT call updateOverlayOceanLabel(...) - that rebuilds during zoom
+      // ❌ DO NOT call clearScreenLabels(svg) - that clears the saved anchor
+      
+      console.debug('[zoom svg identity]', {
+        anchor: svg.node().__oceanWorldAnchor,
+        svgId: svg.node().id || 'no-id',
+        svgNode: svg.node()
+      });
+      if (window.DBG?.labels) console.debug('[zoom]', t);
     });
 
   svg.call(zoom).style('cursor','grab');     // bind zoom to svg
