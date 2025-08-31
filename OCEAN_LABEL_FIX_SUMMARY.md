@@ -88,6 +88,8 @@ if (!state.getCellAtXY && window.currentPolygons) {
 4. **Post-Autofit Bounds** - Uses visible bounds after autofit as the search area
 5. **Guarded Execution** - Won't run rectangle search until accessor exists
 6. **Coastline-Touch Check** - Stops at first transition from water to land to ensure coastline-bound sides
+7. **Post-SAT Optimization** - Additional SA pass after rectangle computation for fine-tuned placement
+8. **World Coordinate Consistency** - Proper screen-to-world conversion throughout SA processing
 
 ## Testing
 

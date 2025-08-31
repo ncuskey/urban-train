@@ -973,49 +973,70 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
     if (USE_SA_FOR_OCEANS) {
       const oceansWithKeepRect = metrics.filter(l => l.kind === 'ocean' && l.keepWithinRect);
       for (const ocean of oceansWithKeepRect) {
-      const rect = ocean.keepWithinRect; // {x0,y0,x1,y1}
-      const neighbors = metrics.filter(l =>
-        l.id !== ocean.id &&
-        l.x >= rect.x0 && l.x <= rect.x1 &&
-        l.y >= rect.y0 && l.y <= rect.y1
-      );
-
-      // Skip if no neighbors (no benefit from annealing)
-      if (neighbors.length === 0) {
-        placed.push({
-          ...ocean,
-          w: Math.max(80, Math.min(500, ocean.text.length * 8)) * Math.min(1.0, Math.max(0.6, ocean.area / 1000)),
-          h: 18 * Math.min(1.0, Math.max(0.6, ocean.area / 1000)),
-          placed: { x: ocean.x, y: ocean.y },
-          scale: Math.min(1.0, Math.max(0.6, ocean.area / 1000)),
-          overlapped: false
+        const rect = ocean.keepWithinRect; // {x0,y0,x1,y1} in world coords
+        
+        // choose neighbors in world coords
+        const neighbors = metrics.filter(l => {
+          const { x, y } = l.anchor || l;
+          return l.id !== ocean.id &&
+                 x >= rect.x0 && x <= rect.x1 &&
+                 y >= rect.y0 && y <= rect.y1;
         });
-        processedIds.add(ocean.id);
-        continue;
+
+        // Skip if no neighbors (no benefit from annealing)
+        if (neighbors.length === 0) {
+          placed.push({
+            ...ocean,
+            w: Math.max(80, Math.min(500, ocean.text.length * 8)) * Math.min(1.0, Math.max(0.6, ocean.area / 1000)),
+            h: 18 * Math.min(1.0, Math.max(0.6, ocean.area / 1000)),
+            placed: { x: ocean.x, y: ocean.y },
+            scale: Math.min(1.0, Math.max(0.6, ocean.area / 1000)),
+            overlapped: false
+          });
+          processedIds.add(ocean.id);
+          continue;
+        }
+
+        // build the cluster: IMPORTANT – clone with world-sized boxes
+        const k = d3.zoomTransform(d3.select('#map').node()).k || 1;
+        function asWorldBox(d) {
+          return {
+            ...d,
+            // SA reads x/y as box top-left in the same units as bounds
+            x: Number.isFinite(d.x) ? d.x : (d.anchor?.x ?? d.x) - (d.width / k) / 2,
+            y: Number.isFinite(d.y) ? d.y : (d.anchor?.y ?? d.y) - (d.height / k) / 2,
+            width:  d.width  / k,
+            height: d.height / k,
+          };
+        }
+
+        seedOceanIntoWorldRect(ocean);
+        const cluster = [ocean, ...neighbors].map(asWorldBox);
+
+        const r = ocean.keepWithinRect;
+        const annealed = annealLabels({ labels: cluster, bounds: r, sweeps: 400 }); // your wrapper
+
+        // copy placements back to the originals and clamp fully inside the world rect
+        for (const a of annealed) {
+          const minX = r.x0, maxX = r.x1 - a.width;
+          const minY = r.y0, maxY = r.y1 - a.height;
+          a.placed = {
+            x: Math.max(minX, Math.min(maxX, a.placed.x)),
+            y: Math.max(minY, Math.min(maxY, a.placed.y))
+          };
+        }
+
+        // One-line assert: verify ocean label is inside its rectangle
+        const inside = (d) => d.placed.x >= r.x0 && d.placed.x + (d.width/k) <= r.x1 &&
+                              d.placed.y >= r.y0 && d.placed.y + (d.height/k) <= r.y1;
+        console.log('[ocean] placed inside rect?', inside(ocean));
+
+        // Copy placed back (ocean first, then neighbors)
+        placed.push(...annealed);
+        
+        // Mark as processed
+        annealed.forEach(l => processedIds.add(l.id));
       }
-
-      // Seed ocean into its rectangle before annealing
-      seedOceanIntoRect(ocean);
-      
-      // Ocean polishing: smaller sweeps since rectangle already did most work
-      const sweeps = Math.min(500, Math.max(300, 300 + neighbors.length * 10));
-      
-      if (window.DEBUG) {
-        console.log(`[labels] SA ocean: ${neighbors.length + 1} labels, ${sweeps} sweeps`);
-      }
-
-      const annealed = annealLabels({
-        labels: [ocean, ...neighbors],
-        bounds: rect,
-        sweeps: sweeps
-      });
-
-      // Copy placed back (ocean first, then neighbors)
-      placed.push(...annealed);
-      
-      // Mark as processed
-      annealed.forEach(l => processedIds.add(l.id));
-    }
     }
     
     // Step 3: Merge in any labels we skipped (oceans without keepWithinRect, or clusters too small)
@@ -1635,22 +1656,35 @@ function seedOceanIntoRect(oceanLabel) {
   };
 }
 
+// Seed ocean label inside world rectangle (world coordinates)
+function seedOceanIntoWorldRect(l) {
+  const r = l.keepWithinRect;        // world coords!
+  const k = d3.zoomTransform(d3.select('#map').node()).k || 1;
+
+  // your d.width/d.height are in *screen* px; convert to world units
+  const wWorld = l.width  / k;
+  const hWorld = l.height / k;
+
+  const cx = r.x0 + Math.max(0, (r.x1 - r.x0 - wWorld)) / 2;
+  const cy = r.y0 + Math.max(0, (r.y1 - r.y0 - hWorld)) / 2;
+
+  // SA uses top-left box; store world-space box
+  l.x = cx;
+  l.y = cy;
+
+  // anchor = rect center in world coords so energy doesn't pull to old centroid
+  l.anchor = { x: (r.x0 + r.x1) / 2, y: (r.y0 + r.y1) / 2, r: 4 };
+}
+
 // Helper function to get label position, preferring SA output when present
 function labelDrawXY(d) {
-  const w = safe(d.width, 0);
-  const h = safe(d.height, 0);
-
-  // If SA ran, we have a box top-left at placed.x/y
+  const k = d3.zoomTransform(d3.select('#map').node()).k || 1;
   if (d.placed && Number.isFinite(d.placed.x) && Number.isFinite(d.placed.y)) {
-    // Convert box top-left -> text center (middle/white stroke looks right ~0.75h)
-    return {
-      x: d.placed.x + w / 2,
-      y: d.placed.y + h * 0.75
-    };
+    const wWorld = d.width  / k;
+    const hWorld = d.height / k;
+    return { x: d.placed.x + wWorld / 2, y: d.placed.y + hWorld * 0.75 };
   }
-
-  // Fallback to centroid if no SA placement
-  return { x: safe(d.x, 0), y: safe(d.y, 0) };
+  return { x: d.x, y: d.y };
 }
 
 // Render all labels once with keyed join (hidden by default)
@@ -2154,6 +2188,23 @@ export function findOceanLabelRectAfterAutofit(
   }
 
   console.log(`[ocean] Final pixels (ranked): ${bestPx.w}x${bestPx.h} at (${bestPx.x},${bestPx.y})`);
+  
+  // Convert screen coordinates to world coordinates
+  const t = d3.zoomTransform(d3.select('#map').node());
+  
+  function screenToWorldRect(s) {
+    return {
+      x0: (s.x - t.x) / t.k,
+      y0: (s.y - t.y) / t.k,
+      x1: (s.x + s.w - t.x) / t.k,
+      y1: (s.y + s.h - t.y) / t.k,
+    };
+  }
+  
+  const oceanRectWorld = screenToWorldRect(bestPx);
+  bestPx._debugRectScreen = bestPx; // Store screen coords for debug overlay
+  bestPx.keepWithinRect = oceanRectWorld; // Store world bounds for SA
+  
   return bestPx;
 }
 

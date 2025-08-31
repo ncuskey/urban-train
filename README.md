@@ -34,6 +34,7 @@ The label placement system uses an advanced Simulated Annealing (SA) algorithm:
 - **SA optimization**: Uses Monte Carlo optimization with temperature scheduling for global placement
 - **Performance guardrails**: Dynamic sweeps based on cluster size with intelligent fallbacks
 - **Ocean polishing**: Specialized SA optimization for ocean labels within their water boundaries
+- **Post-SAT ocean-only SA**: Additional SA pass after SAT rectangle computation for fine-tuned ocean placement
 - **Collision avoidance**: Minimizes overlaps while maintaining proximity to feature centroids
 - **Box clamping**: Ensures labels stay within designated bounds after annealing
 - **One-cluster fallback**: Additional annealing pass for any remaining overlaps
@@ -43,6 +44,8 @@ The label placement system uses an advanced Simulated Annealing (SA) algorithm:
 - **NaN protection**: Multiple layers prevent NaN/Infinity values in transforms
 - **Fallback metrics**: Approximate text measurements when precise measurement fails
 - **Ocean seeding**: Labels start inside their rectangles for optimal SA convergence
+- **Post-SAT optimization**: Fine-tuned SA placement after initial rectangle computation
+- **World coordinate consistency**: Proper screen-to-world conversion throughout SA processing
 - **Zoom safety**: Finite zoom factors prevent rendering crashes
 
 ### **Size-Based Zoom Filtering**
@@ -55,6 +58,7 @@ The label placement system uses an advanced Simulated Annealing (SA) algorithm:
 - **Cluster-based processing** with performance guardrails
 - **Priority-based placement** (oceans > lakes > islands)
 - **Ocean boundary constraints** with specialized polishing
+- **Post-SAT neighbor optimization**: Includes neighboring labels in ocean SA passes
 - **Visual indicators** for overlapped labels (reduced opacity)
 - **Overlap counting**: Debug output shows remaining overlaps after placement
 

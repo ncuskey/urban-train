@@ -758,6 +758,89 @@ async function generate(count) {
           // Draw debug rectangle
           drawDebugOceanRect(pxRect);
           
+          // Convert screen rect to world rect and attach to ocean labels
+          const mapG = d3.select('#map').node();
+          const t = d3.zoomTransform(mapG);
+          
+          function screenRectToWorld({x,y,w,h}, t) {
+            return {
+              x0: (x     - t.x) / t.k,
+              y0: (y     - t.y) / t.k,
+              x1: (x + w - t.x) / t.k,
+              y1: (y + h - t.y) / t.k,
+            };
+          }
+          
+          const best = { x: pxRect.x, y: pxRect.y, w: pxRect.w, h: pxRect.h };
+          const worldRect = screenRectToWorld(best, t);
+          
+          // Set keepWithinRect on ocean labels for SA processing
+          for (const oceanLabel of oceanLabels) {
+            oceanLabel.keepWithinRect = worldRect;          // store WORLD bounds (not screen)
+            oceanLabel._debugRectScreen = best;             // keep your dashed overlay as-is
+            
+            // Give the ocean label an immediate world-space placement inside that rect
+            // width/height are in screen pixels; convert to world units
+            const k = t.k || 1;
+            const wWorld = oceanLabel.width  / k;
+            const hWorld = oceanLabel.height / k;
+
+            // center the label's box inside the rect (world coords, top-left)
+            oceanLabel.placed = {
+              x: worldRect.x0 + Math.max(0, (worldRect.x1 - worldRect.x0 - wWorld)) / 2,
+              y: worldRect.y0 + Math.max(0, (worldRect.y1 - worldRect.y0 - hWorld)) / 2
+            };
+
+            // nudge anchor to the rect center so later energy terms don't pull it back
+            oceanLabel.anchor = {
+              x: (worldRect.x0 + worldRect.x1) / 2,
+              y: (worldRect.y0 + worldRect.y1) / 2,
+              r: 4
+            };
+            
+            // One-line assert: verify ocean label is inside its rectangle
+            const ok = oceanLabel.placed.x >= worldRect.x0 &&
+                       oceanLabel.placed.x + (oceanLabel.width/k)  <= worldRect.x1 &&
+                       oceanLabel.placed.y >= worldRect.y0 &&
+                       oceanLabel.placed.y + (oceanLabel.height/k) <= worldRect.y1;
+            console.log('[ocean] inside rect?', ok);
+          }
+          
+          // Run a post-SAT ocean-only SA pass inside that world rect
+          for (const oceanLabel of oceanLabels) {
+            // Pull any non-ocean labels whose ANCHOR falls inside the rect (world coords)
+            const inside = (x,y,r) => x>=r.x0 && x<=r.x1 && y>=r.y0 && y<=r.y1;
+            const neighbors = featureLabels.filter(d =>
+              d.kind !== 'ocean' && inside(d.anchor?.x ?? d.x, d.anchor?.y ?? d.y, worldRect)
+            );
+
+            // Build a small cluster with world-sized boxes (top-left + width/height in world)
+            function asWorldBox(d) {
+              const hasPlaced = d.placed && isFinite(d.placed.x) && isFinite(d.placed.y);
+              return {
+                ...d,
+                x: hasPlaced ? d.placed.x : ( (d.anchor?.x ?? d.x) - (d.width / k) / 2 ),
+                y: hasPlaced ? d.placed.y : ( (d.anchor?.y ?? d.y) - (d.height/ k) / 2 ),
+                width:  d.width  / k,
+                height: d.height / k
+              };
+            }
+
+            const cluster  = [oceanLabel, ...neighbors].map(asWorldBox);
+            const annealed = annealLabels({ labels: cluster, bounds: worldRect, sweeps: 380 });
+
+            // copy placements back (remember: these are WORLD top-left)
+            for (const a of annealed) {
+              const target = featureLabels.find(d => d.id === a.id);
+              if (!target) continue;
+              target.placed = { x: a.placed.x, y: a.placed.y };
+              // hard clamp to keep the full box in the rect
+              // a.width/height are already in world units from asWorldBox
+              target.placed.x = Math.max(worldRect.x0, Math.min(worldRect.x1 - a.width,  target.placed.x));
+              target.placed.y = Math.max(worldRect.y0, Math.min(worldRect.y1 - a.height, target.placed.y));
+            }
+          }
+          
           // Place ocean labels in the found rectangle using the new centered placement
           for (const oceanLabel of oceanLabels) {
             placeOceanLabelCentered(svgSel.select('#labels'), oceanLabel.text, pxRect);
