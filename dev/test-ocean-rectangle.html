@@ -236,7 +236,7 @@
                     clearExistingOceanLabels();
                     
                     // Place the ocean label at the center of the rectangle using the new centered placement
-                    placeOceanLabelCentered(svg.select('#labels'), oceanLabel.text, { x: rect.x0, y: rect.y0, w: rect.w, h: rect.h });
+                    placeOceanLabelCentered(svg.select('#labels'), oceanLabel.text, { x: rect.x0, y: rect.y0, w: rect.w, h: rect.h }, null);
                     
                     results.push(`<div class="success">✅ Placed ocean label: "${oceanLabel.text}" at center (${cx.toFixed(1)}, ${cy.toFixed(1)}) using placeOceanLabelCentered</div>`);
                     results.push(`<div class="info">📍 Rectangle center: (${cx.toFixed(1)}, ${cy.toFixed(1)}) - Label should be perfectly centered with proper styling</div>`);

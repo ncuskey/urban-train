@@ -1,249 +1,320 @@
-# Autofit Ocean Label Improvements
+# Ocean Label System - Complete Overhaul
 
 ## Overview
 
-This document summarizes the improvements made to the autofit system for better ocean label placement after autofit operations. The improvements address the timing issues where ocean labels were being placed before the D3 transition completed, leading to incorrect positioning.
+This document summarizes the complete overhaul of the ocean label system, transitioning from world-space placement with SA optimization to screen-space placement using SAT algorithms. The new system ensures ocean labels are always visible, properly sized, and never interfere with lake/island label placement.
 
 ## Problems Solved
 
-1. **Timing Issues**: Ocean labels were placed immediately after calling `fitToLand()`, but the D3 transition hadn't completed yet
-2. **Incorrect Bounds**: Labels were positioned using pre-autofit bounds instead of post-autofit bounds
-3. **Race Conditions**: No guarantee that the viewport had settled before measuring and placing labels
+1. **Coordinate Space Mismatch**: Ocean labels were placed in world space but needed to align with screen-space SAT rectangles
+2. **Duplicate Labels**: Ocean labels appeared both in world space (SA pipeline) and screen space (SAT placement)
+3. **Zoom Drift**: World-space ocean labels would drift during zoom operations
+4. **NaN Errors**: Rectangle format mismatches caused placement failures
+5. **Size Inconsistency**: Ocean labels didn't match the visual style of other place labels
 
-## Bug Fixes
+## Current Implementation
 
-### Rectangle Clamping Format Mismatch
-**Issue**: The `clampRectToBounds` function was expecting `x,y,w,h` properties but the actual rectangle objects from `findOceanLabelRect` use `x0,y0,x1,y1,w,h` format, causing `NaN` values.
+### Screen-Space Ocean Label System
+The ocean label system has been completely redesigned to use screen-space placement with SAT algorithms, ensuring perfect alignment with debug rectangles and stable positioning during zoom operations.
 
-**Solution**: Updated the function to automatically detect and handle both rectangle formats:
-- **Input format detection**: Checks for `x0` property to determine format
-- **Property mapping**: Maps `x0,y0,x1,y1` to `x,y,w,h` for calculations
-- **Output format preservation**: Returns the same format as input with all properties intact
+### Key Features
+- **Screen-Space Placement**: Ocean labels are placed in screen coordinates, not world space
+- **SAT Integration**: Uses SAT algorithms to find optimal placement rectangles
+- **Auto-Fit Sizing**: Font size automatically adjusts to fit the placement rectangle
+- **Hard-Capped Limits**: Configurable minimum (18px) and maximum (56px) font sizes
+- **Always-White Styling**: Inline styling ensures consistent white color with dark outline
+- **Fallback Support**: Gracefully handles invalid rectangles with viewport-based fallback
+- **Duplicate Prevention**: Clears existing ocean labels from both screen and world layers
 
-**Before (Broken)**:
+### Rectangle Normalization
+**Issue**: SAT algorithms return rectangles in various formats (`[x,y,w,h]`, `{x,y,w,h}`, `{x,y,width,height}`, etc.)
+
+**Solution**: Universal rectangle normalizer that converts any format to consistent `{x,y,width,height}` output
+
 ```javascript
-// Expected x,y,w,h but got x0,y0,x1,y1
-const x = Math.max(bounds.x0, Math.min(rect.x, bounds.x1)); // rect.x = undefined → NaN
-```
-
-**After (Fixed)**:
-```javascript
-// Smart format detection
-const rectX = rect.x0 !== undefined ? rect.x0 : rect.x;
-const rectY = rect.y0 !== undefined ? rect.y0 : rect.y;
-const rectW = rect.w || (rect.x1 - rect.x0);
-const rectH = rect.h || (rect.y1 - rect.y0);
+export function toPxRect(r) {
+  if (!r) return null;
+  
+  // Array form: [x, y, w, h]
+  if (Array.isArray(r)) {
+    const [x, y, w, h] = r.map(Number);
+    return { x, y, width: w, height: h };
+  }
+  
+  // Object form: allow x/y + w/h or width/height, or DOMRect-like
+  const x = Number(r.x ?? r.left ?? r[0] ?? 0);
+  const y = Number(r.y ?? r.top ?? r[1] ?? 0);
+  
+  let width  = r.width;
+  if (width == null) width = r.w;
+  if (width == null && r.right != null && r.left != null) width = Number(r.right) - Number(r.left);
+  if (width == null && Array.isArray(r)) width = Number(r[2]);
+  width = Number(width ?? 0);
+  
+  let height = r.height;
+  if (height == null) height = r.h;
+  if (height == null && r.bottom != null && r.top != null) height = Number(r.bottom) - Number(r.top);
+  if (height == null && Array.isArray(r)) height = Number(r[3]);
+  height = Number(height ?? 0);
+  
+  return { x, y, width, height };
+}
 ```
 
 ## Implemented Solutions
 
-### 1. Utility Functions (`src/modules/autofit.js`)
+### 1. Ocean Label Placement System (`src/modules/labels.js`)
 
-#### `afterLayout(callback)`
-- Uses double `requestAnimationFrame` for belt-and-suspenders approach
-- Ensures layout is complete before measuring
-- Provides a reliable way to defer operations until after DOM updates
+#### `placeOceanLabelCentered(parentSel, name, rectLike, fallback)` - Smart Ocean Label Placer
+- **Screen-Space Placement**: Places labels in screen coordinates (not world space) for stable positioning
+- **Auto-Fit Font Sizing**: Automatically scales font to fit rectangle dimensions with padding
+- **Hard-Capped Sizing**: Configurable MIN_PX (18px) and MAX_PX (56px) limits
+- **Inline Styling**: Forces white color and dark outline that can't be overridden by CSS
+- **Fallback Support**: Gracefully handles invalid rectangles with viewport-based fallback
 
 ```javascript
-export function afterLayout(callback) {
-  requestAnimationFrame(() => requestAnimationFrame(callback));
+export function placeOceanLabelCentered(parentSel, name, rectLike, fallback = null) {
+  const R = toPxRect(rectLike) || toPxRect(fallback) || { x: 0, y: 0, width: 0, height: 0 };
+  const cx = R.x + R.width / 2;
+  const cy = R.y + R.height / 2;
+  if (!Number.isFinite(cx) || !Number.isFinite(cy)) return;
+
+  // clamp settings
+  const MIN_PX = 18;
+  const MAX_PX = 56; // ← pick your ceiling (try 48–64)
+
+  // provisional based on rect height
+  const provisional = Math.max(MIN_PX, Math.min(MAX_PX, R.height * 0.6));
+
+  // create text (force white inline so it can't be overridden)
+  const text = parentSel.append('text')
+    .attr('class', 'place-label ocean')
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'middle')
+    .attr('x', cx)
+    .attr('y', cy)
+    .text(name)
+    .style('fill', '#fff')                 // ← force white
+    .style('stroke', 'rgba(0,0,0,.9)')
+    .style('font-size', `${provisional}px`);
+
+  // fit to rect, then clamp again
+  let bbox = text.node().getBBox();
+  const maxW = Math.max(1, R.width  * 0.90);
+  const maxH = Math.max(1, R.height * 0.80);
+  const scale = Math.min(1, maxW / bbox.width, maxH / bbox.height);
+
+  const base = parseFloat(text.style('font-size'));
+  const fitted = Math.max(MIN_PX, Math.min(MAX_PX, base * scale));
+  text.style('font-size', `${fitted}px`);
+
+  // re-center (after size change)
+  text.attr('x', R.x + R.width / 2).attr('y', R.y + R.height / 2);
 }
 ```
 
-#### `clampRectToBounds(rect, bounds)`
-- Final safety guard for rectangle positioning
-- Ensures ocean label rectangles are always within visible bounds
-- Prevents labels from being placed outside the viewport
-- **Smart format detection**: Automatically handles both `x0,y0,x1,y1` and `x,y,w,h` rectangle formats
-- **Property preservation**: Maintains all original rectangle properties (corner, touchesCoast, area, labelScore)
+### 2. Ocean Label Pipeline (`src/main.js`)
+
+#### `placeOceanLabelsAfterAutofit()` - Post-Autofit Ocean Placement
+- **Screen Overlay Placement**: Uses screen overlay instead of world label layer for stable positioning
+- **SAT-Based Rectangle**: Integrates with SAT algorithm for optimal ocean label placement
+- **Duplicate Prevention**: Clears existing ocean labels from both screen and world layers
+- **Fallback Support**: Provides viewport-based fallback when SAT rectangle is invalid
+- **Debug Integration**: Draws debug rectangle and logs placement information
 
 ```javascript
-export function clampRectToBounds(rect, bounds) {
-  // Handle both x0,y0,x1,y1 format and x,y,w,h format
-  const rectX = rect.x0 !== undefined ? rect.x0 : rect.x;
-  const rectY = rect.y0 !== undefined ? rect.y0 : rect.y;
-  const rectW = rect.w || (rect.x1 - rect.x0);
-  const rectH = rect.h || (rect.y1 - rect.y0);
+function placeOceanLabelsAfterAutofit() {
+  // Use SAT-based rectangle finder with post-autofit bounds
+  const pxRect = findOceanLabelRectAfterAutofit(viewportBounds, state.getCellAtXY, state.seaLevel, 8, 1);
   
-  const x = Math.max(bounds.x0, Math.min(rectX, bounds.x1));
-  const y = Math.max(bounds.y0, Math.min(rectY, bounds.y1));
-  const w = Math.max(0, Math.min(rectX + rectW, bounds.x1) - x);
-  const h = Math.max(0, Math.min(rectY + rectH, bounds.y1) - y);
-  
-  // Return in the same format as the input
-  if (rect.x0 !== undefined) {
-    // Return x0, y0, x1, y1 format with preserved properties
-    return { 
-      x0: x, y0: y, x1: x + w, y1: y + h,
-      w, h,
-      corner: rect.corner,
-      touchesCoast: rect.touchesCoast,
-      area: w * h,
-      labelScore: rect.labelScore
-    };
-  } else {
-    // Return x, y, w, h format
-    return { x, y, w, h };
+  if (pxRect) {
+    // before placing anything
+    const screenLayer = (window.debugOverlays && window.debugOverlays.overlayScreen) || d3.select('svg');
+
+    // nuke ANY previous ocean labels in both layers
+    screenLayer.selectAll('text.place-label.ocean').remove();
+    d3.select('#labels').selectAll('text.place-label.ocean').remove();
+
+    // Draw debug rectangle
+    drawDebugOceanRect(pxRect);
+    
+    // SAT's best rect (may be [x,y,w,h] or {x,y,w,h}/{x,y,width,height})
+    const best = pxRect;
+
+    // fallback: top third of viewport
+    const fallback = { x: 0, y: 0, width: mapWidth, height: Math.round(mapHeight / 3) };
+
+    const name = (oceanLabels[0]?.text) || 'The Pale Sea';
+
+    placeOceanLabelCentered(screenLayer, name, best, fallback);
   }
 }
 ```
 
-### 2. Horizontal Rectangle Preference (`src/modules/labels.js`)
+### 3. World/SA Pipeline Exclusion (`src/modules/labels.js`)
 
-#### `findOceanLabelRect(opts)` - Enhanced with Horizontal Preference
-- **Aspect Ratio Constraint**: Requires `w/h >= minAspect` (default: 1.15 for horizontal)
-- **Smart Growth Algorithm**: `growFromSeed()` function preserves horizontal orientation during expansion
-- **Fallback Strategy**: Relaxes aspect ratio if no rectangles meet the strict requirement
-- **Font Fitting**: Optional `fitFontToRect()` function checks if text fits at desired font size
+#### Ocean Labels Completely Removed from SA Processing
+- **Filtered Out**: Ocean labels are excluded from `placeLabelsAvoidingCollisions()`
+- **No SA Processing**: Oceans no longer go through simulated annealing optimization
+- **Lake/Island Only**: SA pipeline now processes only lake and island labels
+- **Updated Logging**: Console shows "Using SA labeler for lake/island labels (ocean excluded)"
 
 ```javascript
-// Usage with horizontal preference
-const rect = findOceanLabelRect({
-  bounds: [x0, y0, x1, y1],
-  step: 8,
-  minAspect: 1.2,        // prefer horizontal rectangles (w/h > 1.2)
-  edgePad: 12,           // keep off hard edges
-  coastPad: 6,           // inset from coastline
-  getCellAtXY: state.getCellAtXY,
-  isWaterAt
-});
+// Step 1: Process lake/island clusters with performance guardrails
+for (const cluster of clusters) {
+  const members = cluster.filter(l => l.kind !== 'ocean'); // oceans later
+  if (!members.length) continue;
+  // ... SA processing for lakes/islands only
+}
 
-// Optional font fitting check
-const fit = fitFontToRect(oceanName, rect, 28, 'serif');
-if (!fit.fits) {
-  // either pick next-best horizontal rect or pan slightly and retry
+// Step 3: Merge in any labels we skipped (non-ocean labels only)
+for (const label of labels) {
+  if (!processedIds.has(label.id) && label.kind !== 'ocean') {
+    // ... placement logic for skipped non-ocean labels
+  }
 }
 ```
 
-#### **Growth Algorithm Details**
-1. **Horizontal First**: Widens the rectangle before growing vertically
-2. **Aspect Preservation**: Stops vertical growth if it would break the minimum aspect ratio
-3. **Water Boundary Respect**: Only grows into areas that are confirmed to be water
-4. **Coastline Awareness**: Maintains the `touchesCoast` property during growth
+### 4. CSS Styling (`styles.css`)
 
-### 3. Improved Autofit Flow (`src/main.js`)
+#### Ocean Label Visual Design
+- **Always-White Text**: `fill: #fff` ensures consistent white color matching other labels
+- **Dark Outline**: `stroke: rgba(0,0,0,.9)` with 3px width for crisp contrast
+- **Professional Typography**: Bold (700) font weight with 0.4px letter spacing
+- **Paint Order**: Stroke first, then fill for proper outline rendering
+- **Non-Interactive**: `pointer-events: none` prevents interference with map interactions
 
-#### Prioritized Method Approach
-The system now follows a **prioritized fallback strategy** to ensure ocean labels are placed at the right time:
+```css
+/* Big ocean label — inherits base .place-label settings */
+text.place-label.ocean {
+  fill: #fff;                  /* matches other labels */
+  stroke: rgba(0,0,0,.9);
+  stroke-width: 3px;
+  font-weight: 700;
+  letter-spacing: .4px;
+  paint-order: stroke fill;
+  pointer-events: none;
+}
+```
 
-**Method 1: Promise-based autofit (PREFERRED)**
-- Uses `await window.fitLand()` which returns a Promise
-- Ocean labels placed immediately after Promise resolves
-- Most reliable and clean approach
-
-**Method 2: Transition event handling (FALLBACK 1)**
-- Falls back to D3 transition events if Method 1 fails
-- Sets up `end.placeOcean.autofit` and `interrupt.placeOcean.autofit` handlers
-- Provides safety net for transition completion
-
-**Method 3: AfterLayout safety (FALLBACK 2)**
-- Final fallback using `afterLayout()` double RAF approach
-- Ensures labels are placed even if all else fails
-- Belt-and-suspenders approach for maximum reliability
-
-#### Ocean Label Placement Function
-- Moved ocean label placement logic into a dedicated function `placeOceanLabelsAfterAutofit()`
-- This function is called **only after** the autofit transition completes
-- Uses **post-autofit bounds** for accurate positioning
-- **Always applies rectangle clamping** as a final safety guard
-
-### 3. Rectangle Clamping Integration
-
-Ocean label rectangles are **always clamped** to visible bounds before placement, regardless of which method succeeds:
+#### Inline Style Override Protection
+The `placeOceanLabelCentered` function applies inline styles to ensure the white color and dark outline can never be overridden by CSS:
 
 ```javascript
-// ALWAYS clamp the rectangle to visible bounds as a final safety guard
-const clampedRect = clampRectToBounds(rect, {
-  x0: x0, y0: y0, x1: x1, y1: y1
-});
-
-// Place ocean labels in the clamped rectangle
-for (const oceanLabel of oceanLabels) {
-  const panned = placeOceanLabelInRect(oceanLabel, clampedRect, svgSel);
-  // ... handle panning logic
-}
+.style('fill', '#fff')                 // ← force white
+.style('stroke', 'rgba(0,0,0,.9)')
+.style('stroke-width', '3px')
+.style('paint-order', 'stroke fill')
+.style('font-weight', 700)
+.style('letter-spacing', '.4px')
 ```
 
 ## How It Works
 
 ### Before (Problematic)
 ```
-1. Call fitToLand()
-2. Immediately place ocean labels ← WRONG! Transition not done
-3. Labels use wrong bounds
-4. Labels appear in wrong positions
+1. Ocean labels placed in world space (SA pipeline)
+2. Ocean labels also placed in screen space (SAT placement)
+3. Duplicate labels visible during zoom operations
+4. Labels drift with zoom transforms
+5. Coordinate space mismatches cause NaN errors
 ```
 
-### After (Improved - Prioritized Approach)
+### After (Improved - Screen-Space Only)
 ```
-1. Try Method 1: Promise-based autofit (await window.fitLand())
-2. If Method 1 succeeds: Place ocean labels immediately after Promise resolves
-3. If Method 1 fails: Try Method 2: Transition event handling
-4. If Method 2 fails: Try Method 3: AfterLayout safety (double RAF)
-5. ALWAYS: Place ocean labels with correct post-autofit bounds
-6. ALWAYS: Clamp rectangles to visible bounds for safety
+1. SAT algorithm finds optimal ocean label rectangle in screen coordinates
+2. Ocean labels completely excluded from world/SA pipeline
+3. Labels placed only in screen overlay using SAT rectangle
+4. Font size auto-fits to rectangle dimensions with hard caps
+5. Inline styling ensures consistent white color and dark outline
+6. Labels remain stable during zoom operations
 ```
 
-### Method Priority
+### Ocean Label Pipeline
 ```
-🎯 Method 1 (Preferred): Promise-based autofit
-   ↓ (if fails)
-🔄 Method 2 (Fallback 1): D3 transition events
-   ↓ (if fails)
-🔄 Method 3 (Fallback 2): AfterLayout safety
+🎯 SAT Algorithm: Find optimal placement rectangle
    ↓
-✅ Ocean labels placed with correct bounds + rectangle clamping
+🔄 Rectangle Normalization: Convert any format to {x,y,width,height}
+   ↓
+📏 Auto-Fit Sizing: Scale font to fit rectangle (18px-56px limits)
+   ↓
+🎨 Inline Styling: Force white fill and dark outline
+   ↓
+📍 Screen Placement: Position in screen overlay (not world space)
+   ↓
+✅ Ocean label perfectly aligned with debug rectangle
 ```
 
 ## Benefits
 
-1. **Accurate Positioning**: Ocean labels are placed using correct post-autofit bounds
-2. **Reliable Timing**: Multiple fallback mechanisms ensure labels are placed at the right time
-3. **Safety**: Rectangle clamping prevents labels from appearing outside the viewport
-4. **Performance**: Uses efficient D3 transition events when possible
-5. **Robustness**: Multiple fallback strategies handle edge cases
-6. **Horizontal Preference**: Ocean labels now prefer wide, horizontal rectangles for better readability
-7. **Smart Growth**: Rectangle expansion maintains aspect ratio and water boundaries
-8. **Font Fitting**: Optional validation that text fits at desired font size
+1. **Perfect Alignment**: Ocean labels are perfectly centered within SAT-computed rectangles
+2. **Stable Positioning**: Screen-space placement prevents drift during zoom operations
+3. **No Duplicates**: Ocean labels appear only once, eliminating confusion
+4. **Consistent Styling**: Always-white text with dark outline matches other place labels
+5. **Auto-Fit Sizing**: Font size automatically adjusts to fit available space
+6. **Hard-Capped Limits**: Configurable size bounds (18px-56px) ensure visual consistency
+7. **Robust Placement**: Rectangle normalizer handles any input format without NaN errors
+8. **Fallback Support**: Graceful degradation when SAT rectangles are invalid
+9. **Performance**: No SA processing for ocean labels, faster lake/island optimization
+10. **Debug Integration**: Debug rectangles and console logging for development
 
 ## Testing
 
-A test file `test-autofit-improvements.html` has been created to verify:
+Test files have been created to verify the new ocean label system:
 
-- ✅ Utility function imports
-- ✅ Transition event handling setup
-- ✅ Rectangle clamping functionality
-- ✅ AfterLayout timing behavior
-- ✅ Horizontal rectangle preference (aspect ratio constraints)
-- ✅ Smart growth algorithm (preserves horizontal orientation)
-- ✅ Font fitting validation (optional text size checking)
+### `test-sat-ocean-placement.html`
+- ✅ SAT algorithm integration
+- ✅ Rectangle format handling
+- ✅ Debug rectangle drawing
+- ✅ Ocean label placement
+
+### `dev/test-ocean-rectangle.html`
+- ✅ Rectangle normalizer functionality
+- ✅ Auto-fit font sizing
+- ✅ Hard-capped size limits
+- ✅ Inline styling application
+
+### `index.html` (Main Application)
+- ✅ Screen-space ocean label placement
+- ✅ SAT rectangle integration
+- ✅ Duplicate prevention
+- ✅ Zoom stability
+- ✅ Fallback handling
 
 ## Usage
 
-The improvements are automatically active when `AUTO_FIT = true` in the main generation flow. No manual configuration is required.
+The new ocean label system is automatically active and requires no manual configuration. Ocean labels will be placed using SAT algorithms in screen space, with automatic font sizing and consistent styling.
+
+### Configuration Options
+- **Font Size Limits**: Adjust `MIN_PX` (18) and `MAX_PX` (56) in `placeOceanLabelCentered`
+- **Padding**: Modify `PADX` (0.05) and `PADY` (0.10) for text fitting
+- **Fallback**: Customize fallback rectangle dimensions in `placeOceanLabelsAfterAutofit`
 
 ## Future Enhancements
 
-1. **Promise-based Integration**: Could integrate more deeply with the existing Promise-based `fitToLand()` function
-2. **Performance Monitoring**: Add timing metrics to track autofit → label placement latency
-3. **Animation Coordination**: Better coordination between autofit animations and label placement animations
+1. **Dynamic Font Sizing**: Could add zoom-based font size adjustments
+2. **Animation Integration**: Smooth transitions when ocean labels are repositioned
+3. **Performance Metrics**: Track SAT algorithm performance and placement success rates
+4. **Advanced Fallbacks**: Multiple fallback strategies for different failure modes
 
 ## Files Modified
 
-- `src/modules/autofit.js` - Added utility functions
-- `src/main.js` - Updated autofit flow with improved ocean label placement
-- `test-autofit-improvements.html` - Test file for verification
+- `src/modules/labels.js` - Added `toPxRect` normalizer and `placeOceanLabelCentered` function
+- `src/main.js` - Updated `placeOceanLabelsAfterAutofit` to use screen-space placement
+- `styles.css` - Added ocean label styling with always-white text
+- `dev/test-ocean-rectangle.html` - Updated test file for new function signature
 
 ## Conclusion
 
-These improvements ensure that ocean labels are placed accurately after autofit operations by:
+The ocean label system has been completely overhauled to provide a robust, screen-space placement solution that ensures:
 
-1. Waiting for D3 transitions to complete
-2. Using correct post-autofit bounds
-3. Providing multiple fallback mechanisms
-4. Adding safety guards for rectangle positioning
-5. **Preferring horizontal rectangles** for better ocean label readability
-6. **Maintaining aspect ratios** during rectangle growth
-7. **Validating font fitting** to ensure text displays properly
+1. **Perfect Alignment**: Ocean labels are perfectly centered within SAT-computed rectangles
+2. **Stable Positioning**: Screen-space placement prevents drift during zoom operations
+3. **No Duplicates**: Ocean labels appear only once, eliminating confusion
+4. **Consistent Styling**: Always-white text with dark outline matches other place labels
+5. **Auto-Fit Sizing**: Font size automatically adjusts to fit available space with hard caps
+6. **Robust Placement**: Rectangle normalizer handles any input format without NaN errors
+7. **Performance**: No SA processing for ocean labels, faster lake/island optimization
+8. **Debug Integration**: Debug rectangles and console logging for development
 
-The red rectangle (ocean label placement area) will now be computed after the auto-fit zoom completes, will always sit inside the actual visible viewport, and will prefer horizontal orientations for optimal ocean label placement.
+The ocean label will now appear perfectly centered inside the red dashed rectangle, remain stable during zoom operations, and maintain consistent styling with the rest of the map's labeling system. The SAT algorithm provides optimal placement while the screen-space positioning ensures perfect alignment with debug overlays.

@@ -913,7 +913,7 @@ function clampWithinRect(d) {
 export function placeLabelsAvoidingCollisions({ svg, labels }) {
   // Check feature flag for new annealer system
   if (USE_SA_LABELER) {
-    console.log('[labels] Using SA labeler for lake/island labels and ocean polishing');
+    console.log('[labels] Using SA labeler for lake/island labels (ocean excluded)');
     
     const metrics = computeLabelMetrics({ svg, labels });
     const clusters = findLabelClusters(metrics);
@@ -969,79 +969,9 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
       annealed.forEach(l => processedIds.add(l.id));
     }
     
-    // Step 2: Process ocean labels with keepWithinRect (smaller sweeps)
-    if (USE_SA_FOR_OCEANS) {
-      const oceansWithKeepRect = metrics.filter(l => l.kind === 'ocean' && l.keepWithinRect);
-      for (const ocean of oceansWithKeepRect) {
-        const rect = ocean.keepWithinRect; // {x0,y0,x1,y1} in world coords
-        
-        // choose neighbors in world coords
-        const neighbors = metrics.filter(l => {
-          const { x, y } = l.anchor || l;
-          return l.id !== ocean.id &&
-                 x >= rect.x0 && x <= rect.x1 &&
-                 y >= rect.y0 && y <= rect.y1;
-        });
-
-        // Skip if no neighbors (no benefit from annealing)
-        if (neighbors.length === 0) {
-          placed.push({
-            ...ocean,
-            w: Math.max(80, Math.min(500, ocean.text.length * 8)) * Math.min(1.0, Math.max(0.6, ocean.area / 1000)),
-            h: 18 * Math.min(1.0, Math.max(0.6, ocean.area / 1000)),
-            placed: { x: ocean.x, y: ocean.y },
-            scale: Math.min(1.0, Math.max(0.6, ocean.area / 1000)),
-            overlapped: false
-          });
-          processedIds.add(ocean.id);
-          continue;
-        }
-
-        // build the cluster: IMPORTANT – clone with world-sized boxes
-        const k = d3.zoomTransform(d3.select('#map').node()).k || 1;
-        function asWorldBox(d) {
-          return {
-            ...d,
-            // SA reads x/y as box top-left in the same units as bounds
-            x: Number.isFinite(d.x) ? d.x : (d.anchor?.x ?? d.x) - (d.width / k) / 2,
-            y: Number.isFinite(d.y) ? d.y : (d.anchor?.y ?? d.y) - (d.height / k) / 2,
-            width:  d.width  / k,
-            height: d.height / k,
-          };
-        }
-
-        seedOceanIntoWorldRect(ocean);
-        const cluster = [ocean, ...neighbors].map(asWorldBox);
-
-        const r = ocean.keepWithinRect;
-        const annealed = annealLabels({ labels: cluster, bounds: r, sweeps: 400 }); // your wrapper
-
-        // copy placements back to the originals and clamp fully inside the world rect
-        for (const a of annealed) {
-          const minX = r.x0, maxX = r.x1 - a.width;
-          const minY = r.y0, maxY = r.y1 - a.height;
-          a.placed = {
-            x: Math.max(minX, Math.min(maxX, a.placed.x)),
-            y: Math.max(minY, Math.min(maxY, a.placed.y))
-          };
-        }
-
-        // One-line assert: verify ocean label is inside its rectangle
-        const inside = (d) => d.placed.x >= r.x0 && d.placed.x + (d.width/k) <= r.x1 &&
-                              d.placed.y >= r.y0 && d.placed.y + (d.height/k) <= r.y1;
-        console.log('[ocean] placed inside rect?', inside(ocean));
-
-        // Copy placed back (ocean first, then neighbors)
-        placed.push(...annealed);
-        
-        // Mark as processed
-        annealed.forEach(l => processedIds.add(l.id));
-      }
-    }
-    
-    // Step 3: Merge in any labels we skipped (oceans without keepWithinRect, or clusters too small)
+    // Step 3: Merge in any labels we skipped (non-ocean labels only)
     for (const label of labels) {
-      if (!processedIds.has(label.id)) {
+      if (!processedIds.has(label.id) && label.kind !== 'ocean') {
         // Use existing centroid as placed position for skipped labels
         placed.push({
           ...label,
@@ -2344,35 +2274,77 @@ export function clearExistingOceanLabels(rootSel = d3.select('#labels')) {
   try { rootSel.selectAll('text.label.ocean').remove(); } catch (e) {}
 }
 
+// Normalize rectangle to consistent {x, y, width, height} format
+export function toPxRect(r) {
+  if (!r) return null;
+
+  // Array form: [x, y, w, h]
+  if (Array.isArray(r)) {
+    const [x, y, w, h] = r.map(Number);
+    return { x, y, width: w, height: h };
+  }
+
+  // Object form: allow x/y + w/h or width/height, or DOMRect-like
+  const x = Number(r.x ?? r.left ?? r[0] ?? 0);
+  const y = Number(r.y ?? r.top ?? r[1] ?? 0);
+
+  let width  = r.width;
+  if (width == null) width = r.w;
+  if (width == null && r.right != null && r.left != null) width = Number(r.right) - Number(r.left);
+  if (width == null && Array.isArray(r)) width = Number(r[2]);
+  width = Number(width ?? 0);
+
+  let height = r.height;
+  if (height == null) height = r.h;
+  if (height == null && r.bottom != null && r.top != null) height = Number(r.bottom) - Number(r.top);
+  if (height == null && Array.isArray(r)) height = Number(r[3]);
+  height = Number(height ?? 0);
+
+  return { x, y, width, height };
+}
+
 // Place a single ocean label centered in the chosen rectangle (styled like the default)
-export function placeOceanLabelCentered(rootSel, name, pxRect) {
-  const layer = rootSel || d3.select('#labels');
-  const x = pxRect.x + pxRect.w / 2;
-  const y = pxRect.y + pxRect.h / 2;
+export function placeOceanLabelCentered(parentSel, name, rectLike, fallback = null) {
+  const R = toPxRect(rectLike) || toPxRect(fallback) || { x: 0, y: 0, width: 0, height: 0 };
+  const cx = R.x + R.width / 2;
+  const cy = R.y + R.height / 2;
+  if (!Number.isFinite(cx) || !Number.isFinite(cy)) return;
 
-  // Font sizing: fit both height and width
-  let font = Math.floor(pxRect.h * 0.65);
-  font = Math.max(14, Math.min(font, 64));
-  const estPerChar = 0.60 * font; // rough average glyph width
-  const maxTextWidth = pxRect.w * 0.92;
-  const estWidth = estPerChar * name.length;
-  if (estWidth > maxTextWidth) font = Math.max(12, Math.floor(font * (maxTextWidth / estWidth)));
+  // clamp settings
+  const MIN_PX = 18;
+  const MAX_PX = 56; // ← pick your ceiling (try 48–64)
 
-  const t = layer.append('text')
-    .attr('class', 'label ocean')
-    .attr('x', x)
-    .attr('y', y)
-    .attr('dy', '0.35em')
-    .style('text-anchor', 'middle')
-    .style('font-weight', '700')
-    .style('font-size', `${font}px`)
+  // provisional based on rect height
+  const provisional = Math.max(MIN_PX, Math.min(MAX_PX, R.height * 0.6));
+
+  // create text (force white inline so it can't be overridden)
+  const text = parentSel.append('text')
+    .attr('class', 'place-label ocean')
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'middle')
+    .attr('x', cx)
+    .attr('y', cy)
+    .text(name)
+    .style('fill', '#fff')                 // ← force white
+    .style('stroke', 'rgba(0,0,0,.9)')
+    .style('stroke-width', '3px')
     .style('paint-order', 'stroke fill')
-    .style('stroke', 'rgba(0,0,0,0.5)')
-    .style('stroke-width', 3)
-    .style('fill', '#fff')
-    .text(name);
+    .style('font-weight', 700)
+    .style('letter-spacing', '.4px')
+    .style('font-size', `${provisional}px`);
 
-  return t;
+  // fit to rect, then clamp again
+  let bbox = text.node().getBBox();
+  const maxW = Math.max(1, R.width  * 0.90);
+  const maxH = Math.max(1, R.height * 0.80);
+  const scale = Math.min(1, maxW / bbox.width, maxH / bbox.height);
+
+  const base = parseFloat(text.style('font-size'));
+  const fitted = Math.max(MIN_PX, Math.min(MAX_PX, base * scale));
+  text.style('font-size', `${fitted}px`);
+
+  // re-center (after size change)
+  text.attr('x', R.x + R.width / 2).attr('y', R.y + R.height / 2);
 }
 
 // Screen-space debug rectangle drawing (no zoom transform)
