@@ -6,7 +6,7 @@ export const USE_SA_FOR_OCEANS = true;    // polish oceans in keepWithinRect
 export const DEBUG_LABEL_BOXES = false;   // show rects behind text
 
 // Accurate text measurement using ghost element
-export function measureTextWidth(svg, text, { fontSize = 28, family = 'serif', weight = 700 } = {}) {
+export function measureTextWidth(svg, text, { fontSize = 28, family = getComputedStyle(document.documentElement).getPropertyValue('--label-font')?.trim() || 'serif', weight = 700 } = {}) {
   const ghost = svg.append('text')
     .attr('x', -99999).attr('y', -99999)
     .attr('font-size', fontSize).attr('font-family', family).attr('font-weight', weight)

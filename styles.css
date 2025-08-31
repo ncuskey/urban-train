@@ -3,6 +3,10 @@ input {
   height: 14px;
 }
 
+:root {
+  --label-font: Georgia, "Times New Roman", serif;
+}
+
 svg {
   background-color: #5E4FA2;
 }
@@ -76,8 +80,8 @@ svg {
   fill: white;
   stroke: black;
   stroke-width: 0.5px;
-  font-family: Arial, sans-serif;
-  font-weight: bold;
+  font-family: var(--label-font);
+  font-weight: 700;
   text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
   pointer-events: none;
 }
@@ -146,17 +150,22 @@ text.place-label.ocean {
   fill: none;
   opacity: 0.7;          /* was 0.8 */
   vector-effect: non-scaling-stroke; /* keeps stroke width pleasant */
+  font-family: var(--label-font);
+  font-weight: 700;
 }
 
 #labels text.fill {
   fill: #fff;
   letter-spacing: 0.3px;
+  font-family: var(--label-font);
+  font-weight: 700;
 }
 
 #labels-features text.fill {
   font-size: 16px;
   font-weight: 700;      /* crisper fill, thinner stroke */
   opacity: 0.95;
+  font-family: var(--label-font);
 }
 
 /* Make sure labels are visible */
@@ -167,6 +176,7 @@ text.place-label.ocean {
   stroke: black;
   stroke-width: 2px;
   paint-order: stroke;
+  font-family: var(--label-font);
 }
 
 /* Ensure label text elements are properly styled */
@@ -178,6 +188,8 @@ text.place-label.ocean {
   fill: none;
   opacity: 0.7;
   vector-effect: non-scaling-stroke;
+  font-family: var(--label-font);
+  font-weight: 700;
 }
 
 #labels-features g.label text.fill {
@@ -186,4 +198,5 @@ text.place-label.ocean {
   font-size: 16px;
   font-weight: 700;
   opacity: 0.95;
+  font-family: var(--label-font);
 }
