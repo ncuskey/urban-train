@@ -81,6 +81,34 @@ text.place-label.ocean {
 - **Font size cap**: Enforced `MAX_OCEAN_FONT_PX = 24` constant for consistent sizing
 - **CSS classes**: Ocean labels get `place-label ocean` classes for proper styling
 
+### Ocean Label System Refactoring (Latest)
+
+**Architectural Improvements:**
+- **World-coordinate canonical storage**: Ocean label data stored in `window.state.ocean` with world coordinates as primary values
+- **World layer rendering**: Ocean labels now rendered in `#labels-world` group instead of screen overlays
+- **Inverse scaling**: Labels maintain constant pixel size during zoom using `scale(1/k)` transforms
+- **Decoupled from SA/LOD**: Ocean labels explicitly excluded from collision resolution and zoom filtering
+
+**Key Functions:**
+```javascript
+// World-coordinate storage
+window.state.ocean = { 
+  anchor: { x, y },           // World coordinates
+  rectWorld: { x, y, w, h },  // World rectangle bounds
+  rectPx: { w, h }            // Pixel dimensions for font fitting
+};
+
+// World layer rendering
+renderOceanInWorld(svg, text);           // Creates ocean label in world space
+updateOceanWorldTransform(svg, transform); // Positions with inverse scaling
+```
+
+**Benefits:**
+- **Consistent positioning**: Labels stay anchored to world coordinates during zoom/pan
+- **No double-handling**: Eliminates conflicts with SA collision resolution
+- **Better performance**: Single render path, no overlay management
+- **Zoom consistency**: Labels scale properly with the map
+
 ### Label BBox Estimation Optimization
 The system uses a pragmatic approach for label width estimation:
 

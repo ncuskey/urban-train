@@ -1,14 +1,53 @@
-# Ocean Label Rectangle Finder Fix Summary
+# Ocean Label System Refactoring Summary
 
 ## Problem
-The ocean label rectangle finder was failing because it was trying to use a global `spatialIndex` that was `null` or empty. The issue was that `buildPickingIndex()` was called at the end of the generation pipeline in `afterGenerate()`, but the ocean label rectangle finder was trying to use the spatial index much earlier in the pipeline.
+The ocean label system had several architectural issues:
+1. **Mixed coordinate systems**: Ocean labels were stored in both screen and world coordinates, causing confusion
+2. **Overlay rendering**: Ocean labels were rendered in screen-space overlays, making them difficult to manage
+3. **Double-handling**: Ocean labels were being processed by both the Simulated Annealing (SA) system and manual positioning
+4. **Zoom inconsistencies**: Ocean labels didn't scale properly with the map due to coordinate system mismatches
 
 ## Solution
-Implemented a robust XY→cell accessor system using simple nearest-neighbor search (D3 v5 compatible), removing the global dependency and making the water test reliable.
+Refactored the ocean label system to use **world coordinates as canonical values** and render labels within the world layer using **inverse scaling** to maintain constant pixel size during zoom operations.
 
 ## Changes Made
 
-### 1. Created Robust XY Accessor System (`src/main.js`)
+### 1. Ocean Label System Refactoring (Latest)
+
+**World-Coordinate Canonical Storage:**
+- Ocean label data now stored in `window.state.ocean` with world coordinates as primary values
+- `anchor`: World coordinates of the label center
+- `rectWorld`: World rectangle bounds
+- `rectPx`: Pixel dimensions for font fitting
+
+**World Layer Rendering:**
+- Ocean labels now rendered in `#labels-world` group instead of screen overlays
+- `renderOceanInWorld()`: Creates ocean labels in world space
+- `updateOceanWorldTransform()`: Positions labels with inverse scaling for constant pixel size
+
+**Decoupled from SA/LOD System:**
+- Ocean labels explicitly filtered out of `placeLabelsAvoidingCollisions()`
+- Ocean labels excluded from `annealLabels()` and `computeLabelMetrics()`
+- Ocean labels handled separately in `updateLabelZoom()`
+
+**D3 v5-Safe Zoom Integration:**
+- Zoom handler refactored to use `d3.event.transform` (D3 v5 compatible)
+- Ocean label transforms applied after world layer transforms
+- Proper order: world layers → other labels → ocean labels
+
+### 2. Zoom Behavior Sharing (Latest)
+
+**Single Zoom Instance:**
+- Zoom behavior exported from `interaction.js`: `export let zoom;`
+- All programmatic zoom operations use the same shared instance
+- Prevents duplicate handlers and ensures consistent behavior
+
+**Updated Function Calls:**
+- `fitToLand()` now receives the shared zoom instance
+- `lockZoomToAutofitLevel()` uses imported zoom instead of local shadowing
+- All autofit functions use `svg.call(zoom.transform, target)` pattern
+
+### 3. Created Robust XY Accessor System (`src/main.js`)
 
 **Added new functions:**
 - `buildXYAccessor(cells)` - Builds simple nearest-neighbor search (D3 v5 compatible)

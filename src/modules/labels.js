@@ -1,7 +1,7 @@
 // d3 is global
 
 /**
- * Invariants (enforced by asserts/logs):
+ * Invariants:
  * 1) Ocean SAT rect is stored on datum in WORLD units: d.keepWithinRect.units === 'world'
  * 2) Fitter computes fontPx in SCREEN pixels; we always set font-size = fontPx / k.
  * 3) Ocean text x/y are WORLD coords (middle anchored), so the label stays glued to the world on zoom.
@@ -9,8 +9,12 @@
  * 5) assertOceanWithinRect must log true on first render.
  */
 
-// Helpers to convert between screen pixels and world coords
 import {getZoomState} from './interaction.js';
+
+const worldRectToScreenRect = ({x,y,w,h}) => {
+  const t = d3.zoomTransform(d3.select('svg').node()); 
+  return { x:x*t.k + t.x, y:y*t.k + t.y, w:w*t.k, h:h*t.k };
+};
 
 // Disjoint key functions for world vs ocean labels
 const keyWorld = d => `w:${d.kind}:${d.id}`;
@@ -480,11 +484,11 @@ export function fitOceanToRectPx(label, rectPx, pad = 10) {
 
 // Normalize label data for SA labeler - compute anchors and dimensions
 export function computeLabelMetrics({ svg, labels }) {
-  return labels.map(l => {
-    // Apply fit-to-rect for ocean labels with keepWithinRect
-    if (l.kind === 'ocean' && l.keepWithinRect) {
-      l = fitOceanLabelToRect(l, l.keepWithinRect, svg);
-    }
+  // Filter out ocean labels - they're handled separately by updateOceanWorldTransform
+  const nonOceanLabels = labels.filter(d => d.kind !== 'ocean');
+  
+  return nonOceanLabels.map(l => {
+    // Ocean labels are now excluded from SA processing
     
     // Set baseline font size if not already set
     if (l.baseFontPx == null) {
@@ -498,37 +502,6 @@ export function computeLabelMetrics({ svg, labels }) {
     // Use the fitted dimensions if available, otherwise measure
     const width = l.width || measureTextWidth(svg, l.multiline ? l.text.split('\n')[0] : l.text, { fontSize: l.baseFontPx, weight: 700 });
     const height = l.height || Math.max(10, Math.round(l.baseFontPx * (l.multiline ? 2.4 : 0.9)));
-
-    // Seed ocean labels inside their chosen rectangle
-    if (l.kind === 'ocean' && l.keepWithinRect) {
-      const r = l.keepWithinRect;
-      const startX = r.x + Math.max(0, (r.w - width) / 2);
-      const startY = r.y + Math.max(0, (r.h - height) / 2);
-
-      const result = {
-        ...l,
-        font: l.baseFontPx,
-        // start box top-left inside the rectangle
-        x: startX,
-        y: startY,
-        // rectangle dims used by the annealer
-        width,
-        height,
-        // anchor at rect center so "distance to anchor" doesn't yank back to original centroid
-        anchor: { x: r.x + r.w / 2, y: r.y + r.h / 2, r: 4 }
-      };
-      
-      // Ensure the label stays within its keepWithinRect
-      if (result.keepWithinRect) {
-        result._box = { w: width, h: height };
-        result._box_px = { w: width, h: height }; // Store in pixels for zoom-aware clamping
-        
-        // 🔒 Post-measure clamp: ensures center stays inside the keep rect
-        clampToKeepRect(result);
-      }
-      
-      return result;
-    }
 
     return {
       ...l,
@@ -742,6 +715,10 @@ function oceanSeparationPenalty(lbl, others, minPadWorld) {
 // Wrapper around D3-Labeler simulated annealing
 export function annealLabels({ labels, bounds, sweeps = 400, svg }) {
   if (!labels.length) return labels;
+  
+  // Filter out ocean labels - they're handled separately by updateOceanWorldTransform
+  const nonOceanLabels = labels.filter(d => d.kind !== 'ocean');
+  if (!nonOceanLabels.length) return labels;
 
   // Resolve drawing surface dimensions
   const svgSel = svg || d3.select('svg');
@@ -760,7 +737,7 @@ export function annealLabels({ labels, bounds, sweeps = 400, svg }) {
   const H  = bounds ? (bounds.y1 - bounds.y0) : surfaceH;
 
   // seed: make sure every label has metrics and a starting box top-left
-  for (const l of labels) {
+  for (const l of nonOceanLabels) {
     if (!Number.isFinite(l.width) || !Number.isFinite(l.height)) {
       // if you wired ensureMetrics already, this shouldn't happen
       l.width  = l.width  || 40;
@@ -775,14 +752,14 @@ export function annealLabels({ labels, bounds, sweeps = 400, svg }) {
   }
 
   // Build SA arrays in local coords
-  const la = labels.map(l => ({
+  const la = nonOceanLabels.map(l => ({
     x: l.x - x0,
     y: l.y - y0,
     width:  l.width,
     height: l.height,
     name:   l.text || ''
   }));
-  const aa = labels.map(l => ({
+  const aa = nonOceanLabels.map(l => ({
     x: (l.anchor?.x ?? (l.x + l.width/2)) - x0,
     y: (l.anchor?.y ?? (l.y + l.height/2)) - y0,
     r: l.anchor?.r ?? 3
@@ -792,8 +769,8 @@ export function annealLabels({ labels, bounds, sweeps = 400, svg }) {
   d3.labeler().label(la).anchor(aa).width(+W).height(+H).alt_energy((index, lab, anc) => customEnergy(index, lab, anc, labels, {x0, y0})).start(sweeps);
 
   // Map back out and clamp box fully inside bounds
-  for (let i=0;i<labels.length;i++) {
-    const l = labels[i], bx = la[i].x + x0, by = la[i].y + y0;
+  for (let i=0;i<nonOceanLabels.length;i++) {
+    const l = nonOceanLabels[i], bx = la[i].x + x0, by = la[i].y + y0;
     l.placed = { x: bx, y: by };
     const minX = x0, maxX = x0 + W - l.width;
     const minY = y0, maxY = y0 + H - l.height;
@@ -1012,7 +989,7 @@ export function growOceanRectFromCorner({
 
   // Debug water detection at corner
   const isWater = isWaterAt(ax, ay);
-  console.log(`[ocean] Corner ${corner} water test at (${ax}, ${ay}): isWater=${isWater}`);
+  // console.log(`[ocean] Corner ${corner} water test at (${ax}, ${ay}): isWater=${isWater}`);
   
   if (!isWater) {
     // Try a few nearby points
@@ -1024,7 +1001,7 @@ export function growOceanRectFromCorner({
     let foundWater = false;
     for (const [nx, ny] of nearbyPoints) {
       if (nx >= minX && nx <= maxX && ny >= minY && ny <= maxY && isWaterAt(nx, ny)) {
-        console.log(`[ocean] Corner ${corner} using nearby water at (${nx}, ${ny}) instead of (${ax}, ${ay})`);
+        // console.log(`[ocean] Corner ${corner} using nearby water at (${nx}, ${ny}) instead of (${ax}, ${ay})`);
         ax = nx;
         ay = ny;
         foundWater = true;
@@ -1033,7 +1010,7 @@ export function growOceanRectFromCorner({
     }
     
     if (!foundWater) {
-      console.log(`[ocean] Corner ${corner} failed: no water at (${ax}, ${ay}) or nearby`);
+      // console.log(`[ocean] Corner ${corner} failed: no water at (${ax}, ${ay}) or nearby`);
       return { area: 0, touchesCoast: false, corner };
     }
   }
@@ -1100,26 +1077,26 @@ export function findOceanLabelRect(opts) {
   
   const corners = ['tl','tr','bl','br'].map(corner => growOceanRectFromCorner({ corner, ...opts }));
   
-  console.log('[ocean] Corner results:', corners.map((r, i) => ({
-    corner: ['tl','tr','bl','br'][i],
-    area: r.area,
-    touchesCoast: r.touchesCoast,
-    w: r.w,
-    h: r.h,
-    aspect: r.w > 0 ? (r.w / r.h).toFixed(2) : 'N/A',
-    isWater: r.area > 0 ? '✅' : '❌'
-  })));
+  // console.log('[ocean] Corner results:', corners.map((r, i) => ({
+//   corner: ['tl','tr','bl','br'][i],
+//   area: r.area,
+//   touchesCoast: r.touchesCoast,
+//   w: r.w,
+//   h: r.h,
+//   aspect: r.w > 0 ? (r.w / r.h).toFixed(2) : 'N/A',
+//   isWater: r.area > 0 ? '✅' : '❌'
+// })));
   
   const withCoast = corners.filter(r => r.area > 0 && r.touchesCoast);
   const pool = withCoast.length ? withCoast : corners.filter(r => r.area > 0);
   
-  console.log('[ocean] Pool results:', {
-    withCoast: withCoast.length,
-    totalValid: pool.length,
-    pool: pool.map(r => ({ area: r.area, corner: r.corner, touchesCoast: r.touchesCoast, aspect: (r.w / r.h).toFixed(2) })),
-    sanity: withCoast.length === 4 ? '✅ All corners touch coast' : 
-            withCoast.length > 0 ? `✅ ${withCoast.length}/4 corners touch coast` : '❌ No corners touch coast'
-  });
+  // console.log('[ocean] Pool results:', {
+//   withCoast: withCoast.length,
+//   totalValid: pool.length,
+//   pool: pool.map(r => ({ area: r.area, corner: r.corner, touchesCoast: r.touchesCoast, aspect: (r.w / r.h).toFixed(2) })),
+//   sanity: withCoast.length === 4 ? '✅ All corners touch coast' : 
+//           withCoast.length > 0 ? `✅ ${withCoast.length}/4 corners touch coast` : '❌ No corners touch coast'
+// });
   
   if (!pool.length) {
     // Fallback: try to find any large water rectangle in the center area
@@ -1127,13 +1104,13 @@ export function findOceanLabelRect(opts) {
     return findCenterBasedOceanRect(opts);
   }
   
-  console.log('[ocean] Initial seed rectangles:', pool.map(r => ({
-    corner: r.corner,
-    w: r.w,
-    h: r.h,
-    aspect: (r.w / r.h).toFixed(2),
-    area: r.area
-  })));
+  // console.log('[ocean] Initial seed rectangles:', pool.map(r => ({
+//   corner: r.corner,
+//   w: r.w,
+//   h: r.h,
+//   aspect: (r.w / r.h).toFixed(2),
+//   area: r.area
+// })));
   
   // Filter out seeds that are too tall to be worth growing
   // If a seed has aspect < 0.3, it's probably too tall to grow into a good horizontal rectangle
@@ -1599,11 +1576,14 @@ function clampWithinRect(d) {
 }
 
 export function placeLabelsAvoidingCollisions({ svg, labels }) {
+  // Filter out ocean labels - they're handled separately by updateOceanWorldTransform
+  const nonOceanLabels = labels.filter(d => d.kind !== 'ocean');
+  
   // Check feature flag for new annealer system
   if (USE_SA_LABELER) {
-    console.log('[labels] Using SA labeler for all feature labels (ocean included)');
+    console.log('[labels] Using SA labeler for all feature labels (ocean excluded)');
     
-    const metrics = computeLabelMetrics({ svg, labels });
+    const metrics = computeLabelMetrics({ svg, labels: nonOceanLabels });
     const clusters = findLabelClusters(metrics);
     
     const placed = [];
@@ -1658,8 +1638,8 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
     }
     
     // Step 3: Merge in any labels we skipped (non-ocean labels only)
-    for (const label of labels) {
-      if (!processedIds.has(label.id) && label.kind !== 'ocean') {
+    for (const label of nonOceanLabels) {
+      if (!processedIds.has(label.id)) {
         // Use existing centroid as placed position for skipped labels
         placed.push({
           ...label,
@@ -1734,9 +1714,9 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
     return placed;
   }
   
-  // Fallback to original system
+  // Fallback to original system (ocean labels excluded)
   const placed = [];
-  const ordered = [...labels.filter(d => d.fixed), ...labels.filter(d => !d.fixed)];
+  const ordered = [...nonOceanLabels.filter(d => d.fixed), ...nonOceanLabels.filter(d => !d.fixed)];
 
   if (window.DEBUG) console.log('[labels] DEBUG: Collision avoidance starting with', labels.length, 'labels');
 
@@ -2179,14 +2159,14 @@ export function filterByZoom(placed, k) {
   }
   visible.push(...keptLakes);
 
-  // Debug logging
-  console.log(`[labels] zoom filter: k=${k.toFixed(2)}, total=${worldOnly.length}, visible=${visible.length}`);
-  console.log(`[labels] budgets: island=${budgets.island}, lake=${budgets.lake}`);
-  console.log(`[labels] buckets: island=${buckets.island.length}, lake=${buckets.lake.length}`);
-  console.log(`[labels] visible by kind:`, {
-    island: keptIslands.length,
-    lake: keptLakes.length
-  });
+  // Debug logging (commented out to reduce spam)
+  // console.log(`[labels] zoom filter: k=${k.toFixed(2)}, total=${worldOnly.length}, visible=${visible.length}`);
+  // console.log(`[labels] budgets: island=${budgets.island}, lake=${budgets.lake}`);
+  // console.log(`[labels] buckets: island=${buckets.island.length}, lake=${buckets.lake.length}`);
+  // console.log(`[labels] visible by kind:`, {
+  //   island: keptIslands.length,
+  //   lake: keptLakes.length
+  // });
 
   return visible;
 }
@@ -2232,38 +2212,38 @@ export function debugLabels() {
     console.log('[labels] No obvious issues detected');
   }
   
-  // LOD Debug: Check current visibility state (world labels only)
-  const currentK = window.currentTransform ? window.currentTransform.k : 1;
-  const worldOnly = placed.filter(l => l.kind !== 'ocean');
-  const visible = filterByZoom(worldOnly, currentK);
-  console.log(`[labels] Current LOD state: k=${currentK.toFixed(2)}, visible=${visible.length}/${worldOnly.length} (world labels only)`);
+  // LOD Debug: Check current visibility state (world labels only) - commented out to reduce spam
+  // const currentK = window.currentTransform ? window.currentTransform.k : 1;
+  // const worldOnly = placed.filter(l => l.kind !== 'ocean');
+  // const visible = filterByZoom(worldOnly, currentK);
+  // console.log(`[labels] Current LOD state: k=${currentK.toFixed(2)}, visible=${visible.length}/${worldOnly.length} (world labels only)`);
   
-  // Show visible vs hidden breakdown (world labels only)
-  const visibleByKind = { lake: [], island: [] };
-  visible.forEach(l => {
-    const kind = l?.kind || 'other';
-    if (visibleByKind[kind]) visibleByKind[kind].push(l);
-  });
+  // Show visible vs hidden breakdown (world labels only) - commented out to reduce spam
+  // const visibleByKind = { lake: [], island: [] };
+  // visible.forEach(l => {
+  //   const kind = l?.kind || 'other';
+  //   if (visibleByKind[kind]) visibleByKind[kind].push(l);
+  // });
   
-  console.log('[labels] Currently visible by kind (world labels):', {
-    lake: visibleByKind.lake.length,
-    island: visibleByKind.island.length
-  });
+  // console.log('[labels] Currently visible by kind (world labels):', {
+  //   lake: visibleByKind.lake.length,
+  //   island: visibleByKind.island.length
+  // });
   
-  // Show all labels with their data
-  console.table(placed.map(l => ({
-    id: l?.id || 'unknown',
-    kind: l?.kind || 'other',
-    text: l?.text || '',
-    area: l?.area || 0,
-    x: l?.placed?.x || l?.x || 0,
-    y: l?.placed?.y || l?.y || 0,
-    w: l?.w || 0,
-    h: l?.h || 0,
-    scale: l?.scale || 0,
-    priority: l?.priority || 0,
-    visible: visible.some(v => v?.id === l?.id)
-  })));
+  // Show all labels with their data - commented out to reduce spam
+  // console.table(placed.map(l => ({
+  //   id: l?.id || 'unknown',
+  //   kind: l?.kind || 'other',
+  //   text: l?.text || '',
+  //   area: l?.area || 0,
+  //   x: l?.placed?.x || l?.x || 0,
+  //   y: l?.placed?.y || l?.y || 0,
+  //   w: l?.w || 0,
+  //   h: l?.h || 0,
+  //   scale: l?.scale || 0,
+  //   priority: l?.priority || 0,
+  //   visible: visible.some(v => v?.id === l?.id)
+  // })));
   
   return placed;
 }
@@ -2381,6 +2361,38 @@ export function renderNonOceanLabels(gAll, labels) {
 
   // Render non-ocean labels using existing renderLabels logic
   renderLabels({ svg: d3.select('svg'), placed: nonOceanLabels, groupId: 'labels-world' });
+}
+
+// Put this near other render helpers
+export function renderOceanInWorld(svg, text) {
+  // ensure a single world group for ocean
+  const g = svg.select('#labels-world')
+    .selectAll('#ocean-world')
+    .data([0])
+    .join('g')
+    .attr('id', 'ocean-world')
+    .attr('class', 'label ocean')
+    .style('pointer-events', 'none');
+
+  const t = svg.select('#ocean-world-text').empty()
+    ? g.append('text').attr('id', 'ocean-world-text')
+    : g.select('#ocean-world-text');
+
+  t.attr('text-anchor', 'middle')
+   .attr('dominant-baseline', 'middle')
+   .text(text);
+
+  // set an initial font size in **pixels** that fits rectPx.w
+  if (window.state && window.state.ocean && window.state.ocean.rectPx) {
+    const { rectPx } = window.state.ocean;
+    const px = fitFontPx(text, rectPx.w * 0.9); // your existing fitter
+    t.style('font-size', px + 'px');
+  } else {
+    // fallback to default font size if state.ocean not available
+    t.style('font-size', '28px');
+  }
+
+  // position happens in updateOceanWorldTransform()
 }
 
 // Render all labels once with keyed join (hidden by default)
@@ -2672,8 +2684,7 @@ export function updateLabelZoom({ svg, groupId = 'labels-world' }) {
   const k = d3.zoomTransform(worldNode).k;
   const g = d3.select('#labels-world');
 
-  // Ocean is rendered in screen space; do not rescale or reposition it here.
-  d3.selectAll('.label.ocean').each(function() {/* no-op */});
+  // Ocean labels are handled separately by updateOceanWorldTransform - skip them here
   // From here on, operate only on non-ocean labels.
   const sel = g.selectAll('.label').filter(d => d && d.kind !== 'ocean');
 
@@ -2693,20 +2704,35 @@ export function updateLabelZoom({ svg, groupId = 'labels-world' }) {
       return px + 'px';
     });
   
-  // Verify zoom behavior with targeted logging
-  if (window.DBG && window.DBG.labels) {
-    sel.each(function(d) {
-      if (!d) return;
-      const t = d3.select(this).attr("transform") || "";
-      const fs = d3.select(this).select("text").style("font-size");
-      console.log("[zoom]", { k, id: d.id, kind: d.kind, transform: t, fontSize: fs });
-    });
-  }
+        // Verify zoom behavior with targeted logging - commented out to reduce spam
+      // if (window.DBG && window.DBG.labels) {
+      //   sel.each(function(d) {
+      //     if (!d) return;
+      //     const t = d3.select(this).attr("transform") || "";
+      //     const fs = d3.select(this).select("text").style("font-size");
+      //     console.log("[zoom]", { k, id: d.id, kind: d.kind, transform: t, fontSize: fs });
+      //   });
+      // }
   
   // Debug logging inside updateLabelZoom (after applying transform)
   if (LABEL_DEBUG) {
     logProbe('updateLabelZoom:after-apply', sel);
   }
+}
+
+// Keep ocean label glued to world on zoom (inverse scale)
+export function updateOceanWorldTransform(svgSel, transform) {
+  if (!window.state || !window.state.ocean) return;
+  const svg = svgSel && svgSel.node ? svgSel : d3.select('svg');
+  const t = transform || d3.zoomTransform(svg.node()); // v5-safe fallback
+
+  const { anchor } = window.state.ocean;
+  const sx = t.applyX(anchor.x);
+  const sy = t.applyY(anchor.y);
+
+  // Move the parent <g> and inverse-scale to keep font pixel-constant
+  svg.select('#ocean-world')
+     .attr('transform', `translate(${sx},${sy}) scale(${1 / t.k})`);
 }
 
 // Real LOD: compute the visible set and toggle class
@@ -2725,25 +2751,25 @@ export function updateLabelVisibility({ svg, groupId, placed, k, filterByZoom })
     .selectAll('g.label text')
     .classed('is-visible', function(d) { return d && d.id && visible.has(d.id); });
   
-  // Quick self-check: log zoom level and visible count
-  console.log(`[LOD] k=${k.toFixed(2)}, visible=${visible.size}/${worldOnly.length} labels`);
+  // Quick self-check: log zoom level and visible count - commented out to reduce spam
+  // console.log(`[LOD] k=${k.toFixed(2)}, visible=${visible.size}/${worldOnly.length} labels`);
   
-  // Debug breakdown by kind (world labels only)
-  const buckets = { lake: [], island: [], other: [] };
-  for (const l of worldOnly) {
-    if (l?.kind) {
-      (buckets[l.kind] ?? buckets.other).push(l);
-    }
-  }
+  // Debug breakdown by kind (world labels only) - commented out to reduce spam
+  // const buckets = { lake: [], island: [], other: [] };
+  // for (const l of worldOnly) {
+  //   if (l?.kind) {
+  //     (buckets[l.kind] ?? buckets.other).push(l);
+  //   }
+  // }
   
-  const visibleByKind = { lake: [], island: [], other: [] };
-  for (const l of worldOnly) {
-    if (l?.id && visible.has(l.id)) {
-      (visibleByKind[l?.kind] ?? visibleByKind.other).push(l);
-    }
-  }
+  // const visibleByKind = { lake: [], island: [], other: [] };
+  // for (const l of worldOnly) {
+  //   if (l?.id && visible.has(l.id)) {
+  //     (visibleByKind[l?.kind] ?? visibleByKind.other).push(l);
+  //   }
+  // }
   
-  console.log(`[LOD] Breakdown: lake=${visibleByKind.lake.length}/${buckets.lake.length}, island=${visibleByKind.island.length}/${buckets.island.length}`);
+  // console.log(`[LOD] Breakdown: lake=${visibleByKind.lake.length}/${buckets.lake.length}, island=${visibleByKind.island.length}/${buckets.island.length}`);
 }
 
 /**
@@ -3037,7 +3063,7 @@ function largestHorizontalWaterRects(satEnv, K = 12) {
   const { cols, rows, landCount } = satEnv;
   const out = [];
   
-  console.log(`[ocean] Searching for rectangles in ${cols}x${rows} grid`);
+  // console.log(`[ocean] Searching for rectangles in ${cols}x${rows} grid`);
   
   // Try all possible rectangle sizes and positions
   for (let h = 1; h <= rows; h++) {
@@ -3065,7 +3091,7 @@ function largestHorizontalWaterRects(satEnv, K = 12) {
     }
   }
   
-  console.log(`[ocean] Found ${out.length} raw rectangles before deduplication`);
+  // console.log(`[ocean] Found ${out.length} raw rectangles before deduplication`);
 
   // De-dupe near-duplicates (bin by coarse center/size) and keep top-K by area
   const seen = new Set();
@@ -3223,7 +3249,13 @@ export function findOceanLabelRectAfterAutofit(
   const anchor = { x: rWorld.x + rWorld.w * 0.5, y: rWorld.y + rWorld.h * 0.5 };
   const rectPx = { w: bestPx.w, h: bestPx.h };
   
-  // Save on the SVG (primary) and screen-labels (fallback)
+  // Store as canonical world coordinates in state (primary storage)
+  if (window.state) {
+    window.state.ocean = { anchor, rectWorld: rWorld, rectPx: { w: bestPx.w, h: bestPx.h } };
+    console.debug('[ocean] anchor stored in state', { anchor, rectWorld: rWorld, rectPx });
+  }
+  
+  // Save on the SVG (fallback) and screen-labels (fallback)
   const svgSel = d3.select('svg');
   const svgNode = svgSel.node();
   const rootNode = svgSel.select('#screen-labels').node();
@@ -3232,12 +3264,28 @@ export function findOceanLabelRectAfterAutofit(
   console.debug('[ocean] anchor stored', {
     onSvg: !!(svgNode && svgNode.__oceanWorldAnchor),
     onRoot: !!(rootNode && rootNode.__oceanWorldAnchor),
+    inState: !!(window.state && window.state.ocean),
     anchor,
     svgNodeId: svgNode?.id || 'no-id',
     rootNodeId: rootNode?.id || 'no-id'
   });
   
   return bestPx;
+}
+
+// Simple pixel-based font fitter for ocean labels
+function fitFontPx(text, maxWidthPx, basePx = 28, family = labelFontFamily()) {
+  // Use the existing measureTextWidth function for consistency
+  const svg = d3.select('svg');
+  let fs = basePx;
+  
+  while (fs > 12) { // don't go smaller than 12px
+    const textW = measureTextWidth(svg, text, { fontSize: fs, family, weight: 700 });
+    if (textW <= maxWidthPx) break;
+    fs -= 2; // reduce by 2px each iteration
+  }
+  
+  return fs;
 }
 
 // Optional (nice UX): only accept rects that can fit the text horizontally at (or slightly below) your base font size
@@ -3296,7 +3344,7 @@ export function drawDebugOceanRect(pxRect) {
     .attr('stroke-dasharray', '6,6')
     .attr('stroke-width', 2);
 
-  console.log(`[ocean] Debug rect clamped to viewport: ${clamped.width}x${clamped.height} at (${clamped.x},${clamped.y})`);
+  // console.log(`[ocean] Debug rect clamped to viewport: ${clamped.width}x${clamped.height} at (${clamped.x},${clamped.y})`);
 }
 
 // Minimal, screen-space ocean renderer
@@ -3427,7 +3475,13 @@ export function placeOceanLabelAt(cx, cy, maxWidth, oceanLabel, svg, opts = {}) 
     const anchor = { x: wr.x + wr.w * 0.5, y: wr.y + wr.h * 0.5 };
     const rectPx = { w: rectPx?.w ?? rectPx?.width ?? 0, h: rectPx?.h ?? rectPx?.height ?? 0 };
     
-    // Save on the SVG (primary) and screen-labels (fallback)
+    // Store as canonical world coordinates in state (primary storage)
+    if (window.state) {
+      window.state.ocean = { anchor, rectWorld: wr, rectPx: { w: rectPx?.w ?? rectPx?.width ?? 0, h: rectPx?.h ?? rectPx?.height ?? 0 } };
+      console.debug('[ocean] anchor stored in state', { anchor, rectWorld: wr, rectPx });
+    }
+    
+    // Save on the SVG (fallback) and screen-labels (fallback)
     const svgNode = svg.node();
     const rootNode = screenLabelsGroup.node();
     if (svgNode) { svgNode.__oceanWorldAnchor = anchor; svgNode.__oceanRectPx = rectPx; }
@@ -3435,6 +3489,7 @@ export function placeOceanLabelAt(cx, cy, maxWidth, oceanLabel, svg, opts = {}) 
     console.debug('[ocean] anchor stored', {
       onSvg: !!(svgNode && svgNode.__oceanWorldAnchor),
       onRoot: !!(rootNode && rootNode.__oceanWorldAnchor),
+      inState: !!(window.state && window.state.ocean),
       anchor,
       svgNodeId: svgNode?.id || 'no-id',
       rootNodeId: rootNode?.id || 'no-id'
@@ -3443,6 +3498,13 @@ export function placeOceanLabelAt(cx, cy, maxWidth, oceanLabel, svg, opts = {}) 
     // last-resort fallback (should almost never hit)
     const t = d3.zoomTransform(svg.node());
     const anchor = { x: (cx - t.x) / t.k, y: (cy - t.y) / t.k };
+    
+    // Store as canonical world coordinates in state (primary storage)
+    if (window.state) {
+      window.state.ocean = { anchor, rectWorld: null, rectPx: { w: 0, h: 0 } };
+      console.debug('[ocean] fallback anchor stored in state', { anchor });
+    }
+    
     const svgNode = svg.node();
     const rootNode = screenLabelsGroup.node();
     if (svgNode) { svgNode.__oceanWorldAnchor = anchor; }
@@ -3487,13 +3549,22 @@ export function clearScreenLabels() {
 export function updateOceanLabelScreenPosition(svg, transform) {
   const t = transform ?? d3.zoomTransform(svg.node());
 
-  // try SVG first, then #screen-labels fallback
-  const svgNode  = svg.node();
-  const rootNode = svg.select('#screen-labels').node();
-  const anchor   = (svgNode && svgNode.__oceanWorldAnchor)
-                || (rootNode && rootNode.__oceanWorldAnchor);
-  const rectPx   = (svgNode && svgNode.__oceanRectPx)
-                || (rootNode && rootNode.__oceanRectPx);
+  // try state first (canonical), then SVG fallback, then #screen-labels fallback
+  let anchor, rectPx;
+  
+  if (window.state && window.state.ocean) {
+    // Use canonical state data
+    anchor = window.state.ocean.anchor;
+    rectPx = window.state.ocean.rectPx;
+  } else {
+    // Fallback to SVG node storage
+    const svgNode  = svg.node();
+    const rootNode = svg.select('#screen-labels').node();
+    anchor = (svgNode && svgNode.__oceanWorldAnchor)
+          || (rootNode && rootNode.__oceanWorldAnchor);
+    rectPx = (svgNode && svgNode.__oceanRectPx)
+          || (rootNode && rootNode.__oceanRectPx);
+  }
 
   if (!anchor) {
     if (window.DBG?.labels) console.debug('[ocean] reproj skipped: no anchor on svg or #screen-labels');
@@ -3522,6 +3593,14 @@ export function updateOceanLabelScreenPosition(svg, transform) {
 
   if (window.DBG?.labels) console.debug('[ocean] reproj', { k: t.k, x: t.x, y: t.y, anchor, sx, sy });
 }
+
+// Debug helper for testing ocean label reprojection
+window.__dbgReprojectOcean = () => {
+  const svg = d3.select('svg');
+  updateOceanLabelScreenPosition(svg);
+  const anchor = (window.state && window.state.ocean) ? window.state.ocean.anchor : svg.node().__oceanWorldAnchor;
+  console.log('[dbg] reprojection nudged to', anchor);
+};
 
 // Remove any previously placed ocean labels
 export function clearExistingOceanLabels(rootSel = d3.select('#labels-overlay')) {

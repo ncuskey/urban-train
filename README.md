@@ -205,6 +205,43 @@ await fitToLand({
 const [x0, y0, x1, y1] = getVisibleWorldBounds(svg, width, height);
 ```
 
+### **Ocean Label System Refactoring (Latest)**
+```javascript
+// World-coordinate canonical storage
+window.state.ocean = { 
+  anchor: { x, y },           // World coordinates
+  rectWorld: { x, y, w, h },  // World rectangle bounds
+  rectPx: { w, h }            // Pixel dimensions for font fitting
+};
+
+// World layer rendering with inverse scaling
+renderOceanInWorld(svg, text);           // Creates ocean label in world space
+updateOceanWorldTransform(svg, transform); // Positions with inverse scaling for constant pixel size
+```
+
+**Benefits:**
+- **Consistent positioning**: Labels stay anchored to world coordinates during zoom/pan
+- **No double-handling**: Eliminates conflicts with SA collision resolution
+- **Better performance**: Single render path, no overlay management
+- **Zoom consistency**: Labels scale properly with the map
+
+### **Zoom Behavior Sharing (Latest)**
+```javascript
+// interaction.js - Export the zoom instance
+export let zoom;
+
+// main.js - Import and use the shared zoom
+import { ..., zoom } from "./modules/interaction.js";
+
+// All autofit functions use consistent zoom behavior
+svg.call(zoom.transform, target);
+```
+
+**Benefits:**
+- Single zoom instance prevents duplicate handlers
+- Consistent zoom constraints and settings across all operations
+- Proper D3 v5 compatibility with `zoom.transform` pattern
+
 ### **Font Consistency**
 ```css
 /* Unified font styling for all labels */

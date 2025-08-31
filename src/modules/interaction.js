@@ -1,5 +1,5 @@
 // d3 is global; do not import it.
-import { updateLabelZoom, updateLabelVisibility, updateOverlayOceanLabel, clearDebugOverlays, clearScreenLabels, updateOceanLabelScreenPosition } from './labels.js';
+import { updateLabelZoom, updateLabelVisibility, updateOverlayOceanLabel, clearDebugOverlays, clearScreenLabels, updateOceanLabelScreenPosition, updateOceanWorldTransform } from './labels.js';
 import { filterByZoom } from './labels.js';
 
 // Add a tiny accessor so other modules can safely read current zoom.
@@ -27,7 +27,8 @@ export function padBounds([minX, minY, maxX, maxY], padPx, k) {
   return [minX + p, minY + p, maxX - p, maxY - p];
 }
 
-let svg, gTarget, zoom, currentTransform = d3.zoomIdentity;
+let svg, gTarget, currentTransform = d3.zoomIdentity;
+export let zoom;
 
 export function attachInteraction({
   svg: svgParam,            // d3 selection of the root <svg> (same instance used for anchor storage)
@@ -66,56 +67,72 @@ export function attachInteraction({
 
   // Clear any old zoom listeners and bind to SVG (v5-safe)
   svg.on('.zoom', null);
+  
+  // v5-safe zoom handler
+  function onZoom() {
+    // `this` is the element the zoom behavior is bound to (the <svg>)
+    const svgSel = d3.select(this);
+    const t = (d3.event && d3.event.transform)
+      ? d3.event.transform
+      : d3.zoomTransform(svgSel.node()); // fallback, just in case
+
+    currentTransform = t;
+    window.currentTransform = currentTransform; // Global transform tracking
+    
+    // LOD flip: make sure this exists and is cheap
+    if (typeof updateCellsLOD === 'function') {
+      updateCellsLOD(t.k);
+    }
+
+    // Apply world transforms (both world + labels-world usually follow the same transform)
+    d3.select('#world')
+      .attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
+    d3.select('#labels-world')
+      .attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
+
+    // Update visibility + inverse scale for feature labels
+    if (window.__labelsPlaced && window.__labelsPlaced.features) {
+      updateLabelVisibility({
+        svg: svgSel,
+        groupId: 'labels-world',
+        placed: window.__labelsPlaced.features,
+        k: t.k,
+        filterByZoom
+      });
+      updateLabelZoom({ svg: svgSel, groupId: 'labels-world' });
+    }
+
+    // Scale non-ocean labels by k (if your function expects just k, pass t.k)
+    // updateLabelZoom(t.k); // Uncomment if you want to pass just k
+
+    // Reposition OCEAN label (world-anchored, inverse-scaled)
+    updateOceanWorldTransform(svgSel, t);
+    
+    // Reposition screen-space ocean label (order matters: world labels first, then ocean)
+    updateOceanLabelScreenPosition(svgSel, t);// screen-space ocean follows its world anchor
+    
+    // ❌ DO NOT call updateOverlayOceanLabel(...) - that rebuilds during zoom
+    // ❌ DO NOT call clearScreenLabels(svg) - that clears the saved anchor
+    
+    console.debug('[zoom svg identity]', {
+      anchor: (window.state && window.state.ocean) ? window.state.ocean.anchor : svgSel.node().__oceanWorldAnchor,
+      svgId: svgSel.node().id || 'no-id',
+      svgNode: svgSel.node()
+    });
+    if (window.DBG?.labels) console.debug('[zoom]', t);
+  }
+
   zoom = d3.zoom()
     .scaleExtent([0.5, 32])
     .translateExtent([
       [-100, -100],
       [r.width + 100, r.height + 100]
     ])
-    .on('zoom', function() {                 // v5: use d3.event
-      const t = (d3.event && d3.event.transform) ? d3.event.transform
-                                                 : d3.zoomTransform(svg.node());
-      currentTransform = t;
-      window.currentTransform = currentTransform; // Global transform tracking
-      
-      // LOD flip: make sure this exists and is cheap
-      if (typeof updateCellsLOD === 'function') {
-        updateCellsLOD(t.k);
-      }
-      
-      // Transform the world container and labels-world group
-      const world = svg.select('#world');
-      const labelsWorld = svg.select('#labels-world');
-      world.attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
-      labelsWorld.attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
+    .on('zoom', onZoom);
 
-      // Update visibility + inverse scale for feature labels
-      if (window.__labelsPlaced && window.__labelsPlaced.features) {
-        updateLabelVisibility({
-          svg,
-          groupId: 'labels-world',
-          placed: window.__labelsPlaced.features,
-          k: t.k,
-          filterByZoom
-        });
-        updateLabelZoom({ svg, groupId: 'labels-world' });
-      }
-      
-      // Reposition screen-space ocean label (order matters: world labels first, then ocean)
-      updateOceanLabelScreenPosition(svg, t);// screen-space ocean follows its world anchor
-      
-      // ❌ DO NOT call updateOverlayOceanLabel(...) - that rebuilds during zoom
-      // ❌ DO NOT call clearScreenLabels(svg) - that clears the saved anchor
-      
-      console.debug('[zoom svg identity]', {
-        anchor: svg.node().__oceanWorldAnchor,
-        svgId: svg.node().id || 'no-id',
-        svgNode: svg.node()
-      });
-      if (window.DBG?.labels) console.debug('[zoom]', t);
-    });
-
-  svg.call(zoom).style('cursor','grab');     // bind zoom to svg
+  svg.call(zoom)
+     .on('dblclick.zoom', null)
+     .style('cursor','grab');     // bind zoom to svg
   svg.node().__ZOOM__ = zoom;                // expose for auto-fit/tests
   svg.node().__ZOOM_TARGET__ = gTarget.node();
 

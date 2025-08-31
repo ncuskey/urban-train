@@ -97,7 +97,38 @@ Added to `main.js` to prevent zooming out beyond the autofit level:
 function lockZoomToAutofitLevel() {
   const currentZoom = d3.zoomTransform(svgSel.node());
   const autofitZoomLevel = currentZoom.k;
-  const zoom = svgSel.node().__ZOOM__;
+  // Use the shared zoom instance from interaction.js
+  if (zoom) {
+    zoom.scaleExtent([autofitZoomLevel, 32]);
+  }
+}
+```
+
+### **5. Zoom Behavior Sharing (Latest)**
+
+**Problem**: Multiple zoom instances were being created, leading to duplicate handlers and inconsistent behavior.
+
+**Solution**: Centralized zoom behavior management:
+
+```javascript
+// interaction.js - Export the zoom instance
+export let zoom;
+
+// main.js - Import and use the shared zoom
+import { ..., zoom } from "./modules/interaction.js";
+
+// autofit.js - Receive zoom as parameter and use consistently
+export function fitToLand({ svg, zoom, ... }) {
+  // Use the shared zoom instance
+  svg.call(zoom.transform, target);
+}
+```
+
+**Benefits**:
+- Single zoom instance prevents duplicate handlers
+- Consistent zoom constraints and settings across all operations
+- Proper D3 v5 compatibility with `zoom.transform` pattern
+- Clean architecture with zoom behavior centralized in interaction.js
   if (zoom) {
     // Set minimum zoom to the autofit level to prevent zooming out
     zoom.scaleExtent([autofitZoomLevel, 32]);
