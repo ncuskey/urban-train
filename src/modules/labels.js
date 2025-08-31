@@ -2083,7 +2083,14 @@ export function findOceanLabelRectAfterAutofit(
 ) {
   console.log(`[ocean] Using post-autofit bounds: [${visibleBounds.join(', ')}]`);
 
-  function localPointIsOcean(x, y, { onlyOcean = true } = {}) {
+  const transform = d3.zoomTransform(d3.select('#world').node() || d3.select('svg').node());
+
+  function pxToWorld(x, y) { 
+    return { x: (x - transform.x) / transform.k, y: (y - transform.y) / transform.k }; 
+  }
+
+  function localPointIsOcean(px, py, { onlyOcean = true } = {}) {
+    const { x, y } = pxToWorld(px, py);           // ← convert to world
     const cell = getCellAtXY?.(x, y);
     if (!cell) return true;
     let height = cell.height ?? cell.data?.height ?? cell.polygon?.height ?? null;
@@ -2119,15 +2126,13 @@ export function findOceanLabelRectAfterAutofit(
 
   console.log(`[ocean] Final pixels (ranked): ${bestPx.w}x${bestPx.h} at (${bestPx.x},${bestPx.y})`);
   
-  // Convert screen coordinates to world coordinates
-  const t = d3.zoomTransform(d3.select('#map').node());
-  
+  // Convert screen coordinates to world coordinates using the same transform
   function screenToWorldRect(s) {
     return {
-      x0: (s.x - t.x) / t.k,
-      y0: (s.y - t.y) / t.k,
-      x1: (s.x + s.w - t.x) / t.k,
-      y1: (s.y + s.h - t.y) / t.k,
+      x0: (s.x - transform.x) / transform.k,
+      y0: (s.y - transform.y) / transform.k,
+      x1: (s.x + s.w - transform.x) / transform.k,
+      y1: (s.y + s.h - transform.y) / transform.k,
     };
   }
   
