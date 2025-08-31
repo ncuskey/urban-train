@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Feature Flag Test - SA Labeler</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+    .status { font-weight: bold; }
+    .status.on { color: green; }
+    .status.off { color: red; }
+    button { margin: 5px; padding: 8px 16px; }
+  </style>
+</head>
+<body>
+  <h1>SA Labeler Feature Flag Test</h1>
+  
+  <div class="test-section">
+    <h3>Feature Flag Status</h3>
+    <div id="flag-status" class="status"></div>
+    <button onclick="toggleFlag()">Toggle Flag</button>
+    <button onclick="testLabeler()">Test Labeler</button>
+  </div>
+  
+  <div class="test-section">
+    <h3>Console Output</h3>
+    <div id="console-output" style="background: #f5f5f5; padding: 10px; height: 200px; overflow-y: scroll; font-family: monospace; font-size: 12px;"></div>
+  </div>
+
+  <script type="module">
+    import { USE_SA_LABELER, placeLabelsAvoidingCollisions } from './src/modules/labels.js';
+    
+    // Capture console.log for display
+    const originalLog = console.log;
+    const outputDiv = document.getElementById('console-output');
+    
+    console.log = function(...args) {
+      originalLog.apply(console, args);
+      const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+      outputDiv.innerHTML += message + '<br>';
+      outputDiv.scrollTop = outputDiv.scrollHeight;
+    };
+    
+    // Update status display
+    function updateStatus() {
+      const statusDiv = document.getElementById('flag-status');
+      statusDiv.textContent = `USE_SA_LABELER: ${USE_SA_LABELER}`;
+      statusDiv.className = `status ${USE_SA_LABELER ? 'on' : 'off'}`;
+    }
+    
+    // Test the labeler function
+    window.testLabeler = function() {
+      console.log('=== Testing placeLabelsAvoidingCollisions ===');
+      
+      const mockLabels = [
+        { id: 'test1', text: 'Test Label 1', x: 100, y: 100, area: 1000, priority: 80 },
+        { id: 'test2', text: 'Test Label 2', x: 150, y: 150, area: 800, priority: 60 }
+      ];
+      
+      const mockSvg = { node: () => ({}) };
+      
+      try {
+        const result = placeLabelsAvoidingCollisions({ svg: mockSvg, labels: mockLabels });
+        console.log('Labeler result:', result.length, 'labels placed');
+        console.log('First label position:', result[0]?.placed);
+      } catch (error) {
+        console.log('Error:', error.message);
+      }
+    };
+    
+    // Toggle the flag (this will require a page reload to take effect)
+    window.toggleFlag = function() {
+      alert('To toggle the feature flag, you need to edit src/modules/labels.js and change USE_SA_LABELER to false, then reload this page.');
+    };
+    
+    // Initialize
+    updateStatus();
+    console.log('Feature flag test initialized');
+    console.log('Current USE_SA_LABELER value:', USE_SA_LABELER);
+  </script>
+</body>
+</html>

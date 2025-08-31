@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Ocean Polishing Test - SA Labeler</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+    .status { font-weight: bold; }
+    .status.success { color: green; }
+    .status.error { color: red; }
+    .results-display { background: #f9f9f9; padding: 10px; margin: 10px 0; font-family: monospace; font-size: 12px; }
+    .visualization { border: 1px solid #ccc; margin: 10px 0; }
+    .controls { margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h1>Ocean Polishing Test - SA Labeler</h1>
+  
+  <div class="test-section">
+    <h3>Test Ocean Polishing with keepWithinRect</h3>
+    <div class="controls">
+      <button onclick="testOceanPolishing()">Test Ocean Polishing</button>
+      <button onclick="testWithNeighbors()">Test with Neighbors</button>
+    </div>
+    <div id="polishing-result" class="results-display"></div>
+  </div>
+  
+  <div class="test-section">
+    <h3>Visualization</h3>
+    <div id="visualization" class="visualization">
+      <svg width="800" height="600" id="test-svg"></svg>
+    </div>
+  </div>
+  
+  <div class="test-section">
+    <h3>Console Output</h3>
+    <div id="console-output" style="background: #f5f5f5; padding: 10px; height: 200px; overflow-y: scroll; font-family: monospace; font-size: 12px;"></div>
+  </div>
+
+  <script src="https://d3js.org/d3.v5.min.js"></script>
+  <script src="vendor/d3-labeler/labeler.js"></script>
+  
+  <script type="module">
+    import { placeLabelsAvoidingCollisions, computeLabelMetrics } from './src/modules/labels.js';
+    
+    // Capture console.log for display
+    const originalLog = console.log;
+    const outputDiv = document.getElementById('console-output');
+    
+    console.log = function(...args) {
+      originalLog.apply(console, args);
+      const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' ');
+      outputDiv.innerHTML += message + '<br>';
+      outputDiv.scrollTop = outputDiv.scrollHeight;
+    };
+    
+    // Test ocean polishing
+    window.testOceanPolishing = function() {
+      console.log('=== Testing Ocean Polishing ===');
+      
+      const mockSvg = d3.select('#test-svg');
+      mockSvg.selectAll('*').remove();
+      
+      // Sample labels with ocean having keepWithinRect
+      const sampleLabels = [
+        // Ocean with keepWithinRect
+        { 
+          id: 'ocean-1', 
+          kind: 'ocean', 
+          text: 'Pacific Ocean', 
+          x: 200, y: 150, 
+          area: 5000, 
+          priority: 100,
+          keepWithinRect: { x0: 100, y0: 100, x1: 400, y1: 300 }
+        },
+        
+        // Some lake labels that might interfere
+        { id: 'lake-1', kind: 'lake', text: 'Crystal Lake', x: 180, y: 140, area: 800, priority: 80 },
+        { id: 'lake-2', kind: 'lake', text: 'Mountain Tarn', x: 220, y: 160, area: 600, priority: 80 },
+        { id: 'lake-3', kind: 'lake', text: 'Forest Pond', x: 250, y: 180, area: 400, priority: 80 },
+        
+        // Island labels
+        { id: 'island-1', kind: 'island', text: 'Tropical Isle', x: 300, y: 200, area: 600, priority: 60 },
+        { id: 'island-2', kind: 'island', text: 'Rocky Outcrop', x: 350, y: 220, area: 300, priority: 60 }
+      ];
+      
+      try {
+        console.log('Input labels:', sampleLabels.length, 'labels');
+        console.log('Ocean with keepWithinRect:', sampleLabels.find(l => l.kind === 'ocean'));
+        
+        // Test the integration
+        const placed = placeLabelsAvoidingCollisions({ svg: mockSvg, labels: sampleLabels });
+        
+        console.log('Placed labels:', placed.length, 'labels');
+        
+        // Find the ocean label
+        const oceanLabel = placed.find(l => l.kind === 'ocean');
+        if (oceanLabel) {
+          console.log('Ocean label placed at:', oceanLabel.placed);
+          console.log('Ocean moved:', oceanLabel.placed.x !== oceanLabel.x || oceanLabel.placed.y !== oceanLabel.y);
+        }
+        
+        // Display results
+        const resultDiv = document.getElementById('polishing-result');
+        resultDiv.innerHTML = '<h4>Ocean Polishing Results:</h4>' + 
+          '<p>Input: ' + sampleLabels.length + ' labels</p>' +
+          '<p>Output: ' + placed.length + ' labels</p>' +
+          '<p>Ocean moved: ' + (oceanLabel && (oceanLabel.placed.x !== oceanLabel.x || oceanLabel.placed.y !== oceanLabel.y)) + '</p>' +
+          '<pre>' + JSON.stringify(oceanLabel, null, 2) + '</pre>';
+        
+        // Visualize the results
+        visualizeOceanPolishing(mockSvg, sampleLabels, placed);
+        
+      } catch (error) {
+        console.log('Error testing ocean polishing:', error.message);
+      }
+    };
+    
+    // Test with neighbors inside the rect
+    window.testWithNeighbors = function() {
+      console.log('=== Testing Ocean Polishing with Neighbors ===');
+      
+      const mockSvg = d3.select('#test-svg');
+      mockSvg.selectAll('*').remove();
+      
+      // Sample labels with neighbors inside ocean rect
+      const sampleLabels = [
+        // Ocean with keepWithinRect
+        { 
+          id: 'ocean-1', 
+          kind: 'ocean', 
+          text: 'Atlantic Ocean', 
+          x: 300, y: 200, 
+          area: 4000, 
+          priority: 100,
+          keepWithinRect: { x0: 200, y0: 150, x1: 500, y1: 350 }
+        },
+        
+        // Neighbors inside the ocean rect
+        { id: 'lake-1', kind: 'lake', text: 'Island Lake', x: 250, y: 180, area: 800, priority: 80 },
+        { id: 'lake-2', kind: 'lake', text: 'Coastal Bay', x: 280, y: 220, area: 600, priority: 80 },
+        { id: 'island-1', kind: 'island', text: 'Ocean Isle', x: 320, y: 240, area: 500, priority: 60 },
+        
+        // Labels outside the rect (should not be processed with ocean)
+        { id: 'lake-3', kind: 'lake', text: 'Mountain Lake', x: 100, y: 100, area: 400, priority: 80 },
+        { id: 'island-2', kind: 'island', text: 'Remote Island', x: 600, y: 400, area: 300, priority: 60 }
+      ];
+      
+      try {
+        console.log('Input labels:', sampleLabels.length, 'labels');
+        console.log('Ocean rect:', sampleLabels.find(l => l.kind === 'ocean').keepWithinRect);
+        
+        // Test the integration
+        const placed = placeLabelsAvoidingCollisions({ svg: mockSvg, labels: sampleLabels });
+        
+        console.log('Placed labels:', placed.length, 'labels');
+        
+        // Check which labels were processed with the ocean
+        const oceanRect = sampleLabels.find(l => l.kind === 'ocean').keepWithinRect;
+        const neighborsInRect = sampleLabels.filter(l => 
+          l.kind !== 'ocean' &&
+          l.x >= oceanRect.x0 && l.x <= oceanRect.x1 &&
+          l.y >= oceanRect.y0 && l.y <= oceanRect.y1
+        );
+        
+        console.log('Neighbors in ocean rect:', neighborsInRect.length);
+        console.log('Neighbors:', neighborsInRect.map(l => l.text));
+        
+        // Display results
+        const resultDiv = document.getElementById('polishing-result');
+        resultDiv.innerHTML = '<h4>Ocean Polishing with Neighbors:</h4>' + 
+          '<p>Input: ' + sampleLabels.length + ' labels</p>' +
+          '<p>Output: ' + placed.length + ' labels</p>' +
+          '<p>Neighbors in ocean rect: ' + neighborsInRect.length + '</p>' +
+          '<p>Neighbors: ' + neighborsInRect.map(l => l.text).join(', ') + '</p>';
+        
+        // Visualize the results
+        visualizeOceanPolishingWithNeighbors(mockSvg, sampleLabels, placed);
+        
+      } catch (error) {
+        console.log('Error testing ocean polishing with neighbors:', error.message);
+      }
+    };
+    
+    // Visualization helper for ocean polishing
+    function visualizeOceanPolishing(svg, originalLabels, placedLabels) {
+      // Add title
+      svg.append('text')
+        .attr('x', 400).attr('y', 20)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', 14)
+        .attr('font-weight', 'bold')
+        .text('Ocean Polishing Test');
+      
+      // Draw ocean rect
+      const oceanLabel = originalLabels.find(l => l.kind === 'ocean');
+      if (oceanLabel && oceanLabel.keepWithinRect) {
+        const rect = oceanLabel.keepWithinRect;
+        svg.append('rect')
+          .attr('x', rect.x0)
+          .attr('y', rect.y0)
+          .attr('width', rect.x1 - rect.x0)
+          .attr('height', rect.y1 - rect.y0)
+          .attr('fill', 'none')
+          .attr('stroke', 'blue')
+          .attr('stroke-width', 2)
+          .attr('stroke-dasharray', '5,5')
+          .attr('opacity', 0.7);
+      }
+      
+      // Draw original positions (red dots)
+      svg.selectAll('.original')
+        .data(originalLabels)
+        .enter().append('circle')
+        .attr('class', 'original')
+        .attr('cx', d => d.x)
+        .attr('cy', d => d.y)
+        .attr('r', 3)
+        .attr('fill', 'red')
+        .attr('opacity', 0.7);
+      
+      // Draw placed positions (green dots)
+      svg.selectAll('.placed')
+        .data(placedLabels)
+        .enter().append('circle')
+        .attr('class', 'placed')
+        .attr('cx', d => d.placed.x)
+        .attr('cy', d => d.placed.y)
+        .attr('r', 3)
+        .attr('fill', 'green')
+        .attr('opacity', 0.7);
+      
+      // Draw movement lines
+      svg.selectAll('.movement')
+        .data(placedLabels)
+        .enter().append('line')
+        .attr('class', 'movement')
+        .attr('x1', d => d.x)
+        .attr('y1', d => d.y)
+        .attr('x2', d => d.placed.x)
+        .attr('y2', d => d.placed.y)
+        .attr('stroke', 'blue')
+        .attr('stroke-width', 1)
+        .attr('stroke-dasharray', '3,3')
+        .attr('opacity', 0.5);
+      
+      // Draw label text
+      svg.selectAll('.label-text')
+        .data(placedLabels)
+        .enter().append('text')
+        .attr('class', 'label-text')
+        .attr('x', d => d.placed.x)
+        .attr('y', d => d.placed.y)
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'middle')
+        .attr('font-size', d => d.kind === 'ocean' ? 16 : d.kind === 'lake' ? 12 : 10)
+        .attr('fill', 'black')
+        .text(d => d.text);
+      
+      // Add legend
+      const legend = svg.append('g').attr('transform', 'translate(20, 40)');
+      
+      legend.append('rect').attr('x', 0).attr('y', 0).attr('width', 20).attr('height', 15)
+        .attr('fill', 'none').attr('stroke', 'blue').attr('stroke-width', 2).attr('stroke-dasharray', '5,5');
+      legend.append('text').attr('x', 25).attr('y', 12).text('Ocean Rect').attr('font-size', 12);
+      
+      legend.append('circle').attr('cx', 0).attr('cy', 25).attr('r', 3).attr('fill', 'red');
+      legend.append('text').attr('x', 10).attr('y', 29).text('Original').attr('font-size', 12);
+      
+      legend.append('circle').attr('cx', 0).attr('cy', 45).attr('r', 3).attr('fill', 'green');
+      legend.append('text').attr('x', 10).attr('y', 49).text('Placed').attr('font-size', 12);
+    }
+    
+    // Visualization helper for ocean polishing with neighbors
+    function visualizeOceanPolishingWithNeighbors(svg, originalLabels, placedLabels) {
+      // Add title
+      svg.append('text')
+        .attr('x', 400).attr('y', 20)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', 14)
+        .attr('font-weight', 'bold')
+        .text('Ocean Polishing with Neighbors');
+      
+      // Draw ocean rect
+      const oceanLabel = originalLabels.find(l => l.kind === 'ocean');
+      if (oceanLabel && oceanLabel.keepWithinRect) {
+        const rect = oceanLabel.keepWithinRect;
+        svg.append('rect')
+          .attr('x', rect.x0)
+          .attr('y', rect.y0)
+          .attr('width', rect.x1 - rect.x0)
+          .attr('height', rect.y1 - rect.y0)
+          .attr('fill', 'none')
+          .attr('stroke', 'blue')
+          .attr('stroke-width', 2)
+          .attr('stroke-dasharray', '5,5')
+          .attr('opacity', 0.7);
+      }
+      
+      // Draw original positions (red dots)
+      svg.selectAll('.original')
+        .data(originalLabels)
+        .enter().append('circle')
+        .attr('class', 'original')
+        .attr('cx', d => d.x)
+        .attr('cy', d => d.y)
+        .attr('r', 3)
+        .attr('fill', 'red')
+        .attr('opacity', 0.7);
+      
+      // Draw placed positions (green dots)
+      svg.selectAll('.placed')
+        .data(placedLabels)
+        .enter().append('circle')
+        .attr('class', 'placed')
+        .attr('cx', d => d.placed.x)
+        .attr('cy', d => d.placed.y)
+        .attr('r', 3)
+        .attr('fill', 'green')
+        .attr('opacity', 0.7);
+      
+      // Draw movement lines
+      svg.selectAll('.movement')
+        .data(placedLabels)
+        .enter().append('line')
+        .attr('class', 'movement')
+        .attr('x1', d => d.x)
+        .attr('y1', d => d.y)
+        .attr('x2', d => d.placed.x)
+        .attr('y2', d => d.placed.y)
+        .attr('stroke', 'blue')
+        .attr('stroke-width', 1)
+        .attr('stroke-dasharray', '3,3')
+        .attr('opacity', 0.5);
+      
+      // Draw label text
+      svg.selectAll('.label-text')
+        .data(placedLabels)
+        .enter().append('text')
+        .attr('class', 'label-text')
+        .attr('x', d => d.placed.x)
+        .attr('y', d => d.placed.y)
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'middle')
+        .attr('font-size', d => d.kind === 'ocean' ? 16 : d.kind === 'lake' ? 12 : 10)
+        .attr('fill', 'black')
+        .text(d => d.text);
+      
+      // Add legend
+      const legend = svg.append('g').attr('transform', 'translate(20, 40)');
+      
+      legend.append('rect').attr('x', 0).attr('y', 0).attr('width', 20).attr('height', 15)
+        .attr('fill', 'none').attr('stroke', 'blue').attr('stroke-width', 2).attr('stroke-dasharray', '5,5');
+      legend.append('text').attr('x', 25).attr('y', 12).text('Ocean Rect').attr('font-size', 12);
+      
+      legend.append('circle').attr('cx', 0).attr('cy', 25).attr('r', 3).attr('fill', 'red');
+      legend.append('text').attr('x', 10).attr('y', 29).text('Original').attr('font-size', 12);
+      
+      legend.append('circle').attr('cx', 0).attr('cy', 45).attr('r', 3).attr('fill', 'green');
+      legend.append('text').attr('x', 10).attr('y', 49).text('Placed').attr('font-size', 12);
+    }
+    
+    console.log('Ocean polishing test initialized');
+  </script>
+</body>
+</html>

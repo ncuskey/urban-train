@@ -12,9 +12,9 @@ import { makeNamer } from "./modules/names.js";
 import { drawCoastline } from "./modules/coastline.js";
 import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction, getVisibleWorldBounds, padBounds } from "./modules/interaction.js";
-import { fitToLand, autoFitToWorld } from './modules/autofit.js';
+import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
-import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels } from "./modules/labels.js";
+import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, placeOceanLabelAt, clearScreenLabels, clearExistingOceanLabels, placeOceanLabelCentered } from "./modules/labels.js";
 
 // === Minimal Perf HUD ==========================================
 const Perf = (() => {
@@ -133,6 +133,13 @@ function getVisibleWorldBoundsWithSize(svg, zoom, width, height) {
   const topLeft = t.invert([0, 0]);
   const bottomRight = t.invert([width, height]);
   return [topLeft[0], topLeft[1], bottomRight[0], bottomRight[1]];
+}
+
+// Get viewport bounds in screen coordinates (for SAT-based ocean label placement)
+function getViewportBounds(pad = 0) {
+  const svg = d3.select('svg');
+  const W = +svg.attr('width'), H = +svg.attr('height');
+  return [pad, pad, W - pad, H - pad]; // left, top, right, bottom — all <= svg size
 }
 
 // Place ocean label at a specific spot (circle-based placement)
@@ -343,6 +350,9 @@ async function generate(count) {
   if (!existingDebugCircles.empty()) {
     existingDebugCircles.remove();
   }
+  
+  // Clear any existing screen labels from previous generation
+  clearScreenLabels();
 
   var svg = d3.select("svg"),
     mapWidth = +svg.attr("width"),
@@ -365,6 +375,20 @@ async function generate(count) {
     
   // Create HUD layer outside the world container
   let gHUD = svg.append("g").attr("id", "hud").style("pointer-events", "none");
+  
+  // Create screen-space overlay for debug rectangles (no zoom transform)
+  const overlayScreen = svg.append("g")
+    .attr("id", "overlay-screen")
+    .attr("pointer-events", "none");
+  
+  // Create world-space overlay for any future world-coordinate debug elements
+  const overlayWorld = world.append("g")
+    .attr("id", "overlay-world")
+    .attr("pointer-events", "none");
+  
+  // Make debug overlays available globally
+  window.debugOverlays = { overlayScreen, overlayWorld };
+  
   // Poisson-disc sampling from https://bl.ocks.org/mbostock/99049112373e12709381
   const sampler = poissonDiscSampler(mapWidth, mapHeight, sizeInput.valueAsNumber, rng);
   let samples = [];
@@ -614,15 +638,50 @@ async function generate(count) {
   const AUTO_FIT = true;
   if (AUTO_FIT) {
     console.log('[autofit] Starting autofit to land...');
-    // Auto-fit to land and then place ocean labels
-    await window.fitLand();
+    
+    // Method 1: Promise-based autofit (preferred approach)
+    try {
+      console.log('[autofit] 🎯 Method 1: Using Promise-based autofit...');
+      
+      // Use the existing fitLand function which returns a Promise
+      await window.fitLand();
+      console.log('[autofit] ✅ Promise-based autofit completed successfully');
+      
+      // Now place ocean labels with the correct post-autofit bounds
+      placeOceanLabelsAfterAutofit();
+      
+    } catch (error) {
+      console.warn('[autofit] Method 1 failed, falling back to Method 2:', error);
+      
+      // Method 2: Transition event handling
+      try {
+        console.log('[autofit] 🔄 Method 2: Using transition event handling...');
+        
+        // Create a transition and set up event handlers
+        const tr = svgSel.transition().duration(600);
+        
+        // Set up transition event handlers
+        tr.on('end.placeOcean.autofit', placeOceanLabelsAfterAutofit);
+        tr.on('interrupt.placeOcean.autofit', placeOceanLabelsAfterAutofit); // safety
+        
+        // Start the autofit
+        await window.fitLand();
+        
+      } catch (error2) {
+        console.warn('[autofit] Method 2 failed, falling back to Method 3:', error2);
+        
+        // Method 3: Direct call with afterLayout safety
+        console.log('[autofit] 🔄 Method 3: Using afterLayout fallback...');
+        await window.fitLand();
+        afterLayout(placeOceanLabelsAfterAutofit);
+      }
+    }
+  }
+
+  // Ocean label placement function - called after autofit completes
+  function placeOceanLabelsAfterAutofit() {
     console.log('[autofit] Autofit completed, now placing ocean labels...');
     
-    // Alternative: Use autoFitToWorld for more control
-    // const worldBBox = { x: 0, y: 0, width: mapWidth, height: mapHeight };
-    // await autoFitToWorld(svgSel, interact.zoom, mapWidth, mapHeight, worldBBox, 400);
-    
-    // Now place ocean labels with the correct post-autofit bounds
     // Use the stored featureLabels from earlier in the generation
     const featureLabels = window.__featureLabels || [];
     const oceanLabels = featureLabels.filter(l => l.kind === 'ocean');
@@ -637,12 +696,11 @@ async function generate(count) {
     if (oceanLabels.length > 0) {
       console.log('[ocean] 🎯 Placing ocean labels after autofit with correct bounds');
       
-      // Get the post-autofit visible world bounds
-      const [x0, y0, x1, y1] = getVisibleWorldBoundsFromLabels(svgSel, mapWidth, mapHeight);
-      const visibleWorld = [x0, y0, x1, y1];
+      // Get the viewport bounds in screen coordinates (for SAT-based placement)
+      const viewportBounds = getViewportBounds(0);
       
-      console.log('[ocean] DEBUG: Post-autofit bounds:', {
-        bounds: visibleWorld,
+      console.log('[ocean] DEBUG: Viewport bounds (screen coordinates):', {
+        bounds: viewportBounds,
         svgWidth: mapWidth,
         svgHeight: mapHeight
       });
@@ -654,6 +712,8 @@ async function generate(count) {
         // Fallback to circle-based placement
         for (const oceanLabel of oceanLabels) {
           const t = d3.zoomTransform(svgSel.node());
+          const [x0, y0, x1, y1] = getVisibleWorldBoundsFromLabels(svgSel, mapWidth, mapHeight);
+          const visibleWorld = [x0, y0, x1, y1];
           const paddedBounds = padBounds(visibleWorld, 32, t.k);
           
           // Create water test function for this ocean label
@@ -680,59 +740,37 @@ async function generate(count) {
           }
         }
       } else {
-        // Primary: Use rectangle-based placement with post-autofit bounds
-        console.log('[ocean] 🎯 Primary path: Using rectangle-based ocean label placement with post-autofit bounds');
-        const t = d3.zoomTransform(svgSel.node());
-        const paddedBounds = padBounds(visibleWorld, 32, t.k);
+        // Primary: Use SAT-based placement with post-autofit bounds
+        console.log('[ocean] 🎯 Primary path: Using SAT-based ocean label placement with post-autofit bounds');
         
-        // Create water test function using the accessor
-        const isWaterAt = makeIsWater(state.getCellAtXY, state.seaLevel);
+        // Use the new SAT-based rectangle finder with viewport bounds
+        const pxRect = findOceanLabelRectAfterAutofit(viewportBounds, state.getCellAtXY, state.seaLevel, 8, 1);
         
-        const rect = findOceanLabelRect({
-          bounds: paddedBounds,
-          step: 8,               // sampling resolution
-          edgePad: 12,           // keep off hard edges
-          coastPad: 6,           // inset from coastline
-          getCellAtXY: state.getCellAtXY,
-          isWaterAt
-        });
-
-        console.log('[ocean] Rectangle finder debug:', {
-          bounds: paddedBounds,
-          rect: rect,
-          sanity: rect ? `✅ Found ${rect.x1 - rect.x0}x${rect.y1 - rect.y0} rectangle from ${rect.corner} corner` : '❌ No rectangle found'
-        });
-
-        if (rect) {
-          // Place ocean labels in the rectangle
-          console.log(`[ocean] ✅ Using rectangle-based placement for ${oceanLabels.length} ocean label(s)`);
-          let anyPanned = false;
+        if (pxRect) {
+          console.log(`[ocean] ✅ Using SAT-based placement for ${oceanLabels.length} ocean label(s)`);
+          
+          // Clear any existing ocean labels to prevent duplicates
+          clearExistingOceanLabels();
+          
+          // Draw debug rectangle
+          drawDebugOceanRect(pxRect);
+          
+          // Place ocean labels in the found rectangle using the new centered placement
           for (const oceanLabel of oceanLabels) {
-            const panned = placeOceanLabelInRect(oceanLabel, rect, svgSel);
-            if (panned) anyPanned = true;
+            placeOceanLabelCentered(svgSel.select('#labels'), oceanLabel.text, pxRect);
           }
-          
-          // If any label caused panning, wait for the pan to complete and then recalculate
-          if (anyPanned) {
-            console.log('[ocean] Panning occurred, will recalculate labels after pan completes');
-            // The pan transition will trigger a zoom event, which can trigger label recalculation
-            // For now, we'll let the current labels stand and let the user manually trigger recalculation
-          }
-          
-          // Debug visualization of the rectangle
-          d3.select('#world').append('rect')
-            .attr('x', rect.x0).attr('y', rect.y0)
-            .attr('width', rect.x1 - rect.x0).attr('height', rect.y1 - rect.y0)
-            .attr('fill', 'none').attr('stroke', '#ff0000')
-            .attr('stroke-width', 2).attr('stroke-dasharray', '6 4').attr('opacity', 0.4)
-            .attr('class', 'debug-rect');
         } else {
-          console.warn('[ocean] ❌ No suitable rectangle found; using fallback circle-based placement.');
+          console.warn('[ocean] ❌ No suitable SAT rectangle found; using fallback circle-based placement.');
+          
+          // Clear any existing screen labels before placing new ones
+          clearScreenLabels();
           
           // Fallback to circle-based placement
           console.log(`[ocean] ⚠️ Fallback: Using circle-based placement for ${oceanLabels.length} ocean label(s)`);
           for (const oceanLabel of oceanLabels) {
             const t = d3.zoomTransform(svgSel.node());
+            const [x0, y0, x1, y1] = getVisibleWorldBoundsFromLabels(svgSel, mapWidth, mapHeight);
+            const visibleWorld = [x0, y0, x1, y1];
             const paddedBounds = padBounds(visibleWorld, 32, t.k);
             
             // Create water test function for this ocean label
@@ -764,8 +802,6 @@ async function generate(count) {
     }
   }
 
-
-
   // Clamp and normalize height values for self-tests
   const heightArray = polygons.map(p => p.height);
   clamp01(heightArray);
@@ -791,6 +827,9 @@ async function generate(count) {
 
   // redraw all polygons on SeaInput change 
   $("#seaInput").change(function() {
+    // Clear screen labels since ocean boundaries may have changed
+    clearScreenLabels();
+    
     drawPolygons({
       polygons,
       color,

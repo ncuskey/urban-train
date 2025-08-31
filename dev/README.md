@@ -98,6 +98,106 @@ http://localhost:8000/dev/test-refine.html
 - Height and feature preservation
 - Performance impact of refinement
 
+## SA Labeler Test Pages
+
+### `test-feature-flag.html`
+**Purpose**: Testing the SA labeler feature flag system
+
+**How to run**:
+```bash
+http://localhost:8000/test-feature-flag.html
+```
+
+**Tests**:
+- Feature flag status verification
+- Toggle between SA and original systems
+- Label placement comparison
+- System status reporting
+
+### `test-d3-labeler.html`
+**Purpose**: Testing the D3-Labeler plugin integration
+
+**How to run**:
+```bash
+http://localhost:8000/test-d3-labeler.html
+```
+
+**Tests**:
+- D3-Labeler plugin loading
+- Plugin API functionality
+- Basic annealing operations
+- Plugin integration verification
+
+### `test-label-metrics.html`
+**Purpose**: Testing label metrics computation for SA labeler
+
+**How to run**:
+```bash
+http://localhost:8000/test-label-metrics.html
+```
+
+**Tests**:
+- Font size calculation by label type
+- Text width measurement
+- Anchor point generation
+- Metrics structure validation
+
+### `test-anneal-labels.html`
+**Purpose**: Testing the annealer wrapper function
+
+**How to run**:
+```bash
+http://localhost:8000/test-anneal-labels.html
+```
+
+**Tests**:
+- Annealer wrapper functionality
+- Coordinate transformation
+- Bounds handling
+- Result validation
+
+### `test-sa-integration.html`
+**Purpose**: Testing the complete SA labeler integration
+
+**How to run**:
+```bash
+http://localhost:8000/test-sa-integration.html
+```
+
+**Tests**:
+- Complete SA integration workflow
+- Cluster-based processing
+- Label placement optimization
+- Visual comparison of before/after
+
+### `test-ocean-polishing.html`
+**Purpose**: Testing ocean label polishing with keepWithinRect
+
+**How to run**:
+```bash
+http://localhost:8000/test-ocean-polishing.html
+```
+
+**Tests**:
+- Ocean label optimization within bounds
+- Neighbor inclusion in ocean rects
+- Boundary constraint handling
+- Ocean-specific optimization
+
+### `test-performance-guardrails.html`
+**Purpose**: Testing performance guardrails and debug features
+
+**How to run**:
+```bash
+http://localhost:8000/test-performance-guardrails.html
+```
+
+**Tests**:
+- Performance guardrails for different cluster sizes
+- Debug mode functionality
+- Overlap detection and reporting
+- SA labeler status and controls
+
 ### `test-svg-zoom.html`
 **Purpose**: Testing SVG zoom behavior and transforms
 

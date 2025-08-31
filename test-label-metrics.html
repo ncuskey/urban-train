@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Label Metrics Test - SA Labeler</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+    .status { font-weight: bold; }
+    .status.success { color: green; }
+    .status.error { color: red; }
+    .metrics-display { background: #f9f9f9; padding: 10px; margin: 10px 0; font-family: monospace; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Label Metrics Test - SA Labeler</h1>
+  
+  <div class="test-section">
+    <h3>Test Label Metrics Function</h3>
+    <button onclick="testLabelMetrics()">Test computeLabelMetrics</button>
+    <div id="metrics-result" class="metrics-display"></div>
+  </div>
+  
+  <div class="test-section">
+    <h3>Console Output</h3>
+    <div id="console-output" style="background: #f5f5f5; padding: 10px; height: 200px; overflow-y: scroll; font-family: monospace; font-size: 12px;"></div>
+  </div>
+
+  <script src="https://d3js.org/d3.v5.min.js"></script>
+  <script src="vendor/d3-labeler/labeler.js"></script>
+  
+  <script type="module">
+    import { computeLabelMetrics, measureTextWidth } from './src/modules/labels.js';
+    
+    // Capture console.log for display
+    const originalLog = console.log;
+    const outputDiv = document.getElementById('console-output');
+    
+    console.log = function(...args) {
+      originalLog.apply(console, args);
+      const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' ');
+      outputDiv.innerHTML += message + '<br>';
+      outputDiv.scrollTop = outputDiv.scrollHeight;
+    };
+    
+    // Test the label metrics function
+    window.testLabelMetrics = function() {
+      console.log('=== Testing computeLabelMetrics ===');
+      
+      // Create a mock SVG for testing
+      const mockSvg = d3.select('body').append('svg').attr('width', 1).attr('height', 1);
+      
+      // Sample labels with different kinds
+      const sampleLabels = [
+        { id: 'ocean-1', kind: 'ocean', text: 'Pacific Ocean', x: 100, y: 50, area: 5000, priority: 100 },
+        { id: 'lake-1', kind: 'lake', text: 'Crystal Lake', x: 200, y: 150, area: 800, priority: 80 },
+        { id: 'island-1', kind: 'island', text: 'Tropical Isle', x: 300, y: 250, area: 600, priority: 60 },
+        { id: 'lake-2', kind: 'lake', text: 'Mountain Tarn', x: 400, y: 350, area: 400, priority: 80 }
+      ];
+      
+      try {
+        console.log('Input labels:', sampleLabels);
+        
+        // Test the computeLabelMetrics function
+        const metrics = computeLabelMetrics({ svg: mockSvg, labels: sampleLabels });
+        
+        console.log('Computed metrics:', metrics);
+        
+        // Display results
+        const resultDiv = document.getElementById('metrics-result');
+        resultDiv.innerHTML = '<h4>Computed Label Metrics:</h4>' + 
+          '<pre>' + JSON.stringify(metrics, null, 2) + '</pre>';
+        
+        // Verify the structure
+        const isValid = metrics.every(m => 
+          m.font && 
+          m.width && 
+          m.height && 
+          m.anchor && 
+          m.anchor.x !== undefined && 
+          m.anchor.y !== undefined && 
+          m.anchor.r !== undefined
+        );
+        
+        if (isValid) {
+          console.log('✅ All labels have valid metrics structure');
+        } else {
+          console.log('❌ Some labels are missing required metrics');
+        }
+        
+        // Test font sizes
+        const oceanLabel = metrics.find(m => m.kind === 'ocean');
+        const lakeLabel = metrics.find(m => m.kind === 'lake');
+        const islandLabel = metrics.find(m => m.kind === 'island');
+        
+        console.log('Font sizes:', {
+          ocean: oceanLabel?.font,
+          lake: lakeLabel?.font,
+          island: islandLabel?.font
+        });
+        
+        // Test text measurement
+        console.log('Text widths:', {
+          ocean: oceanLabel?.width,
+          lake: lakeLabel?.width,
+          island: islandLabel?.width
+        });
+        
+        // Clean up
+        mockSvg.remove();
+        
+      } catch (error) {
+        console.log('Error testing label metrics:', error.message);
+        mockSvg.remove();
+      }
+    };
+    
+    console.log('Label metrics test initialized');
+  </script>
+</body>
+</html>

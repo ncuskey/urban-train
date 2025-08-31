@@ -1,5 +1,8 @@
 // d3 is global
 
+// gate the new behavior
+export const USE_SA_LABELER = true; // can toggle off to revert
+
 // Accurate text measurement using ghost element
 export function measureTextWidth(svg, text, { fontSize = 28, family = 'serif', weight = 700 } = {}) {
   const ghost = svg.append('text')
@@ -9,6 +12,70 @@ export function measureTextWidth(svg, text, { fontSize = 28, family = 'serif', w
   const w = ghost.node().getComputedTextLength();
   ghost.remove();
   return Math.max(8, w);
+}
+
+// Normalize label data for SA labeler - compute anchors and dimensions
+export function computeLabelMetrics({ svg, labels }) {
+  return labels.map(l => {
+    const font = (
+      l.kind === 'ocean'  ? 28 :
+      l.kind === 'lake'   ? 14 :
+      l.kind === 'island' ? 12 : 12
+    );
+    const width = measureTextWidth(svg, l.text, { fontSize: font, weight: 700 });
+    const height = Math.max(10, Math.round(font * 0.9));
+
+    return {
+      ...l,
+      font,
+      // initial guess stays at current centroid
+      x: l.x,
+      y: l.y,
+      // rectangle dims used by the annealer
+      width,
+      height,
+      // anchor & radius — small radius works well here
+      anchor: { x: l.x, y: l.y, r: 3 }
+    };
+  });
+}
+
+// Wrapper around D3-Labeler simulated annealing
+export function annealLabels({ labels, bounds, sweeps = 400 }) {
+  if (!labels.length) return labels;
+
+  // switch to a local coord system if bounds provided
+  const offsetX = bounds ? bounds.x0 : 0;
+  const offsetY = bounds ? bounds.y0 : 0;
+  const W = bounds ? (bounds.x1 - bounds.x0) : d3.select('svg').attr('width');
+  const H = bounds ? (bounds.y1 - bounds.y0) : d3.select('svg').attr('height');
+
+  const labelArray = labels.map(l => ({
+    x: l.x - offsetX,
+    y: l.y - offsetY,
+    width: l.width,
+    height: l.height,
+    name: l.text
+  }));
+  const anchorArray = labels.map(l => ({
+    x: l.anchor.x - offsetX,
+    y: l.anchor.y - offsetY,
+    r: l.anchor.r ?? 3
+  }));
+
+  // run simulated annealing
+  d3.labeler()
+    .label(labelArray)
+    .anchor(anchorArray)
+    .width(+W)
+    .height(+H)
+    .start(sweeps);
+
+  // map back to world coords
+  return labels.map((l, i) => ({
+    ...l,
+    placed: { x: labelArray[i].x + offsetX, y: labelArray[i].y + offsetY }
+  }));
 }
 
 // Try to pan the viewport to give more space for the label
@@ -276,6 +343,11 @@ function scoreRectForLabel(rect, desiredTextWidth, desiredLineHeight, pad = 10) 
 
 // Try all four corners; prefer rectangles that touch a coastline, then best label capacity.
 export function findOceanLabelRect(opts) {
+  const MIN_ASPECT = opts.minAspect ?? 1.15; // >1 means horizontal. Use 1.01 if you just want w>h.
+  
+  let best = null;
+  let bestScore = -Infinity;
+  
   const corners = ['tl','tr','bl','br'].map(corner => growOceanRectFromCorner({ corner, ...opts }));
   
   console.log('[ocean] Corner results:', corners.map((r, i) => ({
@@ -284,6 +356,7 @@ export function findOceanLabelRect(opts) {
     touchesCoast: r.touchesCoast,
     w: r.w,
     h: r.h,
+    aspect: r.w > 0 ? (r.w / r.h).toFixed(2) : 'N/A',
     isWater: r.area > 0 ? '✅' : '❌'
   })));
   
@@ -293,7 +366,7 @@ export function findOceanLabelRect(opts) {
   console.log('[ocean] Pool results:', {
     withCoast: withCoast.length,
     totalValid: pool.length,
-    pool: pool.map(r => ({ area: r.area, corner: r.corner, touchesCoast: r.touchesCoast })),
+    pool: pool.map(r => ({ area: r.area, corner: r.corner, touchesCoast: r.touchesCoast, aspect: (r.w / r.h).toFixed(2) })),
     sanity: withCoast.length === 4 ? '✅ All corners touch coast' : 
             withCoast.length > 0 ? `✅ ${withCoast.length}/4 corners touch coast` : '❌ No corners touch coast'
   });
@@ -304,36 +377,65 @@ export function findOceanLabelRect(opts) {
     return findCenterBasedOceanRect(opts);
   }
   
-  // Score rectangles based on label capacity rather than raw area
-  const desiredTextWidth = 200; // Typical ocean label width
-  const desiredLineHeight = 28 * 1.2; // Base font size * line height
-  
-  pool.forEach(rect => {
-    rect.labelScore = scoreRectForLabel(rect, desiredTextWidth, desiredLineHeight);
-  });
-  
-  console.log('[ocean] Label capacity scores:', pool.map(r => ({
+  console.log('[ocean] Initial seed rectangles:', pool.map(r => ({
     corner: r.corner,
-    area: r.area,
     w: r.w,
     h: r.h,
-    labelScore: r.labelScore.toFixed(1)
+    aspect: (r.w / r.h).toFixed(2),
+    area: r.area
   })));
   
-  pool.sort((a,b) => b.labelScore - a.labelScore);
-  const selected = pool[0];
+  // Filter out seeds that are too tall to be worth growing
+  // If a seed has aspect < 0.3, it's probably too tall to grow into a good horizontal rectangle
+  const viableSeeds = pool.filter(seed => (seed.w / seed.h) >= 0.3);
+  console.log(`[ocean] Filtered to ${viableSeeds.length}/${pool.length} viable seeds (aspect >= 0.3)`);
   
-  console.log('[ocean] Selected rectangle:', {
-    corner: selected.corner,
-    area: selected.area,
-    w: selected.w,
-    h: selected.h,
-    touchesCoast: selected.touchesCoast,
-    labelScore: selected.labelScore ? selected.labelScore.toFixed(1) : 'N/A',
-    sanity: selected && selected.area > 0 ? '✅ Valid rectangle selected' : '❌ Invalid rectangle selected'
-  });
+  if (viableSeeds.length === 0) {
+    console.log('[ocean] No viable seeds found, trying center-based approach');
+    return findCenterBasedOceanRect(opts);
+  }
   
-  return selected;
+  // Score rectangles using the new horizontal aspect requirement
+  for (const seed of viableSeeds) {
+    console.log(`[ocean] Trying to grow seed from ${seed.corner}: w=${seed.w}, h=${seed.h}, aspect=${(seed.w/seed.h).toFixed(2)}`);
+    const r = growFromSeed(seed, {...opts, MIN_ASPECT});
+    const score = scoreRect(r, MIN_ASPECT);
+    console.log(`[ocean] Grown rectangle: w=${r.w}, h=${r.h}, aspect=${(r.w/r.h).toFixed(2)}, score=${score}`);
+    if (score > bestScore) { 
+      best = r; 
+      bestScore = score; 
+      console.log(`[ocean] New best: ${r.corner} with score ${score}`);
+    }
+  }
+  
+  // Fallback: if nothing satisfied aspect, relax toward 1.0 once
+  if (!best) {
+    const relaxed = Math.max(1.01, (opts.minAspect ?? 1.15) - 0.2);
+    console.log(`[ocean] No rectangles met aspect ${MIN_ASPECT}, relaxing to ${relaxed.toFixed(2)}`);
+    
+    for (const seed of pool) {
+      const r = growFromSeed(seed, {...opts, MIN_ASPECT: relaxed});
+      const score = scoreRect(r, relaxed);
+      if (score > bestScore) { 
+        best = r; 
+        bestScore = score; 
+      }
+    }
+  }
+  
+  if (best) {
+    console.log('[ocean] Selected horizontal rectangle:', {
+      corner: best.corner,
+      area: best.area,
+      w: best.w,
+      h: best.h,
+      aspect: (best.w / best.h).toFixed(2),
+      touchesCoast: best.touchesCoast,
+      sanity: '✅ Valid horizontal rectangle selected'
+    });
+  }
+  
+  return best;
 }
 
 // Fallback: find a large water rectangle in the center area
@@ -693,6 +795,7 @@ export function buildFeatureLabels({
     { oceans: oceans.length, lakes: lakes.length, islands: islands.length,
       waterComps: waterComps.length, landComps: landComps.length });
 
+  // NOTE: Labels will be processed by placeLabelsAvoidingCollisions() which checks USE_SA_LABELER flag
   return [...oceans, ...lakes, ...islands];
 }
 
@@ -746,6 +849,139 @@ function clampWithinRect(d) {
 }
 
 export function placeLabelsAvoidingCollisions({ svg, labels }) {
+  // Check feature flag for new annealer system
+  if (USE_SA_LABELER) {
+    console.log('[labels] Using SA labeler for lake/island labels and ocean polishing');
+    
+    const metrics = computeLabelMetrics({ svg, labels });
+    const clusters = findLabelClusters(metrics);
+    
+    const placed = [];
+    const processedIds = new Set();
+    
+    // Step 1: Process lake/island clusters with performance guardrails
+    for (const cluster of clusters) {
+      const members = cluster.filter(l => l.kind !== 'ocean'); // oceans later
+      if (!members.length) continue;
+      
+      // Skip annealing for clusters of size 1-2 (no benefit)
+      if (members.length <= 2) {
+        // Use simple placement for small clusters
+        members.forEach(l => {
+          placed.push({
+            ...l,
+            w: Math.max(80, Math.min(500, l.text.length * 8)) * Math.min(1.0, Math.max(0.6, l.area / 1000)),
+            h: 18 * Math.min(1.0, Math.max(0.6, l.area / 1000)),
+            placed: { x: l.x, y: l.y },
+            scale: Math.min(1.0, Math.max(0.6, l.area / 1000)),
+            overlapped: false
+          });
+          processedIds.add(l.id);
+        });
+        continue;
+      }
+      
+      const pad = 64;
+      const xs = members.map(m => m.x), ys = members.map(m => m.y);
+      const bounds = { 
+        x0: Math.min(...xs) - pad, 
+        y0: Math.min(...ys) - pad,
+        x1: Math.max(...xs) + pad, 
+        y1: Math.max(...ys) + pad 
+      };
+      
+      // Performance guardrails: clamp sweeps based on cluster size
+      let sweeps = Math.min(800, Math.max(200, 200 + 2 * members.length));
+      if (members.length > 60) {
+        sweeps = Math.floor(sweeps * 0.7); // Reduce by ~30% for large clusters
+      }
+      
+      if (window.DEBUG) {
+        console.log(`[labels] SA cluster: ${members.length} labels, ${sweeps} sweeps`);
+      }
+      
+      const annealed = annealLabels({ labels: members, bounds, sweeps });
+      placed.push(...annealed);
+      
+      // Mark as processed
+      annealed.forEach(l => processedIds.add(l.id));
+    }
+    
+    // Step 2: Process ocean labels with keepWithinRect (smaller sweeps)
+    const oceansWithKeepRect = metrics.filter(l => l.kind === 'ocean' && l.keepWithinRect);
+    for (const ocean of oceansWithKeepRect) {
+      const rect = ocean.keepWithinRect; // {x0,y0,x1,y1}
+      const neighbors = metrics.filter(l =>
+        l.id !== ocean.id &&
+        l.x >= rect.x0 && l.x <= rect.x1 &&
+        l.y >= rect.y0 && l.y <= rect.y1
+      );
+
+      // Skip if no neighbors (no benefit from annealing)
+      if (neighbors.length === 0) {
+        placed.push({
+          ...ocean,
+          w: Math.max(80, Math.min(500, ocean.text.length * 8)) * Math.min(1.0, Math.max(0.6, ocean.area / 1000)),
+          h: 18 * Math.min(1.0, Math.max(0.6, ocean.area / 1000)),
+          placed: { x: ocean.x, y: ocean.y },
+          scale: Math.min(1.0, Math.max(0.6, ocean.area / 1000)),
+          overlapped: false
+        });
+        processedIds.add(ocean.id);
+        continue;
+      }
+
+      // Ocean polishing: smaller sweeps since rectangle already did most work
+      const sweeps = Math.min(500, Math.max(300, 300 + neighbors.length * 10));
+      
+      if (window.DEBUG) {
+        console.log(`[labels] SA ocean: ${neighbors.length + 1} labels, ${sweeps} sweeps`);
+      }
+
+      const annealed = annealLabels({
+        labels: [ocean, ...neighbors],
+        bounds: rect,
+        sweeps: sweeps
+      });
+
+      // Copy placed back (ocean first, then neighbors)
+      placed.push(...annealed);
+      
+      // Mark as processed
+      annealed.forEach(l => processedIds.add(l.id));
+    }
+    
+    // Step 3: Merge in any labels we skipped (oceans without keepWithinRect, or clusters too small)
+    for (const label of labels) {
+      if (!processedIds.has(label.id)) {
+        // Use existing centroid as placed position for skipped labels
+        placed.push({
+          ...label,
+          w: Math.max(80, Math.min(500, label.text.length * 8)) * Math.min(1.0, Math.max(0.6, label.area / 1000)),
+          h: 18 * Math.min(1.0, Math.max(0.6, label.area / 1000)),
+          placed: { x: label.x, y: label.y },
+          scale: Math.min(1.0, Math.max(0.6, label.area / 1000)),
+          overlapped: false
+        });
+      }
+    }
+    
+    // Sort placed labels by priority and area (for efficient zoom filtering)
+    const sort = (a,b) => (b.priority??0)-(a.priority??0) || (b.area??0)-(a.area??0);
+    placed.sort(sort);
+    
+    // Ensure each label has a stable ID
+    ensureIds(placed);
+    
+    // Debug: Check for remaining overlaps (post-assertion)
+    if (window.DEBUG) {
+      checkRemainingOverlaps(placed);
+    }
+    
+    return placed;
+  }
+  
+  // Fallback to original system
   const placed = [];
   const ordered = [...labels.filter(d => d.fixed), ...labels.filter(d => !d.fixed)];
 
@@ -1325,4 +1561,742 @@ export function getVisibleWorldBounds(svg, width, height) {
   const [x0, y0] = t.invert([0, 0]);
   const [x1, y1] = t.invert([width, height]);
   return [x0, y0, x1, y1];
+}
+
+// New scoring function that requires horizontal aspect ratio
+function scoreRect(r, minAspect) {
+  if (!r) return -Infinity;
+  const aspect = r.w / Math.max(1, r.h);
+  if (aspect < minAspect) return -Infinity; // must be horizontal enough
+  return r.w * r.h; // plain area once orientation passes
+}
+
+// Constrain growth so it keeps the rectangle horizontal
+function growFromSeed(seed, opts) {
+  let {x0, y0, x1, y1, w, h} = seed;
+  const step = opts.step || 8;
+  const bounds = opts.bounds; // [x0,y0,x1,y1]
+  const minAspect = opts.MIN_ASPECT ?? 1.15;
+  
+  // Convert to x,y,w,h format for easier manipulation
+  let x = x0, y = y0;
+  
+  // Helper functions to check if we can grow in each direction
+  const canGrowLeft = (x, y, w, h) => {
+    const newX = x - step;
+    return newX >= bounds[0] && opts.isWaterAt(newX, y) && opts.isWaterAt(newX, y + h);
+  };
+  
+  const canGrowRight = (x, y, w, h) => {
+    const newX = x + w + step;
+    return newX <= bounds[2] && opts.isWaterAt(newX, y) && opts.isWaterAt(newX, y + h);
+  };
+  
+  const canGrowUp = (x, y, w, h) => {
+    const newY = y - step;
+    return newY >= bounds[1] && opts.isWaterAt(x, newY) && opts.isWaterAt(x + w, newY);
+  };
+  
+  const canGrowDown = (x, y, w, h) => {
+    const newY = y + h + step;
+    return newY <= bounds[3] && opts.isWaterAt(x, newY) && opts.isWaterAt(x + w, newY);
+  };
+  
+  // Prefer widening first to lock in horizontal orientation.
+  let horizontalGrowth = 0;
+  while (canGrowLeft(x, y, w, h) || canGrowRight(x, y, w, h)) {
+    // choose the side that has more room / keeps water
+    const tryLeft = canGrowLeft(x, y, w, h);
+    const tryRight = canGrowRight(x, y, w, h);
+    
+    // Always grow horizontally if possible, prioritize the side with more room
+    if (tryLeft && tryRight) {
+      // If both sides available, choose the one that gives better aspect ratio
+      if (w < h) {
+        // If still very tall, grow both sides equally
+        x -= step; w += step * 2;
+      } else {
+        // If getting wider, grow the side with more room
+        x -= step; w += step;
+      }
+    } else if (tryLeft) {
+      x -= step; w += step;
+    } else if (tryRight) {
+      w += step;
+    } else {
+      break;
+    }
+    
+    horizontalGrowth += step;
+    
+    // Stop if we've achieved a reasonable horizontal aspect
+    if ((w / h) >= 1.5) break;
+  }
+  
+  console.log(`[ocean] growFromSeed: after horizontal growth, w=${w}, h=${h}, aspect=${(w/h).toFixed(2)}, horizontalGrowth=${horizontalGrowth}`);
+  
+  // Now grow vertically while preserving aspect >= minAspect
+  while (true) {
+    const wantUp = canGrowUp(x, y, w, h);
+    const wantDn = canGrowDown(x, y, w, h);
+    if (!wantUp && !wantDn) break;
+    // if growing would break aspect, stop
+    const nextH = h + step;
+    if ((w / nextH) < minAspect) break;
+    if (wantUp && (!wantDn || h < w * 0.5)) { y -= step; h += step; }
+    else if (wantDn) { h += step; }
+    else break;
+  }
+  
+  // Convert back to x0,y0,x1,y1 format
+  return {
+    x0: x, y0: y, x1: x + w, y1: y + h,
+    w, h,
+    area: w * h,
+    touchesCoast: seed.touchesCoast,
+    corner: seed.corner
+  };
+}
+
+// ===== Ocean Label Placement After Autofit =====
+
+// 1) Cheap water test using XY accessor
+function pointIsOcean(x, y, { onlyOcean = true } = {}) {
+  const i = window.xyIndex?.get?.(x, y);
+  if (i == null) return true; // off the mesh = open ocean
+  const c = cells[i];
+  const water = c.h <= 0;
+  if (!onlyOcean) return water;
+  return water && (c.featureType === 'Ocean' || c.ocean === 1 || c.lake === 0 || c.lake == null);
+}
+
+// 2) Build water mask + SAT (of LAND)
+function buildWaterMaskSAT(bounds, step = 8, pointIsOcean) {
+  const [minX, minY, maxX, maxY] = bounds;
+  const cols = Math.max(1, Math.floor((maxX - minX) / step));
+  const rows = Math.max(1, Math.floor((maxY - minY) / step));
+
+  const mask = Array.from({ length: rows }, () => Array(cols).fill(0));
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = minX + c * step + step / 2;
+      const y = minY + r * step + step / 2;
+      mask[r][c] = pointIsOcean(x, y) ? 1 : 0;
+    }
+  }
+
+  const sat = Array.from({ length: rows + 1 }, () => Array(cols + 1).fill(0));
+  for (let r = 1; r <= rows; r++) {
+    for (let c = 1; c <= cols; c++) {
+      const land = mask[r - 1][c - 1] ? 0 : 1;
+      sat[r][c] = land + sat[r - 1][c] + sat[r][c - 1] - sat[r - 1][c - 1];
+    }
+  }
+
+  function landCount(i0, j0, i1, j1) {
+    i0 = Math.max(0, i0); j0 = Math.max(0, j0);
+    i1 = Math.min(cols - 1, i1); j1 = Math.min(rows - 1, j1);
+    if (i0 > i1 || j0 > j1) return 0;
+    return sat[j1 + 1][i1 + 1] - sat[j0][i1 + 1] - sat[j1 + 1][i0] + sat[j0][i0];
+  }
+
+  return { mask, sat, cols, rows, step, origin: [minX, minY], landCount };
+}
+
+// 3) Largest horizontal rectangle of 1s (width >= height)
+// (keep your existing implementation; included here only for context)
+function largestHorizontalWaterRect({ mask, cols, rows }) {
+  const heights = Array(cols).fill(0);
+  let best = null;
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) heights[c] = mask[r][c] ? heights[c] + 1 : 0;
+
+    const stack = [];
+    for (let c = 0; c <= cols; ) {
+      const h = (c === cols) ? 0 : heights[c];
+      if (!stack.length || h >= heights[stack[stack.length - 1]]) {
+        stack.push(c++);
+      } else {
+        const top = stack.pop();
+        const height = heights[top];
+        const left = stack.length ? stack[stack.length - 1] + 1 : 0;
+        const right = c - 1;
+        const width = right - left + 1;
+        if (width >= height) {
+          const area = width * height;
+          if (!best || area > best.area) {
+            best = { area, left, right, top: r - height + 1, bottom: r, width, height };
+          }
+        }
+      }
+    }
+  }
+  return best;
+}
+
+// 4) Shrink until there is zero land inside (with padding),
+//    while preserving a minimum horizontal aspect ratio.
+function shrinkUntilAllWater(rect, landCount, pad = 1, minAspect = 2.0) {
+  let { left, right, top, bottom } = rect;
+  const center = () => ({
+    cx: (left + right) / 2,
+    cy: (top + bottom) / 2
+  });
+
+  const width  = () => right - left + 1;
+  const height = () => bottom - top + 1;
+  const aspect = () => width() / Math.max(1, height());
+
+  const hasLand = () => landCount(left, top, right, bottom) > 0;
+
+  // Helper: trim a row or column from the side with more bordering land; if tie, trim toward outside
+  const trimVertical = () => { // remove from top OR bottom
+    const landTop    = landCount(left - pad, top - pad, right + pad, top);
+    const landBottom = landCount(left - pad, bottom, right + pad, bottom + pad);
+    if (landTop > landBottom) top++;
+    else if (landBottom > landTop) bottom--;
+    else {
+      // tie: keep the center stable
+      const { cy } = center();
+      if (Math.abs((top + 1) - cy) < Math.abs((bottom - 1) - cy)) top++; else bottom--;
+    }
+  };
+  const trimHorizontal = () => { // remove from left OR right
+    const landLeft  = landCount(left - pad, top - pad, left, bottom + pad);
+    const landRight = landCount(right, top - pad, right + pad, bottom + pad);
+    if (landLeft > landRight) left++;
+    else if (landRight > landLeft) right--;
+    else {
+      const { cx } = center();
+      if (Math.abs((left + 1) - cx) < Math.abs((right - 1) - cx)) left++; else right--;
+    }
+  };
+
+  // Main loop: remove land first. If no land remains but aspect is too tall,
+  // trim vertically until aspect >= minAspect (height shrinks, preserving width).
+  let guard = 0;
+  while (guard++ < 10000 && (hasLand() || aspect() < minAspect)) {
+    // If the rect is too tall, favor vertical trimming *unless* that would
+    // immediately create land (rare). When land exists, we still prioritize
+    // removing land first, but we choose the trim direction that best maintains
+    // or improves aspect.
+    const tooTall = aspect() < minAspect;
+
+    if (hasLand()) {
+      // choose trim that both removes the most land and keeps it horizontal
+      const w = width(), h = height();
+      const preferVertical = (h >= w) || tooTall; // shrink rows if tall
+      if (preferVertical) trimVertical(); else trimHorizontal();
+    } else {
+      // only aspect left to fix — shrink height
+      trimVertical();
+    }
+
+    if (left > right || top > bottom) break; // exhausted
+  }
+
+  return {
+    left, right, top, bottom,
+    width: Math.max(0, right - left + 1),
+    height: Math.max(0, bottom - top + 1)
+  };
+}
+
+// 3b) Find the top-K largest horizontal water rectangles in the SAT environment
+function largestHorizontalWaterRects(satEnv, K = 12) {
+  const { cols, rows, landCount } = satEnv;
+  const out = [];
+  
+  console.log(`[ocean] Searching for rectangles in ${cols}x${rows} grid`);
+  
+  // Try all possible rectangle sizes and positions
+  for (let h = 1; h <= rows; h++) {
+    for (let w = h * 2; w <= cols; w++) { // enforce minAspect 2.0
+      for (let top = 0; top <= rows - h; top++) {
+        for (let left = 0; left <= cols - w; left++) {
+          const right = left + w - 1;
+          const bottom = top + h - 1;
+          
+          // Count land cells in this rectangle (0 = all water)
+          const landInRect = landCount(left, top, right, bottom);
+          
+          // Must be all water (no land)
+          if (landInRect === 0) {
+            out.push({
+              area: w * h,
+              left, right,
+              top: top,
+              bottom: bottom,
+              width: w, height: h
+            });
+          }
+        }
+      }
+    }
+  }
+  
+  console.log(`[ocean] Found ${out.length} raw rectangles before deduplication`);
+
+  // De-dupe near-duplicates (bin by coarse center/size) and keep top-K by area
+  const seen = new Set();
+  const uniq = [];
+  for (const rc of out) {
+    const cx = (rc.left + rc.right) / 2;
+    const cy = (rc.top + rc.bottom) / 2;
+    const key = `${Math.round(cx/3)}:${Math.round(cy/3)}:${Math.round(rc.width/3)}:${Math.round(rc.height/3)}`;
+    if (!seen.has(key)) { seen.add(key); uniq.push(rc); }
+  }
+  uniq.sort((a,b) => b.area - a.area);
+  return uniq.slice(0, K);
+}
+
+// Score that prefers big banners with some height and not hugging edges
+function scoreOceanRect(px, visibleBounds) {
+  const [vx, vy, vw, vh] = visibleBounds;
+  const Vw = vw - vx, Vh = vh - vy;
+  const area = px.w * px.h;
+  const heightBonus = Math.min(px.h / 80, 1.25); // saturate around 80px tall
+  const cx = px.x + px.w / 2, cy = px.y + px.h / 2;
+  const margin = Math.min(cx - vx, cy - vy, vx + Vw - cx, vy + Vh - cy) - Math.min(px.w, px.h)/2;
+  const edgePenalty = Math.max(0.65, Math.min(1, margin / 60));
+  return area * heightBonus * edgePenalty;
+}
+
+function gridRectToPixels(rect, origin, step) {
+  const [minX, minY] = origin;
+  return {
+    x: minX + rect.left * step,
+    y: minY + rect.top * step,
+    w: rect.width * step,
+    h: rect.height * step
+  };
+}
+
+// Final safety: if the rect is still too tall (e.g., degenerate masks at edges),
+// shave extra rows symmetrically until minAspect is met or we hit height=1.
+function enforceMinAspect(pxRect, minAspect) {
+  let { x, y, w, h } = { x: pxRect.x, y: pxRect.y, w: pxRect.w, h: pxRect.h };
+  if (w >= h * minAspect) return pxRect;
+  const targetH = Math.max(1, Math.floor(w / minAspect));
+  const trim = Math.max(0, h - targetH);
+  // Keep center: move y down by half the trim and reduce h
+  y += Math.floor(trim / 2);
+  h -= trim;
+  return { x, y, w, h };
+}
+
+// Exported entry point: call this AFTER autofit
+export function findOceanLabelRectAfterAutofit(
+  visibleBounds,
+  getCellAtXY,
+  seaLevel = 0.2,
+  step = 8,
+  pad = 1,
+  minAspect = 2.0
+) {
+  console.log(`[ocean] Using post-autofit bounds: [${visibleBounds.join(', ')}]`);
+
+  function localPointIsOcean(x, y, { onlyOcean = true } = {}) {
+    const cell = getCellAtXY?.(x, y);
+    if (!cell) return true;
+    let height = cell.height ?? cell.data?.height ?? cell.polygon?.height ?? null;
+    const featureType = cell.featureType ?? cell.data?.featureType ?? null;
+    if (height == null) return true;
+    const water = height <= seaLevel;
+    return onlyOcean ? (water && featureType !== 'Lake') : water;
+  }
+
+  const satEnv = buildWaterMaskSAT(visibleBounds, step, localPointIsOcean);
+
+  // NEW: collect top-K horizontal rects, then re-rank by a label-friendly score
+  const candidates = largestHorizontalWaterRects(satEnv, 12);
+  if (!candidates.length) {
+    console.warn('[ocean] No horizontal water rect candidates; will fallback.');
+    return null;
+  }
+
+  let bestPx = null; let bestScore = -Infinity;
+  for (const r of candidates) {
+    let rect = shrinkUntilAllWater(r, satEnv.landCount, pad, minAspect);
+    if (rect.width < 1 || rect.height < 1) continue;
+    let px = gridRectToPixels(rect, satEnv.origin, satEnv.step);
+    if (px.w < px.h * minAspect) px = enforceMinAspect(px, minAspect);
+    const score = scoreOceanRect(px, visibleBounds);
+    if (score > bestScore) { bestScore = score; bestPx = px; }
+  }
+
+  if (!bestPx) {
+    console.warn('[ocean] All candidate rects invalid after shrink; will fallback.');
+    return null;
+  }
+
+  console.log(`[ocean] Final pixels (ranked): ${bestPx.w}x${bestPx.h} at (${bestPx.x},${bestPx.y})`);
+  return bestPx;
+}
+
+// Optional (nice UX): only accept rects that can fit the text horizontally at (or slightly below) your base font size
+export function fitFontToRect(text, rect, basePx, family = 'serif') {
+  // Use the existing measureTextWidth function for consistency
+  const svg = d3.select('svg').node() ? d3.select('svg') : d3.select('body').append('svg');
+  const textW = measureTextWidth(svg, text, { fontSize: basePx, family, weight: 700 });
+  const textH = basePx * 1.2;
+  
+  const scale = Math.min(1, 0.9 * rect.w / textW, 0.8 * rect.h / textH);
+  return { 
+    fontSize: Math.floor(basePx * scale), 
+    fits: scale >= 0.6,
+    originalWidth: textW,
+    originalHeight: textH,
+    scale: scale
+  };
+}
+
+// Optional debug draw (expects a <g id="debug"> layer)
+export function drawDebugOceanRect(pxRect) {
+  const svg = d3.select('svg');
+  const W = +svg.attr('width'), H = +svg.attr('height');
+  const pad = 0; // or 4-8 if you want inset
+
+  if (!pxRect) {
+    // Clear existing debug rectangles
+    const g = window.debugOverlays?.overlayScreen || svg;
+    g.selectAll('rect.ocean-debug').remove();
+    return;
+  }
+
+  // Clamp to visible viewport
+  const x1 = Math.max(pad, pxRect.x);
+  const y1 = Math.max(pad, pxRect.y);
+  const x2 = Math.min(W - pad, pxRect.x + pxRect.w);
+  const y2 = Math.min(H - pad, pxRect.y + pxRect.h);
+
+  const clamped = { 
+    x: x1, 
+    y: y1, 
+    width: Math.max(0, x2 - x1), 
+    height: Math.max(0, y2 - y1) 
+  };
+
+  const g = window.debugOverlays?.overlayScreen || svg;
+  g.selectAll('rect.ocean-debug').remove();
+  g.append('rect')
+    .attr('class', 'ocean-debug')
+    .attr('x', clamped.x)
+    .attr('y', clamped.y)
+    .attr('width', clamped.width)
+    .attr('height', clamped.height)
+    .attr('fill', 'none')
+    .attr('stroke', 'red')
+    .attr('stroke-dasharray', '6,6')
+    .attr('stroke-width', 2);
+
+  console.log(`[ocean] Debug rect clamped to viewport: ${clamped.width}x${clamped.height} at (${clamped.x},${clamped.y})`);
+}
+
+// Place ocean label with font scaling to fit the rectangle
+export function placeOceanLabelAt(cx, cy, maxWidth, oceanLabel, svg, opts = {}) {
+  const {
+    baseFS = 28,      // desired ocean font size
+    minFS  = 16,      // don't go smaller than this
+    pad    = 10       // inner padding inside the rect
+  } = opts;
+
+  // Create a temp text node to measure width
+  const t = svg.append('text')
+    .attr('x', -99999).attr('y', -99999) // Off-screen for measurement
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'middle')
+    .attr('font-size', baseFS)
+    .attr('font-weight', 700)
+    .text(oceanLabel.text);
+
+  // Shrink font until text fits
+  let fs = baseFS;
+  while (fs > minFS) {
+    t.attr('font-size', fs);
+    const textW = t.node().getComputedTextLength();
+    if (textW <= maxWidth * 0.9) break; // 90% of available width
+    fs -= 2; // Reduce by 2px each iteration
+  }
+
+  // Remove temp node
+  t.remove();
+
+  // Place the actual label in screen coordinates (outside the zoomed world group)
+  // This ensures the label appears at the correct screen position regardless of zoom
+  let screenLabelsGroup = svg.select('#screen-labels');
+  if (screenLabelsGroup.empty()) {
+    // Create screen-labels group if it doesn't exist (outside the viewport/world zoom)
+    screenLabelsGroup = svg.append('g').attr('id', 'screen-labels');
+    // Ensure it's above other elements but below HUD
+    screenLabelsGroup.raise();
+  }
+  
+  const label = screenLabelsGroup.append('text')
+    .attr('x', cx)
+    .attr('y', cy)
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'middle')
+    .attr('font-size', fs)
+    .attr('font-weight', 700)
+    .attr('fill', '#1a4a8a')
+    .attr('opacity', 0.8)
+    .text(oceanLabel.text);
+
+  console.log(`[ocean] Placed label "${oceanLabel.text}" at screen coords (${cx.toFixed(1)}, ${cy.toFixed(1)}) with font size ${fs}px`);
+  
+  return label;
+}
+
+// Clear debug overlays (call this on zoom/pan)
+export function clearDebugOverlays() {
+  const g = window.debugOverlays?.overlayScreen;
+  if (g) {
+    g.selectAll('rect.ocean-debug').remove();
+  }
+}
+
+// Clear screen labels (call this on zoom/pan to reposition labels)
+export function clearScreenLabels() {
+  const svg = d3.select('svg');
+  const screenLabels = svg.select('#screen-labels');
+  if (!screenLabels.empty()) {
+    screenLabels.selectAll('*').remove();
+  }
+}
+
+// Remove any previously placed ocean labels
+export function clearExistingOceanLabels(rootSel = d3.select('#labels')) {
+  try { rootSel.selectAll('text.label.ocean').remove(); } catch (e) {}
+}
+
+// Place a single ocean label centered in the chosen rectangle (styled like the default)
+export function placeOceanLabelCentered(rootSel, name, pxRect) {
+  const layer = rootSel || d3.select('#labels');
+  const x = pxRect.x + pxRect.w / 2;
+  const y = pxRect.y + pxRect.h / 2;
+
+  // Font sizing: fit both height and width
+  let font = Math.floor(pxRect.h * 0.65);
+  font = Math.max(14, Math.min(font, 64));
+  const estPerChar = 0.60 * font; // rough average glyph width
+  const maxTextWidth = pxRect.w * 0.92;
+  const estWidth = estPerChar * name.length;
+  if (estWidth > maxTextWidth) font = Math.max(12, Math.floor(font * (maxTextWidth / estWidth)));
+
+  const t = layer.append('text')
+    .attr('class', 'label ocean')
+    .attr('x', x)
+    .attr('y', y)
+    .attr('dy', '0.35em')
+    .style('text-anchor', 'middle')
+    .style('font-weight', '700')
+    .style('font-size', `${font}px`)
+    .style('paint-order', 'stroke fill')
+    .style('stroke', 'rgba(0,0,0,0.5)')
+    .style('stroke-width', 3)
+    .style('fill', '#fff')
+    .text(name);
+
+  return t;
+}
+
+// Screen-space debug rectangle drawing (no zoom transform)
+
+// ===============================
+// BBox-based empty-rectangle mode
+// ===============================
+
+// Build land-component bounding boxes (in GRID cells) from SAT env
+function landBBoxesFromSAT(env, padCells = 1) {
+  const { mask, rows, cols } = env; // mask[r][c] === true => water
+  const seen = Array.from({length: rows}, () => Array(cols).fill(false));
+  const boxes = [];
+
+  const inb = (r,c) => r>=0 && r<rows && c>=0 && c<cols;
+  const q = [];
+  for (let r=0; r<rows; r++) {
+    for (let c=0; c<cols; c++) {
+      if (seen[r][c] || mask[r][c]) continue; // skip water; we want LAND comps
+      let minR=r, maxR=r, minC=c, maxC=c;
+      seen[r][c] = true; q.length = 0; q.push([r,c]);
+      while (q.length) {
+        const [rr,cc] = q.pop();
+        if (rr<minR) minR=rr; if (rr>maxR) maxR=rr; if (cc<minC) minC=cc; if (cc>maxC) maxC=cc;
+        const nb = [[rr-1,cc],[rr+1,cc],[rr,cc-1],[rr,cc+1]];
+        for (const [nr,nc] of nb) {
+          if (!inb(nr,nc) || seen[nr,nc] || mask[nr,nc]) continue; // mask==true is water
+          seen[nr,nc] = true; q.push([nr,nc]);
+        }
+      }
+      // pad and clamp
+      minR = Math.max(0, minR - padCells);
+      maxR = Math.min(rows-1, maxR + padCells);
+      minC = Math.max(0, minC - padCells);
+      maxC = Math.min(cols-1, maxC + padCells);
+      boxes.push({ top:minR, bottom:maxR, left:minC, right:maxC });
+    }
+  }
+  return boxes;
+}
+
+function gridBoxToPixels(box, origin, step) {
+  const [minX, minY] = origin;
+  return {
+    x: minX + box.left * step,
+    y: minY + box.top * step,
+    w: (box.right - box.left + 1) * step,
+    h: (box.bottom - box.top + 1) * step
+  };
+}
+
+// 1D interval subtraction utility
+function subtractIntervals(baseStart, baseEnd, blocks) {
+  // blocks: array of [s,e] to remove; assume s<e, may overlap
+  const out = [];
+  let segs = [[baseStart, baseEnd]];
+  blocks.sort((a,b)=>a[0]-b[0]);
+  for (const [bs,be] of blocks) {
+    const next=[];
+    for (const [s,e] of segs) {
+      if (be<=s || bs>=e) { next.push([s,e]); continue; }
+      if (bs>s) next.push([s, bs]);
+      if (be<e) next.push([be, e]);
+    }
+    segs = next;
+  }
+  for (const seg of segs) if (seg[1]-seg[0]>0) out.push(seg);
+  return out;
+}
+
+// Given obstacle boxes (pixels), find the largest horizontal rect in the viewport
+function largestEmptyHorizontalRectAmongBoxes(visibleBounds, obstacles, minAspect=2.0) {
+  const [vx, vy, vw, vh] = visibleBounds; const Vx2=vx+vw, Vy2=vy+vh;
+  const xs = new Set([vx, Vx2]);
+  const ys = new Set([vy, Vy2]);
+  for (const b of obstacles) {
+    xs.add(Math.max(vx, Math.min(Vx2, b.x)));
+    xs.add(Math.max(vx, Math.min(Vx2, b.x + b.w)));
+    ys.add(Math.max(vy, Math.min(Vy2, b.y)));
+    ys.add(Math.max(vy, Math.min(Vy2, b.y + b.h)));
+  }
+  const X = Array.from(xs).sort((a,b)=>a-b);
+  const Y = Array.from(ys).sort((a,b)=>a-b);
+
+  let best=null, bestScore=-Infinity;
+  for (let i=0;i<X.length;i++) for (let j=i+1;j<X.length;j++) {
+    const x1=X[i], x2=X[j]; const w=x2-x1; if (w<=0) continue;
+    // obstacles overlapping horizontally with [x1,x2]
+    const blocks=[];
+    for (const ob of obstacles) {
+      const o1=ob.x, o2=ob.x+ob.w; if (o2<=x1 || o1>=x2) continue;
+      blocks.push([ob.y, ob.y+ob.h]);
+    }
+    const frees = subtractIntervals(vy, Vy2, blocks);
+    for (const [y1,y2] of frees) {
+      const h=y2-y1; if (h<=0) continue;
+      if (w < h*minAspect) continue; // enforce horizontal
+      const cand = {x:x1,y:y1,w,h};
+      const sc = scoreOceanRect(cand, visibleBounds);
+      if (sc>bestScore) {bestScore=sc; best=cand;}
+    }
+  }
+  return best;
+}
+
+export function findOceanRectByBBoxes(
+  visibleBounds,
+  getCellAtXY,
+  seaLevel = 0.2,
+  step = 8,
+  landPadPx = 12,
+  minAspect = 2.0
+) {
+  function localPointIsOcean(x, y) {
+    const cell = getCellAtXY?.(x, y);
+    if (!cell) return true;
+    let h = cell.height ?? cell.data?.height ?? cell.polygon?.height ?? null;
+    if (h == null) return true;
+    return h <= seaLevel;
+  }
+  const satEnv = buildWaterMaskSAT(visibleBounds, step, localPointIsOcean);
+  const landBoxesGrid = landBBoxesFromSAT(satEnv, Math.max(1, Math.round(landPadPx/step)));
+  const obstacles = landBoxesGrid.map(b => gridBoxToPixels(b, satEnv.origin, satEnv.step));
+  const best = largestEmptyHorizontalRectAmongBoxes(visibleBounds, obstacles, minAspect);
+  if (best) return best;
+  return null;
+}
+
+export function findOceanLabelRectHybrid(
+  visibleBounds,
+  getCellAtXY,
+  seaLevel = 0.2,
+  step = 8,
+  pad = 1,
+  minAspect = 2.0,
+  landPadPx = 12
+) {
+  // Try SAT-grid method
+  const satRect = findOceanLabelRectAfterAutofit(visibleBounds, getCellAtXY, seaLevel, step, pad, minAspect);
+  // Try bbox obstacle method
+  const bbRect = findOceanRectByBBoxes(visibleBounds, getCellAtXY, seaLevel, step, landPadPx, minAspect);
+  if (satRect && !bbRect) return satRect;
+  if (bbRect && !satRect) return bbRect;
+  if (!satRect && !bbRect) return null;
+  // Pick by scoring
+  const s1 = scoreOceanRect(satRect, visibleBounds);
+  const s2 = scoreOceanRect(bbRect, visibleBounds);
+  return s2 > s1 ? bbRect : satRect;
+}
+
+// Debug function to check for remaining overlaps after SA placement
+function checkRemainingOverlaps(placed) {
+  let overlapCount = 0;
+  const overlaps = [];
+  
+  for (let i = 0; i < placed.length; i++) {
+    for (let j = i + 1; j < placed.length; j++) {
+      const a = placed[i];
+      const b = placed[j];
+      
+      if (!a.w || !a.h || !b.w || !b.h) continue;
+      
+      const dx = Math.abs(a.placed.x - b.placed.x);
+      const dy = Math.abs(a.placed.y - b.placed.y);
+      
+      if (dx < (a.w + b.w) / 2 && dy < (a.h + b.h) / 2) {
+        overlapCount++;
+        overlaps.push({
+          label1: a.text,
+          label2: b.text,
+          overlap: Math.min((a.w + b.w) / 2 - dx, (a.h + b.h) / 2 - dy)
+        });
+      }
+    }
+  }
+  
+  if (overlapCount > 0) {
+    console.log(`[labels] DEBUG: ${overlapCount} remaining overlaps after SA placement`);
+    if (window.DEBUG_OVERLAPS) {
+      console.log('[labels] DEBUG: Overlap details:', overlaps.slice(0, 5));
+    }
+  } else {
+    console.log('[labels] DEBUG: No remaining overlaps after SA placement');
+  }
+}
+
+// Debug toggle for SA labeler
+export function toggleSALabeler() {
+  // This would require a page reload to take effect
+  console.log('[labels] To toggle SA labeler, edit src/modules/labels.js and change USE_SA_LABELER, then reload the page');
+  return USE_SA_LABELER;
+}
+
+// Debug function to get SA labeler status
+export function getSALabelerStatus() {
+  return {
+    enabled: USE_SA_LABELER,
+    description: USE_SA_LABELER ? 'SA labeler is active' : 'Original system is active'
+  };
 }

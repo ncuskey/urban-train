@@ -41,7 +41,7 @@
     <script src="https://d3js.org/d3.v5.min.js"></script>
     <script type="module">
         // Import the functions we need to test
-        import { findOceanLabelRect, placeOceanLabelInRect } from '../src/modules/labels.js';
+        import { findOceanLabelRect, placeOceanLabelAt, clearScreenLabels, clearExistingOceanLabels, placeOceanLabelCentered } from '../src/modules/labels.js';
         
         // Mock the functions that would normally come from main.js
         function buildXYAccessor(cells) {
@@ -220,7 +220,7 @@
                     results.push(`<div class="info">📊 Rectangle bounds: (${rect.x0.toFixed(0)}, ${rect.y0.toFixed(0)}) to (${rect.x1.toFixed(0)}, ${rect.y1.toFixed(0)})</div>`);
                     results.push(`<div class="info">📊 Rectangle size: ${rect.w.toFixed(0)}x${rect.h.toFixed(0)}</div>`);
                     
-                    // Test the new placeOceanLabelInRect function
+                    // Test the new placeOceanLabelAt function with screen coordinates
                     const oceanLabel = {
                         text: "Mare Thalassa",
                         x: 0,
@@ -228,23 +228,21 @@
                         fontSize: 28
                     };
                     
-                    placeOceanLabelInRect(oceanLabel, rect, svg);
+                    // Calculate center of the rectangle for proper centering
+                    const cx = rect.x0 + rect.w / 2;
+                    const cy = rect.y0 + rect.h / 2;
                     
-                    results.push(`<div class="success">✅ Placed ocean label: "${oceanLabel.text}" at (${oceanLabel.x.toFixed(1)}, ${oceanLabel.y.toFixed(1)}) with fontSize: ${oceanLabel.fontSize}</div>`);
+                    // Clear any existing ocean labels to prevent duplicates
+                    clearExistingOceanLabels();
                     
-                    // Visualize the label
-                    svg.select('#labels-features').append('text')
-                        .attr('x', oceanLabel.x)
-                        .attr('y', oceanLabel.y)
-                        .attr('text-anchor', 'middle')
-                        .attr('dominant-baseline', 'middle')
-                        .attr('font-size', oceanLabel.fontSize)
-                        .attr('font-weight', 700)
-                        .style('paint-order', 'stroke')
-                        .style('stroke', '#000')
-                        .style('stroke-width', 3)
-                        .style('fill', '#fff')
-                        .text(oceanLabel.text);
+                    // Place the ocean label at the center of the rectangle using the new centered placement
+                    placeOceanLabelCentered(svg.select('#labels'), oceanLabel.text, { x: rect.x0, y: rect.y0, w: rect.w, h: rect.h });
+                    
+                    results.push(`<div class="success">✅ Placed ocean label: "${oceanLabel.text}" at center (${cx.toFixed(1)}, ${cy.toFixed(1)}) using placeOceanLabelCentered</div>`);
+                    results.push(`<div class="info">📍 Rectangle center: (${cx.toFixed(1)}, ${cy.toFixed(1)}) - Label should be perfectly centered with proper styling</div>`);
+                    
+                    // Note: The label is now placed in #labels group with proper ocean label styling
+                    // This ensures it appears at the correct position and matches the app's visual style
                     
                     // Visualize the rectangle
                     svg.select('#map').append('rect')
@@ -256,6 +254,31 @@
                         .attr('stroke', '#ff0000')
                         .attr('stroke-width', 2)
                         .attr('stroke-dasharray', '5,5');
+                    
+                    // Visualize the center point where the label should be
+                    svg.select('#map').append('circle')
+                        .attr('cx', cx)
+                        .attr('cy', cy)
+                        .attr('r', 3)
+                        .attr('fill', '#00ff00')
+                        .attr('stroke', '#000')
+                        .attr('stroke-width', 1);
+                    
+                    // Add a crosshair at the center for precise centering verification
+                    svg.select('#map').append('line')
+                        .attr('x1', cx - 10)
+                        .attr('y1', cy)
+                        .attr('x2', cx + 10)
+                        .attr('y2', cy)
+                        .attr('stroke', '#00ff00')
+                        .attr('stroke-width', 1);
+                    svg.select('#map').append('line')
+                        .attr('x1', cx)
+                        .attr('y1', cy - 10)
+                        .attr('x2', cx)
+                        .attr('y2', cy + 10)
+                        .attr('stroke', '#00ff00')
+                        .attr('stroke-width', 1);
                         
                 } else {
                     results.push(`<div class="error">❌ No ocean rectangle found</div>`);

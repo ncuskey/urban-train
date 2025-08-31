@@ -1,5 +1,47 @@
 // src/modules/autofit.js
-// d3 is global; do not import it here.
+// d3 is global
+
+/**
+ * Utility function to ensure layout is complete before measuring.
+ * Uses double requestAnimationFrame for belt-and-suspenders approach.
+ */
+export function afterLayout(callback) {
+  requestAnimationFrame(() => requestAnimationFrame(callback));
+}
+
+/**
+ * Clamp a rectangle to visible bounds as a final safety guard.
+ * Ensures the rectangle is always within the visible viewport.
+ * Works with rectangle objects that have x0, y0, x1, y1, w, h properties.
+ */
+export function clampRectToBounds(rect, bounds) {
+  // Handle both x0,y0,x1,y1 format and x,y,w,h format
+  const rectX = rect.x0 !== undefined ? rect.x0 : rect.x;
+  const rectY = rect.y0 !== undefined ? rect.y0 : rect.y;
+  const rectW = rect.w || (rect.x1 - rect.x0);
+  const rectH = rect.h || (rect.y1 - rect.y0);
+  
+  const x = Math.max(bounds.x0, Math.min(rectX, bounds.x1));
+  const y = Math.max(bounds.y0, Math.min(rectY, bounds.y1));
+  const w = Math.max(0, Math.min(rectX + rectW, bounds.x1) - x);
+  const h = Math.max(0, Math.min(rectY + rectH, bounds.y1) - y);
+  
+  // Return in the same format as the input
+  if (rect.x0 !== undefined) {
+    // Return x0, y0, x1, y1 format
+    return { 
+      x0: x, y0: y, x1: x + w, y1: y + h,
+      w, h,
+      corner: rect.corner,
+      touchesCoast: rect.touchesCoast,
+      area: w * h,
+      labelScore: rect.labelScore
+    };
+  } else {
+    // Return x, y, w, h format
+    return { x, y, w, h };
+  }
+}
 
 /**
  * Compute an axis-aligned bounding box of "land" polygons.

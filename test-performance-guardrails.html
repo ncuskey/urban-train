@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Performance Guardrails Test - SA Labeler</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+    .status { font-weight: bold; }
+    .status.success { color: green; }
+    .status.error { color: red; }
+    .status.warning { color: orange; }
+    .results-display { background: #f9f9f9; padding: 10px; margin: 10px 0; font-family: monospace; font-size: 12px; }
+    .controls { margin: 10px 0; }
+    .debug-panel { background: #f0f0f0; padding: 10px; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h1>Performance Guardrails Test - SA Labeler</h1>
+  
+  <div class="test-section">
+    <h3>SA Labeler Status & Controls</h3>
+    <div class="debug-panel">
+      <div id="sa-status" class="status"></div>
+      <button onclick="toggleSA()">Toggle SA Labeler</button>
+      <button onclick="refreshStatus()">Refresh Status</button>
+    </div>
+  </div>
+  
+  <div class="test-section">
+    <h3>Test Performance Guardrails</h3>
+    <div class="controls">
+      <button onclick="testSmallClusters()">Test Small Clusters (1-2 labels)</button>
+      <button onclick="testMediumClusters()">Test Medium Clusters (3-10 labels)</button>
+      <button onclick="testLargeClusters()">Test Large Clusters (20+ labels)</button>
+      <button onclick="testOceanPolishing()">Test Ocean Polishing</button>
+    </div>
+    <div id="performance-result" class="results-display"></div>
+  </div>
+  
+  <div class="test-section">
+    <h3>Debug Controls</h3>
+    <div class="controls">
+      <label>
+        <input type="checkbox" id="debug-toggle" onchange="toggleDebug()"> Enable Debug Mode
+      </label>
+      <br>
+      <label>
+        <input type="checkbox" id="debug-overlaps" onchange="toggleDebugOverlaps()"> Show Overlap Details
+      </label>
+    </div>
+  </div>
+  
+  <div class="test-section">
+    <h3>Console Output</h3>
+    <div id="console-output" style="background: #f5f5f5; padding: 10px; height: 200px; overflow-y: scroll; font-family: monospace; font-size: 12px;"></div>
+  </div>
+
+  <script src="https://d3js.org/d3.v5.min.js"></script>
+  <script src="vendor/d3-labeler/labeler.js"></script>
+  
+  <script type="module">
+    import { placeLabelsAvoidingCollisions, getSALabelerStatus, toggleSALabeler } from './src/modules/labels.js';
+    
+    // Capture console.log for display
+    const originalLog = console.log;
+    const outputDiv = document.getElementById('console-output');
+    
+    console.log = function(...args) {
+      originalLog.apply(console, args);
+      const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' ');
+      outputDiv.innerHTML += message + '<br>';
+      outputDiv.scrollTop = outputDiv.scrollHeight;
+    };
+    
+    // Update SA status display
+    function updateSAStatus() {
+      const status = getSALabelerStatus();
+      const statusDiv = document.getElementById('sa-status');
+      statusDiv.textContent = status.description;
+      statusDiv.className = `status ${status.enabled ? 'success' : 'warning'}`;
+    }
+    
+    // Toggle SA labeler
+    window.toggleSA = function() {
+      toggleSALabeler();
+      updateSAStatus();
+    };
+    
+    // Refresh status
+    window.refreshStatus = function() {
+      updateSAStatus();
+    };
+    
+    // Toggle debug mode
+    window.toggleDebug = function() {
+      window.DEBUG = document.getElementById('debug-toggle').checked;
+      console.log('Debug mode:', window.DEBUG ? 'enabled' : 'disabled');
+    };
+    
+    // Toggle debug overlaps
+    window.toggleDebugOverlaps = function() {
+      window.DEBUG_OVERLAPS = document.getElementById('debug-overlaps').checked;
+      console.log('Debug overlaps:', window.DEBUG_OVERLAPS ? 'enabled' : 'disabled');
+    };
+    
+    // Test small clusters (should skip annealing)
+    window.testSmallClusters = function() {
+      console.log('=== Testing Small Clusters (should skip annealing) ===');
+      
+      const mockSvg = d3.select('body').append('svg').attr('width', 1).attr('height', 1);
+      
+      // Sample labels with small clusters
+      const sampleLabels = [
+        // Single label cluster
+        { id: 'lake-1', kind: 'lake', text: 'Lonely Lake', x: 100, y: 100, area: 800, priority: 80 },
+        
+        // Two label cluster
+        { id: 'lake-2', kind: 'lake', text: 'Twin Lake A', x: 200, y: 200, area: 600, priority: 80 },
+        { id: 'lake-3', kind: 'lake', text: 'Twin Lake B', x: 220, y: 220, area: 500, priority: 80 },
+        
+        // Isolated labels
+        { id: 'island-1', kind: 'island', text: 'Remote Island', x: 400, y: 400, area: 300, priority: 60 }
+      ];
+      
+      try {
+        console.log('Input labels:', sampleLabels.length, 'labels');
+        
+        const startTime = performance.now();
+        const placed = placeLabelsAvoidingCollisions({ svg: mockSvg, labels: sampleLabels });
+        const endTime = performance.now();
+        
+        console.log('Processing time:', (endTime - startTime).toFixed(2), 'ms');
+        console.log('Placed labels:', placed.length, 'labels');
+        
+        // Display results
+        const resultDiv = document.getElementById('performance-result');
+        resultDiv.innerHTML = '<h4>Small Clusters Test:</h4>' + 
+          '<p>Input: ' + sampleLabels.length + ' labels</p>' +
+          '<p>Output: ' + placed.length + ' labels</p>' +
+          '<p>Processing time: ' + (endTime - startTime).toFixed(2) + ' ms</p>' +
+          '<p>Expected: Small clusters should skip annealing</p>';
+        
+        mockSvg.remove();
+        
+      } catch (error) {
+        console.log('Error testing small clusters:', error.message);
+        mockSvg.remove();
+      }
+    };
+    
+    // Test medium clusters
+    window.testMediumClusters = function() {
+      console.log('=== Testing Medium Clusters ===');
+      
+      const mockSvg = d3.select('body').append('svg').attr('width', 1).attr('height', 1);
+      
+      // Sample labels with medium clusters
+      const sampleLabels = [
+        // Medium cluster (5 labels)
+        { id: 'lake-1', kind: 'lake', text: 'Lake A', x: 100, y: 100, area: 800, priority: 80 },
+        { id: 'lake-2', kind: 'lake', text: 'Lake B', x: 120, y: 120, area: 600, priority: 80 },
+        { id: 'lake-3', kind: 'lake', text: 'Lake C', x: 140, y: 140, area: 500, priority: 80 },
+        { id: 'island-1', kind: 'island', text: 'Island A', x: 160, y: 160, area: 400, priority: 60 },
+        { id: 'island-2', kind: 'island', text: 'Island B', x: 180, y: 180, area: 300, priority: 60 },
+        
+        // Another medium cluster (4 labels)
+        { id: 'lake-4', kind: 'lake', text: 'Lake D', x: 300, y: 300, area: 700, priority: 80 },
+        { id: 'lake-5', kind: 'lake', text: 'Lake E', x: 320, y: 320, area: 550, priority: 80 },
+        { id: 'island-3', kind: 'island', text: 'Island C', x: 340, y: 340, area: 350, priority: 60 },
+        { id: 'island-4', kind: 'island', text: 'Island D', x: 360, y: 360, area: 250, priority: 60 }
+      ];
+      
+      try {
+        console.log('Input labels:', sampleLabels.length, 'labels');
+        
+        const startTime = performance.now();
+        const placed = placeLabelsAvoidingCollisions({ svg: mockSvg, labels: sampleLabels });
+        const endTime = performance.now();
+        
+        console.log('Processing time:', (endTime - startTime).toFixed(2), 'ms');
+        console.log('Placed labels:', placed.length, 'labels');
+        
+        // Display results
+        const resultDiv = document.getElementById('performance-result');
+        resultDiv.innerHTML = '<h4>Medium Clusters Test:</h4>' + 
+          '<p>Input: ' + sampleLabels.length + ' labels</p>' +
+          '<p>Output: ' + placed.length + ' labels</p>' +
+          '<p>Processing time: ' + (endTime - startTime).toFixed(2) + ' ms</p>' +
+          '<p>Expected: Medium clusters should use moderate sweeps</p>';
+        
+        mockSvg.remove();
+        
+      } catch (error) {
+        console.log('Error testing medium clusters:', error.message);
+        mockSvg.remove();
+      }
+    };
+    
+    // Test large clusters
+    window.testLargeClusters = function() {
+      console.log('=== Testing Large Clusters ===');
+      
+      const mockSvg = d3.select('body').append('svg').attr('width', 1).attr('height', 1);
+      
+      // Sample labels with large clusters
+      const sampleLabels = [];
+      
+      // Large cluster (25 labels)
+      for (let i = 0; i < 25; i++) {
+        sampleLabels.push({
+          id: `lake-${i}`,
+          kind: 'lake',
+          text: `Lake ${i}`,
+          x: 100 + (i % 5) * 20,
+          y: 100 + Math.floor(i / 5) * 20,
+          area: 500 + i * 10,
+          priority: 80
+        });
+      }
+      
+      // Another large cluster (30 labels)
+      for (let i = 0; i < 30; i++) {
+        sampleLabels.push({
+          id: `island-${i}`,
+          kind: 'island',
+          text: `Island ${i}`,
+          x: 300 + (i % 6) * 15,
+          y: 300 + Math.floor(i / 6) * 15,
+          area: 200 + i * 5,
+          priority: 60
+        });
+      }
+      
+      try {
+        console.log('Input labels:', sampleLabels.length, 'labels');
+        
+        const startTime = performance.now();
+        const placed = placeLabelsAvoidingCollisions({ svg: mockSvg, labels: sampleLabels });
+        const endTime = performance.now();
+        
+        console.log('Processing time:', (endTime - startTime).toFixed(2), 'ms');
+        console.log('Placed labels:', placed.length, 'labels');
+        
+        // Display results
+        const resultDiv = document.getElementById('performance-result');
+        resultDiv.innerHTML = '<h4>Large Clusters Test:</h4>' + 
+          '<p>Input: ' + sampleLabels.length + ' labels</p>' +
+          '<p>Output: ' + placed.length + ' labels</p>' +
+          '<p>Processing time: ' + (endTime - startTime).toFixed(2) + ' ms</p>' +
+          '<p>Expected: Large clusters should use reduced sweeps</p>';
+        
+        mockSvg.remove();
+        
+      } catch (error) {
+        console.log('Error testing large clusters:', error.message);
+        mockSvg.remove();
+      }
+    };
+    
+    // Test ocean polishing
+    window.testOceanPolishing = function() {
+      console.log('=== Testing Ocean Polishing ===');
+      
+      const mockSvg = d3.select('body').append('svg').attr('width', 1).attr('height', 1);
+      
+      // Sample labels with ocean polishing
+      const sampleLabels = [
+        // Ocean with keepWithinRect
+        { 
+          id: 'ocean-1', 
+          kind: 'ocean', 
+          text: 'Pacific Ocean', 
+          x: 200, y: 150, 
+          area: 5000, 
+          priority: 100,
+          keepWithinRect: { x0: 100, y0: 100, x1: 400, y1: 300 }
+        },
+        
+        // Neighbors inside the ocean rect
+        { id: 'lake-1', kind: 'lake', text: 'Island Lake', x: 150, y: 120, area: 800, priority: 80 },
+        { id: 'lake-2', kind: 'lake', text: 'Coastal Bay', x: 180, y: 180, area: 600, priority: 80 },
+        { id: 'island-1', kind: 'island', text: 'Ocean Isle', x: 220, y: 200, area: 500, priority: 60 },
+        
+        // Labels outside the rect
+        { id: 'lake-3', kind: 'lake', text: 'Mountain Lake', x: 500, y: 500, area: 400, priority: 80 }
+      ];
+      
+      try {
+        console.log('Input labels:', sampleLabels.length, 'labels');
+        
+        const startTime = performance.now();
+        const placed = placeLabelsAvoidingCollisions({ svg: mockSvg, labels: sampleLabels });
+        const endTime = performance.now();
+        
+        console.log('Processing time:', (endTime - startTime).toFixed(2), 'ms');
+        console.log('Placed labels:', placed.length, 'labels');
+        
+        // Display results
+        const resultDiv = document.getElementById('performance-result');
+        resultDiv.innerHTML = '<h4>Ocean Polishing Test:</h4>' + 
+          '<p>Input: ' + sampleLabels.length + ' labels</p>' +
+          '<p>Output: ' + placed.length + ' labels</p>' +
+          '<p>Processing time: ' + (endTime - startTime).toFixed(2) + ' ms</p>' +
+          '<p>Expected: Ocean polishing should use smaller sweeps</p>';
+        
+        mockSvg.remove();
+        
+      } catch (error) {
+        console.log('Error testing ocean polishing:', error.message);
+        mockSvg.remove();
+      }
+    };
+    
+    // Initialize
+    updateSAStatus();
+    console.log('Performance guardrails test initialized');
+  </script>
+</body>
+</html>

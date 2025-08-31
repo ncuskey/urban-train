@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SA Integration Test - Label Placement</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+    .status { font-weight: bold; }
+    .status.success { color: green; }
+    .status.error { color: red; }
+    .results-display { background: #f9f9f9; padding: 10px; margin: 10px 0; font-family: monospace; font-size: 12px; }
+    .visualization { border: 1px solid #ccc; margin: 10px 0; }
+    .controls { margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h1>SA Integration Test - Label Placement</h1>
+  
+  <div class="test-section">
+    <h3>Test SA Labeler Integration</h3>
+    <div class="controls">
+      <label>
+        <input type="checkbox" id="use-sa" checked> Use SA Labeler
+      </label>
+      <button onclick="testIntegration()">Test Integration</button>
+      <button onclick="toggleFeatureFlag()">Toggle Feature Flag</button>
+    </div>
+    <div id="integration-result" class="results-display"></div>
+  </div>
+  
+  <div class="test-section">
+    <h3>Visualization</h3>
+    <div id="visualization" class="visualization">
+      <svg width="800" height="600" id="test-svg"></svg>
+    </div>
+  </div>
+  
+  <div class="test-section">
+    <h3>Console Output</h3>
+    <div id="console-output" style="background: #f5f5f5; padding: 10px; height: 200px; overflow-y: scroll; font-family: monospace; font-size: 12px;"></div>
+  </div>
+
+  <script src="https://d3js.org/d3.v5.min.js"></script>
+  <script src="vendor/d3-labeler/labeler.js"></script>
+  
+  <script type="module">
+    import { placeLabelsAvoidingCollisions, computeLabelMetrics } from './src/modules/labels.js';
+    
+    // Capture console.log for display
+    const originalLog = console.log;
+    const outputDiv = document.getElementById('console-output');
+    
+    console.log = function(...args) {
+      originalLog.apply(console, args);
+      const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' ');
+      outputDiv.innerHTML += message + '<br>';
+      outputDiv.scrollTop = outputDiv.scrollHeight;
+    };
+    
+    // Test the integration
+    window.testIntegration = function() {
+      console.log('=== Testing SA Labeler Integration ===');
+      
+      const mockSvg = d3.select('#test-svg');
+      mockSvg.selectAll('*').remove(); // Clear previous visualization
+      
+      // Sample labels with different kinds and clusters
+      const sampleLabels = [
+        // Cluster 1 - Lakes
+        { id: 'lake-1', kind: 'lake', text: 'Crystal Lake', x: 100, y: 100, area: 800, priority: 80 },
+        { id: 'lake-2', kind: 'lake', text: 'Mountain Tarn', x: 150, y: 120, area: 600, priority: 80 },
+        { id: 'lake-3', kind: 'lake', text: 'Forest Pond', x: 120, y: 150, area: 400, priority: 80 },
+        
+        // Cluster 2 - Islands
+        { id: 'island-1', kind: 'island', text: 'Tropical Isle', x: 300, y: 200, area: 600, priority: 60 },
+        { id: 'island-2', kind: 'island', text: 'Rocky Outcrop', x: 350, y: 220, area: 300, priority: 60 },
+        
+        // Cluster 3 - Mixed
+        { id: 'lake-4', kind: 'lake', text: 'Deep Lake', x: 500, y: 300, area: 1000, priority: 80 },
+        { id: 'island-3', kind: 'island', text: 'Hidden Isle', x: 520, y: 320, area: 500, priority: 60 },
+        
+        // Oceans (should be skipped by SA)
+        { id: 'ocean-1', kind: 'ocean', text: 'Pacific Ocean', x: 200, y: 50, area: 5000, priority: 100 },
+        { id: 'ocean-2', kind: 'ocean', text: 'Atlantic Ocean', x: 600, y: 100, area: 4000, priority: 100 },
+        
+        // Isolated labels
+        { id: 'lake-5', kind: 'lake', text: 'Lonely Lake', x: 50, y: 400, area: 300, priority: 80 },
+        { id: 'island-4', kind: 'island', text: 'Remote Island', x: 700, y: 450, area: 200, priority: 60 }
+      ];
+      
+      try {
+        console.log('Input labels:', sampleLabels.length, 'labels');
+        console.log('Label kinds:', [...new Set(sampleLabels.map(l => l.kind))]);
+        
+        // Test the integration
+        const placed = placeLabelsAvoidingCollisions({ svg: mockSvg, labels: sampleLabels });
+        
+        console.log('Placed labels:', placed.length, 'labels');
+        console.log('Placed labels with SA:', placed.filter(l => l.placed && l.placed.x !== l.x).length, 'moved');
+        
+        // Display results
+        const resultDiv = document.getElementById('integration-result');
+        resultDiv.innerHTML = '<h4>Integration Results:</h4>' + 
+          '<p>Input: ' + sampleLabels.length + ' labels</p>' +
+          '<p>Output: ' + placed.length + ' labels</p>' +
+          '<p>Moved by SA: ' + placed.filter(l => l.placed && l.placed.x !== l.x).length + ' labels</p>' +
+          '<pre>' + JSON.stringify(placed.slice(0, 3), null, 2) + '</pre>';
+        
+        // Visualize the results
+        visualizeIntegration(mockSvg, sampleLabels, placed);
+        
+        // Verify the structure
+        const hasPlaced = placed.every(l => l.placed && l.placed.x !== undefined && l.placed.y !== undefined);
+        if (hasPlaced) {
+          console.log('✅ All labels have placed coordinates');
+        } else {
+          console.log('❌ Some labels missing placed coordinates');
+        }
+        
+        // Check clusters
+        const clusters = findLabelClusters(sampleLabels);
+        console.log('Found', clusters.length, 'clusters:', clusters.map(c => c.length));
+        
+      } catch (error) {
+        console.log('Error testing integration:', error.message);
+      }
+    };
+    
+    // Toggle feature flag
+    window.toggleFeatureFlag = function() {
+      // This would require a page reload to take effect
+      alert('To toggle the feature flag, edit src/modules/labels.js and change USE_SA_LABELER, then reload this page.');
+    };
+    
+    // Simple cluster finder for testing
+    function findLabelClusters(labels) {
+      const clusters = [];
+      const visited = new Set();
+      
+      for (const label of labels) {
+        if (visited.has(label.id)) continue;
+        
+        const cluster = [label];
+        visited.add(label.id);
+        
+        // Find nearby labels (within 200px) to form a cluster
+        for (const other of labels) {
+          if (visited.has(other.id)) continue;
+          
+          const distance = Math.sqrt((label.x - other.x) ** 2 + (label.y - other.y) ** 2);
+          if (distance < 200) {
+            cluster.push(other);
+            visited.add(other.id);
+          }
+        }
+        
+        clusters.push(cluster);
+      }
+      
+      return clusters;
+    }
+    
+    // Visualization helper
+    function visualizeIntegration(svg, originalLabels, placedLabels) {
+      // Add title
+      svg.append('text')
+        .attr('x', 400).attr('y', 20)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', 14)
+        .attr('font-weight', 'bold')
+        .text('SA Labeler Integration Test');
+      
+      // Draw original positions (red dots)
+      svg.selectAll('.original')
+        .data(originalLabels)
+        .enter().append('circle')
+        .attr('class', 'original')
+        .attr('cx', d => d.x)
+        .attr('cy', d => d.y)
+        .attr('r', 3)
+        .attr('fill', 'red')
+        .attr('opacity', 0.7);
+      
+      // Draw placed positions (green dots)
+      svg.selectAll('.placed')
+        .data(placedLabels)
+        .enter().append('circle')
+        .attr('class', 'placed')
+        .attr('cx', d => d.placed.x)
+        .attr('cy', d => d.placed.y)
+        .attr('r', 3)
+        .attr('fill', 'green')
+        .attr('opacity', 0.7);
+      
+      // Draw movement lines
+      svg.selectAll('.movement')
+        .data(placedLabels)
+        .enter().append('line')
+        .attr('class', 'movement')
+        .attr('x1', d => d.x)
+        .attr('y1', d => d.y)
+        .attr('x2', d => d.placed.x)
+        .attr('y2', d => d.placed.y)
+        .attr('stroke', 'blue')
+        .attr('stroke-width', 1)
+        .attr('stroke-dasharray', '3,3')
+        .attr('opacity', 0.5);
+      
+      // Draw label text
+      svg.selectAll('.label-text')
+        .data(placedLabels)
+        .enter().append('text')
+        .attr('class', 'label-text')
+        .attr('x', d => d.placed.x)
+        .attr('y', d => d.placed.y)
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'middle')
+        .attr('font-size', d => d.kind === 'ocean' ? 16 : d.kind === 'lake' ? 12 : 10)
+        .attr('fill', 'black')
+        .text(d => d.text);
+      
+      // Add legend
+      const legend = svg.append('g').attr('transform', 'translate(20, 40)');
+      
+      legend.append('circle').attr('cx', 0).attr('cy', 0).attr('r', 3).attr('fill', 'red');
+      legend.append('text').attr('x', 10).attr('y', 4).text('Original').attr('font-size', 12);
+      
+      legend.append('circle').attr('cx', 0).attr('cy', 20).attr('r', 3).attr('fill', 'green');
+      legend.append('text').attr('x', 10).attr('y', 24).text('Placed').attr('font-size', 12);
+      
+      legend.append('line').attr('x1', 0).attr('y1', 40).attr('x2', 20).attr('y2', 40)
+        .attr('stroke', 'blue').attr('stroke-width', 1).attr('stroke-dasharray', '3,3');
+      legend.append('text').attr('x', 25).attr('y', 44).text('Movement').attr('font-size', 12);
+    }
+    
+    console.log('SA integration test initialized');
+  </script>
+</body>
+</html>

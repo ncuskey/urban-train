@@ -53,7 +53,11 @@ export function ensureLayers(svg) {
   // Always keep labels above map
   labels.raise();
 
-  return { viewport, world, map, labels };
+  // Ensure debug layer exists
+  let debug = world.select('#debug');
+  if (debug.empty()) debug = world.append('g').attr('id', 'debug');
+
+  return { viewport, world, map, labels, debug };
 }
 
 export function ensureLabelSubgroups(svg) {

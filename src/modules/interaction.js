@@ -1,5 +1,5 @@
 // d3 is global; do not import it.
-import { updateLabelZoom, updateLabelVisibility } from './labels.js';
+import { updateLabelZoom, updateLabelVisibility, clearScreenLabels } from './labels.js';
 import { filterByZoom } from './labels.js';
 
 export function getVisibleWorldBounds(svg) {
@@ -86,6 +86,9 @@ export function attachInteraction({
         });
         updateLabelZoom({ svg, groupId: 'labels-features', k: t.k });
       }
+      
+      // Clear screen labels on zoom/pan so they can be repositioned
+      clearScreenLabels();
     });
 
   svg.call(zoom).style('cursor','grab');     // bind zoom to svg

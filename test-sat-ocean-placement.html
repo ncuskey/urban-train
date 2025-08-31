@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SAT Ocean Label Placement Test</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .error { color: red; }
+        .success { color: green; }
+        .info { color: blue; }
+        .warning { color: orange; }
+        
+        #test-svg {
+            border: 1px solid #ccc;
+            background: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <h1>SAT Ocean Label Placement Test</h1>
+    
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>SVG Test Area</h2>
+        <svg id="test-svg" width="600" height="400">
+            <g id="viewport">
+                <g id="world">
+                    <g id="map"></g>
+                    <g id="labels">
+                        <g id="labels-features"></g>
+                    </g>
+                    <g id="debug"></g>
+                </g>
+            </g>
+        </svg>
+    </div>
+
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script type="module">
+        // Import the functions we need to test
+        import { findOceanLabelRectAfterAutofit, drawDebugOceanRect, placeOceanLabelAt } from './src/modules/labels.js';
+        
+        // Mock the functions that would normally come from main.js
+        function buildXYAccessor(cells) {
+            if (!cells || cells.length === 0) {
+                console.warn('[accessor] No cells provided to buildXYAccessor');
+                return null;
+            }
+            
+            // Extract centroids for nearest-neighbor search
+            const points = cells.map((cell, index) => {
+                // Calculate centroid from polygon vertices
+                let cx = 0, cy = 0, count = 0;
+                if (cell && cell.length > 0) {
+                    cell.forEach(vertex => {
+                        if (vertex && vertex.length >= 2) {
+                            cx += vertex[0];
+                            cy += vertex[1];
+                            count++;
+                        }
+                    });
+                }
+                return {
+                    x: count > 0 ? cx / count : 0,
+                    y: count > 0 ? cy / count : 0,
+                    index
+                };
+            });
+            
+            // Return accessor function using simple nearest-neighbor search
+            return (x, y) => {
+                let nearest = null;
+                let minDist = Infinity;
+                
+                for (const point of points) {
+                    const dx = point.x - x;
+                    const dy = point.y - y;
+                    const dist = dx * dx + dy * dy; // squared distance (faster than sqrt)
+                    
+                    if (dist < minDist) {
+                        minDist = dist;
+                        nearest = cells[point.index];
+                    }
+                }
+                
+                return nearest;
+            };
+        }
+        
+        // Create mock polygons for testing
+        function createMockPolygons() {
+            const polygons = [];
+            const mapWidth = 600;
+            const mapHeight = 400;
+            
+            // Create ocean polygons (touch boundary)
+            for (let i = 0; i < 4; i++) {
+                const x = i * 150;
+                const y = i % 2 === 0 ? 0 : mapHeight - 100;
+                
+                const poly = [
+                    [x, y],
+                    [x + 150, y],
+                    [x + 150, y + 100],
+                    [x, y + 100]
+                ];
+                // Add properties to the polygon array
+                poly.height = 0.1; // Water
+                poly.featureType = "Ocean";
+                poly.neighbors = [];
+                polygons.push(poly);
+            }
+            
+            // Create some land polygons (islands) in the middle
+            for (let i = 0; i < 3; i++) {
+                const x = 200 + (i * 100);
+                const y = 150 + (i * 50);
+                
+                const poly = [
+                    [x, y],
+                    [x + 80, y],
+                    [x + 80, y + 80],
+                    [x, y + 80]
+                ];
+                // Add properties to the polygon array
+                poly.height = 0.8; // Land
+                poly.featureType = "Island";
+                poly.neighbors = [];
+                polygons.push(poly);
+            }
+            
+            return polygons;
+        }
+        
+        // Run tests
+        function runTests() {
+            const results = [];
+            
+            try {
+                const svg = d3.select('#test-svg');
+                const polygons = createMockPolygons();
+                
+                // Store polygons globally for the accessor
+                window.currentPolygons = polygons;
+                
+                // Build the XY accessor
+                const getCellAtXY = buildXYAccessor(polygons);
+                if (!getCellAtXY) {
+                    results.push(`<div class="error">❌ Failed to build XY accessor</div>`);
+                    return results;
+                }
+                
+                results.push(`<div class="success">✅ Built XY accessor for ${polygons.length} cells</div>`);
+                
+                // Test the new SAT-based ocean label placement
+                const bounds = [0, 0, 600, 400];
+                const pxRect = findOceanLabelRectAfterAutofit(bounds, getCellAtXY, 0.2, 8, 1);
+                
+                if (pxRect) {
+                    results.push(`<div class="success">✅ Found SAT rectangle: ${pxRect.w}x${pxRect.h} at (${pxRect.x},${pxRect.y})</div>`);
+                    
+                    // Draw debug rectangle
+                    drawDebugOceanRect(pxRect);
+                    
+                    // Test ocean label placement
+                    const oceanLabel = {
+                        text: "Mare Thalassa",
+                        x: 0,
+                        y: 0,
+                        fontSize: 28
+                    };
+                    
+                    placeOceanLabelAt(pxRect.x + pxRect.w / 2, pxRect.y + pxRect.h / 2, pxRect.w, oceanLabel, svg);
+                    
+                    results.push(`<div class="success">✅ Placed ocean label: "${oceanLabel.text}"</div>`);
+                    
+                } else {
+                    results.push(`<div class="error">❌ No SAT rectangle found</div>`);
+                }
+                
+                // Visualize the polygons
+                polygons.forEach((poly, i) => {
+                    const color = poly.height <= 0.2 ? '#0066cc' : '#8B4513';
+                    const path = 'M' + poly.map(p => p.join(',')).join('L') + 'Z';
+                    
+                    svg.select('#map').append('path')
+                        .attr('d', path)
+                        .attr('fill', color)
+                        .attr('stroke', '#000')
+                        .attr('stroke-width', 1)
+                        .attr('opacity', 0.7);
+                });
+                
+            } catch (error) {
+                results.push(`<div class="error">❌ Error: ${error.message}</div>`);
+                console.error('Test error:', error);
+            }
+            
+            return results;
+        }
+        
+        // Run tests and display results
+        const results = runTests();
+        document.getElementById('results').innerHTML = results.join('');
+    </script>
+</body>
+</html>

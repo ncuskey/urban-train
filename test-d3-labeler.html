@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>D3-Labeler Plugin Test</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+    .status { font-weight: bold; }
+    .status.success { color: green; }
+    .status.error { color: red; }
+    .status.warning { color: orange; }
+  </style>
+</head>
+<body>
+  <h1>D3-Labeler Plugin Test</h1>
+  
+  <div class="test-section">
+    <h3>Plugin Loading Status</h3>
+    <div id="d3-status" class="status"></div>
+    <div id="labeler-status" class="status"></div>
+  </div>
+  
+  <div class="test-section">
+    <h3>Plugin API Test</h3>
+    <div id="api-status" class="status"></div>
+    <button onclick="testLabelerAPI()">Test Labeler API</button>
+  </div>
+  
+  <div class="test-section">
+    <h3>Console Output</h3>
+    <div id="console-output" style="background: #f5f5f5; padding: 10px; height: 200px; overflow-y: scroll; font-family: monospace; font-size: 12px;"></div>
+  </div>
+
+  <script src="https://d3js.org/d3.v5.min.js"></script>
+  <script src="vendor/d3-labeler/labeler.js"></script>
+  
+  <script>
+    // Capture console.log for display
+    const originalLog = console.log;
+    const outputDiv = document.getElementById('console-output');
+    
+    console.log = function(...args) {
+      originalLog.apply(console, args);
+      const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+      outputDiv.innerHTML += message + '<br>';
+      outputDiv.scrollTop = outputDiv.scrollHeight;
+    };
+    
+    // Test D3 loading
+    function testD3() {
+      const d3Status = document.getElementById('d3-status');
+      if (typeof d3 !== 'undefined') {
+        d3Status.textContent = '✅ D3 v5 loaded successfully';
+        d3Status.className = 'status success';
+        console.log('D3 version:', d3.version);
+      } else {
+        d3Status.textContent = '❌ D3 failed to load';
+        d3Status.className = 'status error';
+      }
+    }
+    
+    // Test D3-Labeler loading
+    function testLabeler() {
+      const labelerStatus = document.getElementById('labeler-status');
+      if (typeof d3 !== 'undefined' && d3.labeler) {
+        labelerStatus.textContent = '✅ D3-Labeler plugin loaded successfully';
+        labelerStatus.className = 'status success';
+        console.log('D3-Labeler plugin available:', typeof d3.labeler);
+      } else {
+        labelerStatus.textContent = '❌ D3-Labeler plugin failed to load';
+        labelerStatus.className = 'status error';
+      }
+    }
+    
+    // Test the labeler API
+    window.testLabelerAPI = function() {
+      const apiStatus = document.getElementById('api-status');
+      
+      try {
+        console.log('=== Testing D3-Labeler API ===');
+        
+        // Test basic labeler creation
+        const labeler = d3.labeler();
+        console.log('Labeler created:', typeof labeler);
+        
+        // Test labeler methods
+        const methods = ['label', 'anchor', 'width', 'height', 'start'];
+        const availableMethods = methods.filter(method => typeof labeler[method] === 'function');
+        console.log('Available methods:', availableMethods);
+        
+        // Test with sample data
+        const sampleLabels = [
+          {x: 10, y: 10, name: "Test 1", width: 50, height: 20},
+          {x: 100, y: 100, name: "Test 2", width: 60, height: 25}
+        ];
+        
+        const sampleAnchors = [
+          {x: 10, y: 10, r: 5},
+          {x: 100, y: 100, r: 5}
+        ];
+        
+        const result = labeler
+          .label(sampleLabels)
+          .anchor(sampleAnchors)
+          .width(400)
+          .height(300)
+          .start(100);
+        
+        console.log('Labeler execution result:', result);
+        console.log('Sample labels after processing:', sampleLabels);
+        
+        apiStatus.textContent = '✅ D3-Labeler API test successful';
+        apiStatus.className = 'status success';
+        
+      } catch (error) {
+        console.log('Error testing labeler API:', error.message);
+        apiStatus.textContent = '❌ D3-Labeler API test failed: ' + error.message;
+        apiStatus.className = 'status error';
+      }
+    };
+    
+    // Initialize tests
+    testD3();
+    testLabeler();
+    console.log('D3-Labeler plugin test initialized');
+  </script>
+</body>
+</html>

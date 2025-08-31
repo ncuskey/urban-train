@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Anneal Labels Test - SA Labeler</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+    .status { font-weight: bold; }
+    .status.success { color: green; }
+    .status.error { color: red; }
+    .results-display { background: #f9f9f9; padding: 10px; margin: 10px 0; font-family: monospace; font-size: 12px; }
+    .visualization { border: 1px solid #ccc; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h1>Anneal Labels Test - SA Labeler</h1>
+  
+  <div class="test-section">
+    <h3>Test Anneal Labels Function</h3>
+    <button onclick="testAnnealLabels()">Test annealLabels</button>
+    <button onclick="testWithBounds()">Test with Bounds</button>
+    <div id="anneal-result" class="results-display"></div>
+  </div>
+  
+  <div class="test-section">
+    <h3>Visualization</h3>
+    <div id="visualization" class="visualization">
+      <svg width="600" height="400" id="test-svg"></svg>
+    </div>
+  </div>
+  
+  <div class="test-section">
+    <h3>Console Output</h3>
+    <div id="console-output" style="background: #f5f5f5; padding: 10px; height: 200px; overflow-y: scroll; font-family: monospace; font-size: 12px;"></div>
+  </div>
+
+  <script src="https://d3js.org/d3.v5.min.js"></script>
+  <script src="vendor/d3-labeler/labeler.js"></script>
+  
+  <script type="module">
+    import { computeLabelMetrics, annealLabels } from './src/modules/labels.js';
+    
+    // Capture console.log for display
+    const originalLog = console.log;
+    const outputDiv = document.getElementById('console-output');
+    
+    console.log = function(...args) {
+      originalLog.apply(console, args);
+      const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' ');
+      outputDiv.innerHTML += message + '<br>';
+      outputDiv.scrollTop = outputDiv.scrollHeight;
+    };
+    
+    // Test the anneal labels function
+    window.testAnnealLabels = function() {
+      console.log('=== Testing annealLabels (no bounds) ===');
+      
+      // Create a mock SVG for testing
+      const mockSvg = d3.select('#test-svg');
+      mockSvg.selectAll('*').remove(); // Clear previous visualization
+      
+      // Sample labels with different kinds
+      const sampleLabels = [
+        { id: 'ocean-1', kind: 'ocean', text: 'Pacific Ocean', x: 100, y: 50, area: 5000, priority: 100 },
+        { id: 'lake-1', kind: 'lake', text: 'Crystal Lake', x: 200, y: 150, area: 800, priority: 80 },
+        { id: 'island-1', kind: 'island', text: 'Tropical Isle', x: 300, y: 250, area: 600, priority: 60 },
+        { id: 'lake-2', kind: 'lake', text: 'Mountain Tarn', x: 400, y: 350, area: 400, priority: 80 }
+      ];
+      
+      try {
+        console.log('Input labels:', sampleLabels);
+        
+        // First compute metrics
+        const metrics = computeLabelMetrics({ svg: mockSvg, labels: sampleLabels });
+        console.log('Computed metrics:', metrics);
+        
+        // Then run annealing
+        const annealed = annealLabels({ labels: metrics, sweeps: 200 });
+        console.log('Annealed labels:', annealed);
+        
+        // Display results
+        const resultDiv = document.getElementById('anneal-result');
+        resultDiv.innerHTML = '<h4>Annealed Labels:</h4>' + 
+          '<pre>' + JSON.stringify(annealed, null, 2) + '</pre>';
+        
+        // Visualize the results
+        visualizeLabels(mockSvg, annealed, 'Before/After Annealing');
+        
+        // Verify the structure
+        const hasPlaced = annealed.every(l => l.placed && l.placed.x !== undefined && l.placed.y !== undefined);
+        if (hasPlaced) {
+          console.log('✅ All labels have placed coordinates');
+        } else {
+          console.log('❌ Some labels missing placed coordinates');
+        }
+        
+      } catch (error) {
+        console.log('Error testing anneal labels:', error.message);
+      }
+    };
+    
+    // Test with bounds
+    window.testWithBounds = function() {
+      console.log('=== Testing annealLabels with bounds ===');
+      
+      const mockSvg = d3.select('#test-svg');
+      mockSvg.selectAll('*').remove();
+      
+      // Sample labels
+      const sampleLabels = [
+        { id: 'ocean-1', kind: 'ocean', text: 'Pacific Ocean', x: 150, y: 100, area: 5000, priority: 100 },
+        { id: 'lake-1', kind: 'lake', text: 'Crystal Lake', x: 250, y: 200, area: 800, priority: 80 },
+        { id: 'island-1', kind: 'island', text: 'Tropical Isle', x: 350, y: 300, area: 600, priority: 60 }
+      ];
+      
+      try {
+        console.log('Input labels:', sampleLabels);
+        
+        // Compute metrics
+        const metrics = computeLabelMetrics({ svg: mockSvg, labels: sampleLabels });
+        console.log('Computed metrics:', metrics);
+        
+        // Define bounds (local coordinate system)
+        const bounds = { x0: 100, y0: 50, x1: 500, y1: 350 };
+        console.log('Bounds:', bounds);
+        
+        // Run annealing with bounds
+        const annealed = annealLabels({ labels: metrics, bounds, sweeps: 200 });
+        console.log('Annealed labels with bounds:', annealed);
+        
+        // Display results
+        const resultDiv = document.getElementById('anneal-result');
+        resultDiv.innerHTML = '<h4>Annealed Labels (with bounds):</h4>' + 
+          '<pre>' + JSON.stringify(annealed, null, 2) + '</pre>';
+        
+        // Visualize with bounds
+        visualizeLabelsWithBounds(mockSvg, annealed, bounds, 'Annealing with Bounds');
+        
+      } catch (error) {
+        console.log('Error testing anneal labels with bounds:', error.message);
+      }
+    };
+    
+    // Visualization helper
+    function visualizeLabels(svg, labels, title) {
+      // Add title
+      svg.append('text')
+        .attr('x', 300).attr('y', 20)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', 14)
+        .attr('font-weight', 'bold')
+        .text(title);
+      
+      // Draw labels
+      labels.forEach((label, i) => {
+        const g = svg.append('g');
+        
+        // Original position (red)
+        g.append('circle')
+          .attr('cx', label.x).attr('cy', label.y)
+          .attr('r', 3).attr('fill', 'red');
+        
+        // Placed position (green)
+        if (label.placed) {
+          g.append('circle')
+            .attr('cx', label.placed.x).attr('cy', label.placed.y)
+            .attr('r', 3).attr('fill', 'green');
+          
+          // Line from original to placed
+          g.append('line')
+            .attr('x1', label.x).attr('y1', label.y)
+            .attr('x2', label.placed.x).attr('y2', label.placed.y)
+            .attr('stroke', 'blue').attr('stroke-width', 1).attr('stroke-dasharray', '3,3');
+        }
+        
+        // Label text
+        g.append('text')
+          .attr('x', label.placed ? label.placed.x : label.x)
+          .attr('y', label.placed ? label.placed.y : label.y)
+          .attr('text-anchor', 'middle')
+          .attr('dominant-baseline', 'middle')
+          .attr('font-size', label.font || 12)
+          .attr('fill', 'black')
+          .text(label.text);
+      });
+    }
+    
+    // Visualization with bounds
+    function visualizeLabelsWithBounds(svg, labels, bounds, title) {
+      // Add title
+      svg.append('text')
+        .attr('x', 300).attr('y', 20)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', 14)
+        .attr('font-weight', 'bold')
+        .text(title);
+      
+      // Draw bounds rectangle
+      svg.append('rect')
+        .attr('x', bounds.x0).attr('y', bounds.y0)
+        .attr('width', bounds.x1 - bounds.x0)
+        .attr('height', bounds.y1 - bounds.y0)
+        .attr('fill', 'none')
+        .attr('stroke', 'purple')
+        .attr('stroke-width', 2)
+        .attr('stroke-dasharray', '5,5');
+      
+      // Draw labels
+      labels.forEach((label, i) => {
+        const g = svg.append('g');
+        
+        // Original position (red)
+        g.append('circle')
+          .attr('cx', label.x).attr('cy', label.y)
+          .attr('r', 3).attr('fill', 'red');
+        
+        // Placed position (green)
+        if (label.placed) {
+          g.append('circle')
+            .attr('cx', label.placed.x).attr('cy', label.placed.y)
+            .attr('r', 3).attr('fill', 'green');
+          
+          // Line from original to placed
+          g.append('line')
+            .attr('x1', label.x).attr('y1', label.y)
+            .attr('x2', label.placed.x).attr('y2', label.placed.y)
+            .attr('stroke', 'blue').attr('stroke-width', 1).attr('stroke-dasharray', '3,3');
+        }
+        
+        // Label text
+        g.append('text')
+          .attr('x', label.placed ? label.placed.x : label.x)
+          .attr('y', label.placed ? label.placed.y : label.y)
+          .attr('text-anchor', 'middle')
+          .attr('dominant-baseline', 'middle')
+          .attr('font-size', label.font || 12)
+          .attr('fill', 'black')
+          .text(label.text);
+      });
+    }
+    
+    console.log('Anneal labels test initialized');
+  </script>
+</body>
+</html>

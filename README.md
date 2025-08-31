@@ -13,7 +13,9 @@ A web-based procedural map generator that creates Voronoi-based terrain with int
 ### 🏷️ **Label Management**
 - **All features get names**: No minimum size thresholds - even the smallest lakes and islands receive appropriate names
 - **Size-aware naming**: Uses feature area to select appropriate terms (e.g., "Mere" vs "Lake" vs "Ocean")
-- **Advanced collision avoidance**: Cluster-based jiggling algorithm that optimizes placement of nearby labels simultaneously
+- **Simulated Annealing placement**: Advanced SA algorithm for optimal label placement with collision avoidance
+- **Cluster-based optimization**: Groups nearby labels for simultaneous optimization
+- **Ocean polishing**: Specialized SA optimization for ocean labels within their water boundaries
 - **Size-based zoom filtering**: Features appear progressively based on area and zoom level
 
 ### 🎯 **Interactive Features**
@@ -24,12 +26,13 @@ A web-based procedural map generator that creates Voronoi-based terrain with int
 
 ## Key Algorithms
 
-### **Cluster Jiggling Algorithm**
-The label placement system uses an innovative "cluster jiggling" approach:
+### **Simulated Annealing Label Placement**
+The label placement system uses an advanced Simulated Annealing (SA) algorithm:
 - **Cluster detection**: Groups nearby labels (within 200px) for simultaneous optimization
-- **Systematic combination testing**: For small clusters (≤3 labels), tries ALL possible combinations (up to 729 combinations)
-- **Distance optimization**: Selects placement that minimizes total distance from feature centroids
-- **Intelligent fallback**: Uses overlapped placement only when necessary
+- **SA optimization**: Uses Monte Carlo optimization with temperature scheduling for global placement
+- **Performance guardrails**: Dynamic sweeps based on cluster size with intelligent fallbacks
+- **Ocean polishing**: Specialized SA optimization for ocean labels within their water boundaries
+- **Collision avoidance**: Minimizes overlaps while maintaining proximity to feature centroids
 
 ### **Size-Based Zoom Filtering**
 - **Oceans**: Always visible
@@ -37,9 +40,10 @@ The label placement system uses an innovative "cluster jiggling" approach:
 - **Islands**: Tiny (30+) at zoom 1.5x, Small (150+) at zoom 0.8x, Medium (600+) at zoom 0.4x, All at zoom 3x
 
 ### **Collision Avoidance**
-- **Quadtree spatial indexing** for efficient collision detection
-- **Cardinal direction offsets** (9 positions per label: centroid + 8 directions)
+- **Simulated Annealing optimization** for global placement optimization
+- **Cluster-based processing** with performance guardrails
 - **Priority-based placement** (oceans > lakes > islands)
+- **Ocean boundary constraints** with specialized polishing
 - **Visual indicators** for overlapped labels (reduced opacity)
 
 ## Quick Start
@@ -83,6 +87,14 @@ For comprehensive debugging and testing, see the `/dev/` directory:
 
 ### **Test Pages**
 - **Main app**: `index.html`
+- **SA Labeler tests**: 
+  - `test-feature-flag.html` - Feature flag verification
+  - `test-d3-labeler.html` - D3-Labeler plugin testing
+  - `test-label-metrics.html` - Label metrics computation
+  - `test-anneal-labels.html` - Annealer wrapper testing
+  - `test-sa-integration.html` - SA integration verification
+  - `test-ocean-polishing.html` - Ocean polishing testing
+  - `test-performance-guardrails.html` - Performance testing
 - **Development tools**: See `/dev/` directory for comprehensive test pages and debugging tools
 
 ## Architecture
@@ -119,12 +131,17 @@ For comprehensive debugging and testing, see the `/dev/` directory:
 }
 ```
 
-### **Collision Avoidance**
+### **SA Labeler Configuration**
 ```javascript
 {
-  clusterRadius: 200,  // Pixels for cluster detection
-  maxCombinations: 1000, // Maximum combinations to try
-  offsetDistance: 0.6  // 60% of label size for offsets
+  USE_SA_LABELER: true,  // Toggle between SA and original system
+  clusterRadius: 200,    // Pixels for cluster detection
+  sweeps: {
+    small: 200,          // Base sweeps for small clusters
+    medium: 400,         // Medium clusters
+    large: 800,          // Large clusters (with 30% reduction for >60 labels)
+    ocean: 400           // Ocean polishing sweeps
+  }
 }
 ```
 
@@ -145,15 +162,17 @@ const [x0, y0, x1, y1] = getVisibleWorldBounds(svg, width, height);
 
 ### **Optimizations**
 - **RequestAnimationFrame** for hover/HUD throttling
-- **Quadtree collision detection** for O(log n) spatial queries
-- **Combination limiting** to prevent exponential growth
-- **Early termination** when collision-free placement found
+- **Simulated Annealing** for global label placement optimization
+- **Performance guardrails** with dynamic sweeps based on cluster size
+- **Cluster-based processing** to prevent excessive computation
+- **Ocean boundary constraints** for specialized optimization
 - **Layer management** to minimize DOM manipulation
 
 ### **Memory Usage**
 - **Cluster formation**: O(n²) for initial clustering
-- **Combination generation**: O(9^n) for small clusters, O(500) for large
-- **Collision detection**: O(log n) per check using quadtree
+- **SA optimization**: O(sweeps × cluster_size) per cluster
+- **Performance guardrails**: Skip annealing for clusters ≤2 labels
+- **Dynamic sweeps**: Adaptive computation based on cluster size
 
 ## Development
 
@@ -179,6 +198,36 @@ const [x0, y0, x1, y1] = getVisibleWorldBounds(svg, width, height);
 - **Focused tests**: `test-*.html` pages for specific functionality
 - **Manual verification**: Console debugging and visual inspection
 
+## SA Labeler Migration
+
+### **Overview**
+The label placement system has been upgraded from a "cluster jiggling" algorithm to a **Simulated Annealing (SA)** approach using the D3-Labeler plugin. This provides better global optimization and more sophisticated collision avoidance.
+
+### **Migration Status**
+- ✅ **Step 1**: Vendor D3-Labeler plugin
+- ✅ **Step 2**: Normalize anchors and dimensions
+- ✅ **Step 3**: Add annealer wrapper
+- ✅ **Step 4**: SA integration for lake/island labels
+- ✅ **Step 5**: Ocean polishing with keepWithinRect
+- ✅ **Step 6**: LOD & zoom transforms unchanged
+- ✅ **Step 7**: Debug toggle & fallback path
+- ✅ **Step 8**: Performance guardrails
+
+### **Feature Flag**
+The system can be toggled between old and new algorithms:
+```javascript
+// In src/modules/labels.js
+export const USE_SA_LABELER = true;  // New SA system
+export const USE_SA_LABELER = false; // Original system
+```
+
+### **Testing**
+Comprehensive test suite available:
+- **Feature flag testing**: `test-feature-flag.html`
+- **Performance testing**: `test-performance-guardrails.html`
+- **Integration testing**: `test-sa-integration.html`
+- **Documentation**: `SA_LABELER_MIGRATION.md`
+
 ## Contributing
 
 ### **Guidelines**
@@ -186,12 +235,15 @@ const [x0, y0, x1, y1] = getVisibleWorldBounds(svg, width, height);
 - **Performance first** - avoid layout thrash
 - **Deterministic generation** - maintain seedable RNG
 - **Modular design** - keep functions focused and testable
+- **SA labeler ready** - system supports both old and new algorithms
 
 ### **Debugging Tips**
 - Use `debugLabels()` for comprehensive inspection
-- Check console for placement statistics
+- Check console for SA placement statistics and performance metrics
 - Monitor performance with built-in timers
 - Test with various zoom levels and feature densities
+- Use `getSALabelerStatus()` to check SA system status
+- Enable debug mode with `window.DEBUG = true` for detailed logging
 
 ## License
 
