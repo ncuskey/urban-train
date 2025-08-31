@@ -11,9 +11,10 @@ This document consolidates the development history, implementation details, and 
 5. [Counter-Scaling Implementation](#counter-scaling-implementation)
 6. [Autofit System](#autofit-system)
 7. [Font System](#font-system)
-8. [Performance Optimizations](#performance-optimizations)
-9. [Bug Fixes and Improvements](#bug-fixes-and-improvements)
-10. [Technical Decisions](#technical-decisions)
+8. [Names System](#names-system)
+9. [Performance Optimizations](#performance-optimizations)
+10. [Bug Fixes and Improvements](#bug-fixes-and-improvements)
+11. [Technical Decisions](#technical-decisions)
 
 ---
 
@@ -515,6 +516,35 @@ function setFontTheme(fontName) {
   document.documentElement.style.setProperty('--label-font-family', fontName);
 }
 ```
+
+---
+
+## Names System
+
+**1. Fantasy Name Generation**
+- Robust fantasy names for oceans, lakes, and islands
+- API: `makeNamer(rng)` returns `{ ocean(size), lake(size), island(clusterSize) }`
+- Size-aware naming with appropriate terminology
+
+**2. Uniqueness Control**
+- **Root-based deduplication**: Prevents repetitive patterns (e.g., "Everdark Sea" followed by "Everdark Ocean")
+- **Full name tracking**: Ensures complete uniqueness across all generated names
+- **Fallback strategies**: Multiple uniqueness approaches with graceful degradation
+
+**3. Grammar and Structure**
+- **Oceans**: Directional adjectives (Northern/Western), epic "of the..." constructs, descriptive terms
+- **Lakes**: Intelligent grammar rules for "Adjective Lake" vs "Lake Noun" based on euphony
+- **Islands**: Size-appropriate terminology (Continent, Island, Isle, Atoll, Key, etc.)
+
+**4. Lexicon Organization**
+- **Thematic pools**: Natural, Mythical, Animal, Flora, Abstract categories
+- **Singular/Plural handling**: Proper inflection with irregular plural support
+- **Rich vocabulary**: 25+ descriptors, 21+ qualifiers, extensive noun collections
+
+**5. Size-Aware Naming**
+- **Ocean size**: Influences feature term selection (Ocean, Sea, Expanse, Deep, etc.)
+- **Lake size**: Grammar rules adapt to feature type (Lake, Mere, Tarn, Pool, etc.)
+- **Island clustering**: Cluster size biases toward appropriate size categories
 
 ---
 

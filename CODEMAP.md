@@ -21,11 +21,16 @@ urban-train/
 │   │   ├── features.js     # Geographic feature detection and naming
 │   │   ├── coastline.js    # Coastline tracing and path generation
 │   │   ├── rendering.js    # Polygon rendering and visual effects
-│   │   └── interaction.js  # Zoom and hover HUD functionality
+│   │   ├── interaction.js  # Zoom and hover HUD functionality
+│   │   ├── autofit.js      # Promise-based land fitting and autoFitToWorld
+│   │   ├── labels.js       # Feature labeling with collision avoidance
+│   │   ├── names.js        # Fantasy hydronyms and island names
+│   │   └── refine.js       # Adaptive coastline refinement
 │   ├── render/
 │   │   └── layers.js       # SVG layer management
 │   └── selftest.js         # Regression testing and validation
-├── README.md               # Project documentation
+├── README.md               # Project overview and quick start
+├── devlog.md               # Comprehensive development log (consolidated)
 └── CODEMAP.md              # This file
 ```
 
@@ -55,6 +60,16 @@ urban-train/
 - Interactive element states
 
 ## JavaScript Architecture
+
+### Label System
+**Purpose**: Automatic feature labeling with deduplication and proper placement
+**Key Features**:
+- **`computeMapLabels(polygons)`**: Groups polygons by feature type and name, calculates centroids
+- **`drawLabels(data)`**: Renders labels with keyed data joins to prevent accumulation
+- **Feature-specific styling**: Different colors and weights for Islands, Oceans, and Lakes
+- **Coordinate space management**: Labels scale with map or maintain constant size
+- **Deduplication**: One label per unique feature (no duplicates)
+- **Centroid calculation**: Proper placement at feature centers, not edges
 
 ### Core Modules
 
@@ -87,6 +102,22 @@ urban-train/
 **Key Features**:
 - **Graph neighbor reciprocity** validation
 - **Height range validation** (0..1)
+
+#### `src/modules/autofit.js`
+**Purpose**: Promise-based land fitting and viewport management
+**Key Features**:
+- **`fitToLand()`**: Promise-based autofit that resolves when transition completes
+- **`autoFitToWorld()`**: Alternative fitting function for custom world bounds
+- **`computeLandBBox()`**: Calculates land bounding box for optimal fitting
+- **Transition event handling**: Proper Promise resolution on 'end' or 'interrupt' events
+
+#### `src/modules/labels.js`
+**Purpose**: Feature labeling with collision avoidance and zoom filtering
+**Key Features**:
+- **`getVisibleWorldBounds()`**: Gets post-autofit visible world bounds
+- **`placeLabelsAvoidingCollisions()`**: Advanced collision detection and placement
+- **`filterByZoom()`**: Level-of-detail filtering based on zoom level
+- **Ocean label placement**: Rectangle-based placement after autofit completion with consistent CSS styling
 - **River width validation** (non-negative)
 - **SVG layer presence** validation
 - **Visual badge** with clickable failure details
@@ -119,6 +150,18 @@ urban-train/
 - **Random name generation** from adjective lists
 - **Feature numbering** and grouping
 
+#### `src/modules/names.js`
+**Purpose**: Fantasy descriptive naming system with weighted templates
+**Key Features**:
+- **Weighted template system** for generating varied, descriptive names
+- **60+ adjectives and 70+ nouns** for rich vocabulary
+- **Ocean names**: "Sea of Fallen Stars", "Mare Umbra", "The Azure Deeps"
+- **Lake names**: "Lake Sorrow", "Shimmering Lake", "Lotus Mere"
+- **Island names**: "Dragon Isle", "Verdant Island", "Skullholm"
+- **Flavor packs**: Norse, Greek, and Desert themes
+- **Uniqueness enforcement** with fallback disambiguation
+- **Seeded RNG integration** for reproducible generation
+
 #### `src/modules/coastline.js`
 **Purpose**: Coastline tracing and path generation
 **Key Features**:
@@ -140,15 +183,51 @@ urban-train/
 - **DOM cleanup** and re-rendering for dynamic updates
 
 #### `src/modules/interaction.js`
-**Purpose**: Zoom and hover HUD functionality
+**Purpose**: Zoom, pan, and hover HUD functionality with LOD optimization
 **Key Features**:
-- **D3 zoom behavior** with scale limits (1-50x) and translate extent
+- **D3 zoom behavior** with scale limits (0.5-32x) and translate extent
+- **Smooth pan and zoom** with proper v5 event handling
 - **Hover HUD updates** with real-time cell information display
+- **Level-of-Detail (LOD) system** for performance optimization
+- **Spatial picking** for efficient cell selection without DOM hit-testing
 - **Performance optimization** with RequestAnimationFrame throttling
 - **Change detection** to prevent redundant DOM updates
 - **Vanilla DOM updates** for high-frequency UI performance
-- **Passive event listeners** for touch and mouse events
+- **Auto-fit functionality** for optimal map viewing
 - **Cleanup API** for event listener management
+- **Label counter-scaling** for constant on-screen label size during zoom operations
+- **Global transform tracking** for coordinate conversions
+- **Coordinate space conversion** for proper mouse picking
+
+### Counter-Scaling Implementation
+**Purpose**: Maintains constant on-screen label size during pan/zoom operations
+**Key Features**:
+- **Dual transform system**: Map groups get normal zoom transforms, labels get counter-scaling
+- **Vector-effect attributes**: `vector-effect="non-scaling-stroke"` for constant halo width
+- **Zoom level guards**: Counter-scaling clamped to reasonable bounds (0.5x to 32x)
+- **Rotation preservation**: Maintains existing label rotation during counter-scaling
+- **Performance optimized**: No font-size recalculations, efficient transform-based scaling
+- **Debug logging**: Console output when counter-scaling is applied (controlled by `window.DBG.labels`)
+- **CSS kill switch**: Debug rectangles can be hidden with CSS rules
+
+**Implementation Details**:
+- **Zoom handler**: `zoomed()` function in `interaction.js` applies counter-scaling to all label groups
+- **Label creation**: All text elements created with vector-effect attributes in `labels.js`
+- **Font-size scaling removed**: `updateLabelZoom()` function no longer scales font sizes
+- **Transform chain**: `translate(x,y) + scale(1/k) + rotate(angle)` for each label group
+- **Documentation**: Comprehensive details available in `devlog.md`
+
+#### `src/modules/refine.js`
+**Purpose**: Adaptive coastline refinement for smoother shorelines
+**Key Features**:
+- **Coastal edge detection** between land (height ≥ 0.2) and sea (height < 0.2) cells
+- **Point insertion** along coastal edges with controlled spacing
+- **De-duplication** using d3.quadtree to prevent clustering
+- **Voronoi rebuild** with augmented sample set
+- **Height transfer** from old cells to new cells using nearest-neighbor lookup
+- **Neighbor preservation** with idempotent `detectNeighbors` calls
+- **Performance optimization** with minimum point threshold (10 points)
+- **Configurable spacing** based on global Poisson radius settings
 
 ### Main Application (src/main.js)
 
@@ -165,6 +244,7 @@ urban-train/
 - Initializes interactive features
 - Integrates modular components (RNG, Timers, Layers, Self-tests, Rendering)
 - Calls `randomMap(count)` if count provided
+- **Applies adaptive coastline refinement** for smoother shorelines
 - Performs validation and performance monitoring
 - Imports rendering functions from `src/modules/rendering.js`
 
@@ -184,6 +264,35 @@ urban-train/
 **Operations**:
 - Toggles visibility of `.circles` elements
 
+#### `toggleLabelScaling()`
+**Purpose**: Toggles between scaling and constant-size label modes
+**Operations**:
+- Switches `LABELS_NONSCALING` global flag
+- Re-applies current transform to update label scaling
+- Logs current mode to console
+
+#### `computeMapLabels(polygons)`
+**Purpose**: Computes label data with deduplication and proper positioning
+**Parameters**:
+- `polygons`: Array of polygon objects with feature data
+**Returns**: Array of label objects with id, name, x, y, kind properties
+**Operations**:
+- Groups polygons by feature type and name
+- Calculates centroids for each feature group
+- Creates unique IDs for keyed data joins
+- Filters out features without type/name data
+
+#### `drawLabels(data)`
+**Purpose**: Renders labels with proper coordinate space management
+**Parameters**:
+- `data`: Array of label objects from `computeMapLabels`
+**Operations**:
+- Clears existing labels to prevent accumulation
+- Uses keyed data joins with unique IDs
+- Applies feature-specific CSS classes
+- Positions labels in world coordinates
+- Supports both scaling and constant-size modes
+
 ### Core Map Generation Functions
 
 #### `poissonDiscSampler(width, height, radius)`
@@ -201,6 +310,25 @@ urban-train/
 - Iterates through Voronoi diagram cells
 - Finds shared edges between polygons
 - Stores neighbor indices in polygon objects
+- **Preserves existing heights** (idempotent operation)
+
+#### `refineCoastlineAndRebuild()`
+**Purpose**: Adds detail points along coastal edges for smoother shorelines
+**Parameters**:
+- `samples`: Original point set
+- `diagram`: Current Voronoi diagram
+- `polygons`: Current polygon array
+- `mapWidth/mapHeight`: Map dimensions
+- `seaLevel`: Height threshold (default 0.2)
+- `targetSpacing`: Desired point spacing
+- `minSpacingFactor`: Minimum spacing factor for de-duplication
+**Operations**:
+- Detects edges between land (≥ seaLevel) and sea (< seaLevel) cells
+- Subdivides coastal edges with controlled spacing
+- Uses quadtree for efficient de-duplication
+- Rebuilds Voronoi diagram with augmented samples
+- Transfers heights from old cells to new cells
+- Returns updated samples, diagram, and polygons
 
 #### `add(start, type)`
 **Purpose**: Adds terrain features to the map
@@ -285,12 +413,14 @@ urban-train/
 **Location**: Extracted to `src/modules/interaction.js`
 
 #### Zoom and Pan
-**Purpose**: Navigation controls
+**Purpose**: Navigation controls with performance optimization
 **Implementation**:
-- D3 zoom behavior
-- Scale limits (1-50x)
-- Smooth transitions
-- Reset functionality
+- D3 zoom behavior bound directly to SVG
+- Scale limits (0.5-32x) with translate extent
+- Smooth transitions with proper v5 event handling
+- Level-of-Detail (LOD) system for performance
+- Auto-fit functionality for optimal viewing
+- Spatial picking for efficient cell selection
 **Location**: Extracted to `src/modules/interaction.js`
 
 ### Random Map Generation
@@ -347,6 +477,14 @@ urban-train/
 }
 ```
 
+### Global Configuration
+```javascript
+{
+  currentTransform: d3.zoomTransform,  // Current zoom transform for coordinate conversions
+  LABELS_NONSCALING: boolean           // Label scaling mode (false = scale with map, true = constant size)
+}
+```
+
 ### Timer Objects
 ```javascript
 {
@@ -362,6 +500,19 @@ urban-train/
   end: string,             // "x y" coordinates
   type: string,            // "Island" or "Lake"
   number: number           // Feature number
+}
+```
+
+### Label Objects
+```javascript
+{
+  id: string,              // Unique identifier (e.g., "ocean:warm-ocean")
+  name: string,            // Display text (e.g., "Warm Ocean")
+  x: number,               // World coordinate X position
+  y: number,               // World coordinate Y position
+  kind: string,            // Feature type for CSS styling ("ocean", "island", "lake")
+  featureType: string,     // Original feature type ("Ocean", "Island", "Lake")
+  featureName: string      // Original feature name
 }
 ```
 
@@ -402,6 +553,16 @@ urban-train/
 - **Implementation**: Invariant checking with visual feedback
 - **Features**: Graph validation, height normalization, layer verification
 
+### 8. Level-of-Detail (LOD) System
+- **Purpose**: Performance optimization through adaptive rendering
+- **Implementation**: Automatic switching between raster and vector rendering
+- **Features**: Zoom-based threshold switching, stroke optimization, spatial picking
+
+### 9. Fantasy Naming System
+- **Purpose**: Generate rich descriptive names for geographic features
+- **Implementation**: Weighted template system with seeded RNG
+- **Features**: Ocean, lake, and island name generation with uniqueness enforcement
+
 ## Event Flow
 
 1. **Page Load**: `generate()` called automatically with modular initialization
@@ -424,6 +585,9 @@ urban-train/
 - **Visual Effects**: Removed unnecessary cursor rendering for better performance
 - **Modular Architecture**: ES6 modules for better code splitting and caching
 - **Interaction Module**: Extracted zoom and hover logic for better maintainability
+- **Level-of-Detail (LOD)**: Automatic raster/vector switching for performance
+- **Spatial Picking**: Efficient cell selection without DOM hit-testing
+- **Fantasy Naming**: Weighted template system for descriptive geographic names
 - **Deterministic Generation**: Seeded RNG eliminates need for re-generation
 - **Performance Monitoring**: Built-in timing for optimization insights
 - **Self-Testing**: Automated validation prevents regressions
@@ -444,3 +608,10 @@ urban-train/
 - **Export**: Image and data export capabilities
 - **Multiplayer**: Collaborative map creation
 - **Advanced UI**: Enhanced controls and visualization options
+
+## Documentation
+
+- **`README.md`**: Project overview, quick start, and feature summary
+- **`devlog.md`**: Comprehensive development log covering all implementation details, fixes, and technical decisions
+- **`CODEMAP.md`**: This file - detailed code structure and function documentation
+- **`dev/README.md`**: Development tools and test page documentation
