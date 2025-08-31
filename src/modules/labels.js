@@ -1608,13 +1608,15 @@ export function seedOceanIntoWorldRect(l) {
 
 // Helper function to get label position, preferring SA output when present
 function labelDrawXY(d) {
+  if (!d) return { x: 0, y: 0 }; // Safety guard
+  
   const k = d3.zoomTransform(d3.select('#map').node()).k || 1;
   if (d.placed && Number.isFinite(d.placed.x) && Number.isFinite(d.placed.y)) {
-    const wWorld = d.width  / k;
-    const hWorld = d.height / k;
+    const wWorld = (d.width || 0) / k;
+    const hWorld = (d.height || 0) / k;
     return { x: d.placed.x + wWorld / 2, y: d.placed.y + hWorld * 0.75 };
   }
-  return { x: d.x, y: d.y };
+  return { x: d.x || 0, y: d.y || 0 };
 }
 
 // Render all labels once with keyed join (hidden by default)
@@ -1625,8 +1627,14 @@ export function renderLabels({ svg, placed, groupId }) {
     console.log('[labels] DEBUG: renderLabels called with', placed.length, 'labels, groupId:', groupId);
   }
   
+  // Safety check: ensure placed is an array
+  if (!Array.isArray(placed) || placed.length === 0) {
+    console.warn('[labels] renderLabels: no labels to render or invalid data');
+    return;
+  }
+  
   // Keyed join on stable IDs
-  const sel = g.selectAll('g.label').data(placed, d => d.id);
+  const sel = g.selectAll('g.label').data(placed, d => d?.id || d?.text || Math.random());
   
   // Remove old labels
   sel.exit().remove();
@@ -1643,6 +1651,7 @@ export function renderLabels({ svg, placed, groupId }) {
   
   // Set position and transform
   merged.attr('transform', d => {
+    if (!d) return 'translate(0,0)'; // Safety guard
     const p = labelDrawXY(d);
     // last-resort guard: never return NaN
     const x = safe(p.x, 0);
@@ -1652,40 +1661,46 @@ export function renderLabels({ svg, placed, groupId }) {
   
   // Update stroke text
   merged.select('text.stroke')
-    .text(d => d.text)
+    .text(d => d?.text || '')
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'central')
-    .attr('font-size', d => d.font || 16) // Use computed font size from metrics
+    .attr('font-size', d => d?.font || 16) // Use computed font size from metrics
     .classed('is-visible', false) // Hidden by default
-    .classed('ocean', d.kind === 'ocean') // Add ocean class for styling
-    .classed('lake', d.kind === 'lake') // Add lake class for styling
-    .classed('island', d.kind === 'island'); // Add island class for styling
+    .classed('ocean', d?.kind === 'ocean') // Add ocean class for styling
+    .classed('lake', d?.kind === 'lake') // Add lake class for styling
+    .classed('island', d?.kind === 'island'); // Add island class for styling
   
   // Update fill text
   merged.select('text.fill')
-    .text(d => d.text)
+    .text(d => d?.text || '')
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'central')
-    .attr('font-size', d => d.font || 16) // Use computed font size from metrics
+    .attr('font-size', d => d?.font || 16) // Use computed font size from metrics
     .classed('is-visible', false) // Hidden by default
-    .classed('ocean', d.kind === 'ocean') // Add ocean class for styling
-    .classed('lake', d.kind === 'lake') // Add lake class for styling
-    .classed('island', d.kind === 'island'); // Add island class for styling
+    .classed('ocean', d?.kind === 'ocean') // Add ocean class for styling
+    .classed('lake', d?.kind === 'lake') // Add lake class for styling
+    .classed('island', d?.kind === 'island'); // Add island class for styling
   
   if (window.DEBUG) console.log('[labels] DEBUG: Rendered', merged.size(), 'labels');
   
   // Debug overlay: show final boxes behind text
   if (window.DEBUG && DEBUG_LABEL_BOXES) {
-    const dbg = d3.select('#labels-debug').selectAll('rect').data(placed, d => d.id);
+    const dbg = d3.select('#labels-debug').selectAll('rect').data(placed, d => d?.id || d?.text || Math.random());
     dbg.enter().append('rect')
       .attr('fill', 'none')
       .attr('stroke', '#000')
       .attr('stroke-opacity', 0.25)
       .merge(dbg)
-      .attr('x', d => (d.placed ? d.placed.x : d.x - d.width/2))
-      .attr('y', d => (d.placed ? d.placed.y : d.y - d.height/2))
-      .attr('width',  d => d.width)
-      .attr('height', d => d.height);
+      .attr('x', d => {
+        if (!d) return 0;
+        return (d.placed ? d.placed.x : d.x - (d.width || 0)/2);
+      })
+      .attr('y', d => {
+        if (!d) return 0;
+        return (d.placed ? d.placed.y : d.y - (d.height || 0)/2);
+      })
+      .attr('width',  d => d?.width || 0)
+      .attr('height', d => d?.height || 0);
     dbg.exit().remove();
   }
   
@@ -1693,10 +1708,14 @@ export function renderLabels({ svg, placed, groupId }) {
   function countOverlaps(arr){
     let n=0;
     for (let i=0;i<arr.length;i++){
-      const a = arr[i], ax = (a.placed?.x ?? a.x - a.width/2), ay = (a.placed?.y ?? a.y - a.height/2);
+      const a = arr[i];
+      if (!a) continue;
+      const ax = (a.placed?.x ?? a.x - (a.width || 0)/2), ay = (a.placed?.y ?? a.y - (a.height || 0)/2);
       for (let j=i+1;j<arr.length;j++){
-        const b = arr[j], bx = (b.placed?.x ?? b.x - b.width/2), by = (b.placed?.y ?? b.y - b.height/2);
-        if (ax < bx + b.width && ax + a.width > bx && ay < by + b.height && ay + a.height > by) n++;
+        const b = arr[j];
+        if (!b) continue;
+        const bx = (b.placed?.x ?? b.x - (b.width || 0)/2), by = (b.placed?.y ?? b.y - (b.height || 0)/2);
+        if (ax < bx + (b.width || 0) && ax + (a.width || 0) > bx && ay < by + (b.height || 0) && ay + (a.height || 0) > by) n++;
       }
     }
     return n;
