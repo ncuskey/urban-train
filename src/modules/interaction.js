@@ -83,9 +83,11 @@ export function attachInteraction({
         updateCellsLOD(t.k);
       }
       
-      // ONLY transform the world container
+      // Transform the world container and labels-world group
       const world = svg.select('#world');
+      const labelsWorld = svg.select('#labels-world');
       world.attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
+      labelsWorld.attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
 
       // Update visibility + inverse scale for feature labels
       if (window.__labelsPlaced && window.__labelsPlaced.features) {

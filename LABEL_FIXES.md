@@ -465,3 +465,152 @@ window.DBG = { labels: true };
 
 **Files Changed**:
 - `src/modules/labels.js` - Fixed zoom behavior in `updateLabelZoom`, `renderLabels`, and `labelDrawXY` functions
+
+### Ocean Label First-Zoom Jump Fix (2025-08-30)
+
+**Issue**: Ocean labels were experiencing a "first-zoom jump" where they would suddenly change position or size on the first zoom operation.
+
+**Root Cause**: 
+- Ocean labels were being processed by the zoom updater even though they should be in screen space
+- The zoom handler was not properly excluding ocean labels from transform updates
+- Ocean labels were getting inverse scaling applied during zoom operations
+
+**Solution**: Complete separation of ocean and non-ocean label handling
+
+#### 1. Fixed `updateLabelZoom` Function
+**Before**: Ocean labels were processed by the zoom updater
+```javascript
+g.selectAll('g.label')
+  .attr('transform', d => {
+    if (d.kind === 'ocean') {
+      return `translate(${d.x},${d.y}) scale(${1 / k})`; // ❌ ocean getting zoom transforms
+    }
+  });
+```
+
+**After**: Ocean labels are completely excluded from zoom updates
+```javascript
+// Ocean is rendered in screen space; do not rescale or reposition it here.
+d3.selectAll('.label.ocean').each(function() {/* no-op */});
+// From here on, operate only on non-ocean labels.
+const sel = g.selectAll('.label').filter(d => d && d.kind !== 'ocean');
+```
+
+#### 2. Zoom Handler Already Correct
+**Verified**: The zoom handler in `interaction.js` already only transforms the `#world` container
+- Ocean labels are not affected by the zoom transform
+- Screen space is preserved for ocean labels
+
+#### 3. Ocean Renderer Already Correct
+**Verified**: `renderOceanOverlay` function already uses only `translate` without scaling
+- Ocean labels get `translate(${rectPx.x},${rectPx.y})` only
+- No `scale()` operations applied to ocean labels
+
+#### 4. Added CSS for Crisp Outlines
+**Added**: `.label.ocean text { vector-effect: non-scaling-stroke; }`
+- Ocean label outlines won't fatten/thin with zoom
+- Consistent rendering across all zoom levels
+
+### Island/Lake Labels Sticky Behavior Fix (2025-08-30)
+
+**Issue**: Island and lake labels were not sticking to their features during zoom/pan operations.
+
+**Root Cause**: 
+- Labels were getting per-label transforms that conflicted with the world layer transform
+- The `#labels-world` group was not being transformed with the zoom
+- Labels were being repositioned on each zoom instead of following the world layer
+
+**Solution**: Put labels inside the zoomed world layer and remove per-label transforms
+
+#### 1. Labels Are Inside the Zoomed World Layer
+**Verified**: `renderLabels` function already uses `groupId: 'labels-world'`
+- Labels are created in `#labels-world` group
+- Labels are inside the zoomed world layer
+
+#### 2. Removed Per-Label Transforms
+**Before**: `updateLabelZoom` was applying transforms to labels
+```javascript
+sel.attr('transform', d => `translate(${d.x},${d.y})`); // ❌ per-label transforms
+```
+
+**After**: No transform updates - labels use world coordinates only
+```javascript
+// Non-ocean labels are inside the zoomed world layer.
+// 1) NO per-label transforms - let the world layer handle zooming
+// 2) Only change font-size to make labels grow with zoom
+```
+
+#### 3. Added Labels-World to Zoom Transform
+**Before**: Only `#world` was transformed
+```javascript
+const world = svg.select('#world');
+world.attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
+```
+
+**After**: Both `#world` and `#labels-world` get the same transform
+```javascript
+const world = svg.select('#world');
+const labelsWorld = svg.select('#labels-world');
+world.attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
+labelsWorld.attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
+```
+
+#### 4. Font Size Grows with Zoom
+**Maintained**: BETA logic for font size growth
+```javascript
+const px = Math.max(1, Math.round(d.fontPx * Math.pow(k, BETA)));
+```
+- Labels become larger and more readable as you zoom in
+
+### LOD/Budget Fix (2025-08-30)
+
+**Issue**: After removing per-label scaling, the LOD system was showing `visible=0` even with healthy budgets.
+
+**Root Cause**: 
+- `featurePixelArea` property was being used but never defined
+- The bbox computation was broken after removing inverse scaling
+- Labels were failing the area filter due to missing properties
+
+**Solution**: Compute pixel area correctly from world coordinates
+
+#### 1. Fixed Missing Property
+**Before**: Using non-existent properties
+```javascript
+.filter(l => l.featurePixelArea >= minAreaPx('island', z.k))  // ❌ property doesn't exist
+.sort((a,b) => b.featureWorldArea - a.featureWorldArea);      // ❌ property doesn't exist
+```
+
+**After**: Compute pixel area from world area
+```javascript
+.filter(l => {
+  // Compute pixel area from world area: area * k²
+  const featurePixelArea = (l.area || 0) * z.k * z.k;
+  return featurePixelArea >= minAreaPx('island', z.k);
+})
+.sort((a,b) => (b.area || 0) - (a.area || 0));                // ✅ use existing area property
+```
+
+#### 2. Proper Area Scaling
+**Formula**: `featurePixelArea = worldArea × k²`
+- World area scales quadratically with zoom
+- Matches the new world-coordinate label system
+- Uses existing `area` property from `buildFeatureLabels`
+
+**Expected Behavior**:
+- **Ocean labels**: Stay in screen space, no zoom transforms, no scaling
+- **Island/Lake labels**: Stick to features, grow with zoom, follow world layer
+- **LOD system**: Works correctly with proper area calculations
+- **No first-zoom jump**: Ocean labels remain stable
+- **Proper visibility**: Labels appear based on actual pixel area
+
+**Benefits**:
+- **Sticky labels**: Island/lake labels now stick to their features during zoom/pan
+- **Stable ocean labels**: No sudden jumps or position changes for ocean labels
+- **Working LOD**: Proper visibility filtering based on zoom level
+- **Intuitive behavior**: Labels behave as expected during zoom operations
+- **Crisp rendering**: Ocean labels maintain consistent outline thickness
+
+**Files Changed**:
+- `src/modules/labels.js` - Fixed ocean label exclusion, removed per-label transforms, fixed LOD area computation
+- `src/modules/interaction.js` - Added `#labels-world` to zoom transform
+- `styles.css` - Added crisp outline CSS for ocean labels

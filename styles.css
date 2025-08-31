@@ -268,3 +268,6 @@ text.place-label.ocean {
 /* CSS safety: prevent stale display:none inheritance */
 #labels-world .feature-label { display: unset; }
 #labels-overlay .feature-label { display: unset; }
+
+/* Ocean label crisp outlines that don't fatten/thin with zoom */
+.label.ocean text { vector-effect: non-scaling-stroke; }
