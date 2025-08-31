@@ -351,7 +351,7 @@ Comprehensive test suite available:
 - **Feature flag testing**: `test-feature-flag.html`
 - **Performance testing**: `test-performance-guardrails.html`
 - **Integration testing**: `test-sa-integration.html`
-- **Documentation**: `SA_LABELER_MIGRATION.md`
+- **Documentation**: See `devlog.md` for comprehensive SA labeler migration details
 
 ## Contributing
 
