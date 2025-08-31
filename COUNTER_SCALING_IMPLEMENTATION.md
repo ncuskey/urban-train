@@ -99,6 +99,26 @@ export function updateLabelZoom({ svg, groupId = 'labels-world' }) {
 }
 ```
 
+### **CSS Kill Switch for Debug Rectangles**
+
+To hide debug rectangles that show label boundaries and placement boxes, use the CSS kill switch:
+
+```css
+/* Debug ocean rectangle kill switch */
+.debug-ocean-rect,
+.ocean-bbox,
+.ocean-debug,
+#labels-debug rect { 
+  display: none !important; 
+}
+```
+
+This targets all debug rectangles:
+- `.ocean-bbox` - Debug rectangles created in `placeOceanLabelAt`
+- `.ocean-debug` - Debug rectangles for viewport clamping
+- `#labels-debug rect` - Debug rectangles for label placement validation
+- `.debug-ocean-rect` - Future debug rectangles with this class
+
 ## Safety Features
 
 ### **Zoom Level Guards**
@@ -225,6 +245,11 @@ The transform chain is applied in this order:
 - Check label count during zoom operations
 - Monitor transform parsing performance
 
+**Debug rectangles visible:**
+- Use CSS kill switch to hide debug rectangles: `.ocean-bbox, .ocean-debug, #labels-debug rect { display: none !important; }`
+- Check if `window.DBG.labels` is enabled
+- Verify debug flags in console
+
 ### **Debug Commands**
 ```javascript
 // Check current zoom state
@@ -239,6 +264,9 @@ d3.selectAll('g.label').each(function() {
 const k = 2.0;
 const inv = 1 / k;
 console.log(`Counter-scale factor: ${inv}`);
+
+// Hide debug rectangles via CSS
+document.querySelector('style').textContent += '.ocean-bbox, .ocean-debug, #labels-debug rect { display: none !important; }';
 ```
 
 ## Conclusion

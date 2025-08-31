@@ -169,6 +169,14 @@ text.place-label.ocean {
   z-index: 1000;
 }
 
+/* Debug ocean rectangle kill switch */
+.debug-ocean-rect,
+.ocean-bbox,
+.ocean-debug,
+#labels-debug rect { 
+  display: none !important; 
+}
+
 #hud .tip text {
   fill: white;
   font-family: Arial, sans-serif;

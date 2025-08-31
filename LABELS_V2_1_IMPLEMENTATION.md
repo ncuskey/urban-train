@@ -161,6 +161,7 @@ All text elements now include SVG attributes for consistent rendering:
 - **Defensive positioning**: Extracts original position from current transform attributes
 - **Rotation preservation**: Maintains any existing label rotation during counter-scaling
 - **Debug logging**: Console output when counter-scaling is applied (when `window.DBG.labels` enabled)
+- **CSS kill switch**: Debug rectangles can be hidden with `.ocean-bbox, .ocean-debug, #labels-debug rect { display: none !important; }`
 
 ### Label BBox Estimation Optimization
 The system uses a pragmatic approach for label width estimation:
