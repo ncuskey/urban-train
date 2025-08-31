@@ -5,10 +5,105 @@ export const USE_SA_LABELER = true;       // master switch
 // Ocean labels now always participate in SA collision avoidance
 export const DEBUG_LABEL_BOXES = false;   // show rects behind text
 
+// --- DEBUG CONFIG ---
+export const LABEL_DEBUG = true;  // flip to false to silence logs
+let __labelProbeId = null; // chosen once per run
+let __lastProbe = null; // cache for last probe state
+
+// Dynamic label budgets based on zoom level
+function labelBudgetByZoom(k) {
+  const t = Math.max(0, Math.min(1, (k - 1.1) / 1.2)); // tune
+  return { ocean: 1, island: Math.round(1 + 9*t), lake: Math.round(1 + 11*t) };
+}
+
+// Minimum area thresholds for label visibility
+function minAreaPx(kind, k) {
+  const base = kind === 'island' ? 6000 : 4000; // at k≈1.0; tune
+  const scale = Math.max(0.4, 1.2 - 0.4*(k - 1));
+  return base * scale;
+}
+
+// Check if label is too close to any kept labels
+function tooCloseToAny(l, kept, minSepWorld) {
+  for (const o of kept) {
+    const dx = l.x - o.x, dy = l.y - o.y;
+    if (Math.hypot(dx, dy) < minSepWorld) return true;
+  }
+  return false;
+}
+
+function getK() {
+  const worldNode = d3.select('#world').node() || d3.select('svg').node();
+  return d3.zoomTransform(worldNode).k || 1;
+}
+
+function pickProbeLabel(selection) {
+  if (!LABEL_DEBUG || __labelProbeId) return;
+  // Prefer an island, fall back to any feature label
+  let d = null;
+  selection.each(function(dd) { if (!d && (dd.kind === 'island' || dd.kind === 'lake')) d = dd; });
+  if (!d) selection.each(function(dd){ if (!d) d = dd; });
+  if (d) {
+    if (d.uid == null) d.uid = `lbl_${d.kind}_${Math.random().toString(36).slice(2,7)}`;
+    __labelProbeId = d.uid;
+  }
+}
+
+function countScales(transformStr) {
+  if (!transformStr) return 0;
+  const m = transformStr.match(/scale\(/g);
+  return m ? m.length : 0;
+}
+
+function hasChanged(msg) {
+  const key = JSON.stringify([msg.k, msg.uid, msg.baseFontPx, msg.computedFontPx, msg.transform]);
+  if (__lastProbe === key) return false;
+  __lastProbe = key;
+  return true;
+}
+
+export function logProbe(tag, selection) {
+  if (!LABEL_DEBUG || !__labelProbeId) return;
+  let node = null, data = null;
+  selection.each(function(d){
+    if (d?.uid === __labelProbeId && !node) { node = this; data = d; }
+  });
+  if (!node) return;
+  const g = d3.select(node);
+  const tf = g.attr('transform') || '';
+  const k = getK();
+
+  // read one of the text children for computed font
+  const textNode = g.select('text.fill').node() || g.select('text').node();
+  const cs = textNode ? window.getComputedStyle(textNode) : null;
+  const computedPx = cs ? parseFloat(cs.fontSize) : NaN;
+
+  const base = data?.baseFontPx ?? data?.fontPx ?? NaN;
+  const scales = countScales(tf);
+  const msg = {
+    tag, k,
+    uid: data?.uid, kind: data?.kind, name: data?.label || data?.name,
+    baseFontPx: base, computedFontPx: computedPx,
+    transform: tf, scaleTokens: scales
+  };
+
+  if (!hasChanged(msg)) return;
+  console.groupCollapsed(`🔎 [label-probe] ${tag}`);
+  console.log(msg);
+  // Warnings
+  if (!Number.isNaN(base) && !Number.isNaN(computedPx) && Math.abs(computedPx - base) > 0.5) {
+    console.warn(`⚠️ computed font (${computedPx}px) differs from baseline (${base}px)`);
+  }
+  if (scales > 1) {
+    console.warn(`⚠️ multiple scale() detected in transform (${scales}) → potential double-scaling`);
+  }
+  console.groupEnd();
+}
+
 // Get the label font family from CSS variable
 function labelFontFamily() {
   return getComputedStyle(document.documentElement)
-           .getPropertyValue('--label-font').trim() || 'serif';
+    .getPropertyValue('--label-font').trim() || 'serif';
 }
 
 // Accurate text measurement using ghost element
@@ -65,6 +160,14 @@ export function computeLabelMetrics({ svg, labels }) {
       // Ensure the label stays within its keepWithinRect
       if (result.keepWithinRect) {
         result._box = { w: width, h: height };
+        
+        // 🔒 Post-measure clamp: ensures center stays inside the keep rect
+        const r = result.keepWithinRect;
+        const halfW = result._box.w / 2;
+        const halfH = result._box.h / 2;
+        result.x = Math.min(Math.max(result.x, r.x0 + halfW), r.x1 - halfW);
+        result.y = Math.min(Math.max(result.y, r.y0 + halfH), r.y1 - halfH);
+        
         clampToKeepRect(result);
       }
       
@@ -208,7 +311,24 @@ function fitOceanLabelToRect(oceanLabel, rect, svg) {
   
   // Set _box for clamping and ensure the label stays within bounds
   oceanLabel._box = { w: finalWidth, h: finalHeight };
+  
+  // 🔒 Post-measure clamp: ensures center stays inside the keep rect
+  if (oceanLabel.keepWithinRect && oceanLabel._box) {
+    const r = oceanLabel.keepWithinRect;
+    const halfW = oceanLabel._box.w / 2;
+    const halfH = oceanLabel._box.h / 2;
+    oceanLabel.x = Math.min(Math.max(oceanLabel.x, r.x0 + halfW), r.x1 - halfW);
+    oceanLabel.y = Math.min(Math.max(oceanLabel.y, r.y0 + halfH), r.y1 - halfH);
+  }
+  
   clampToKeepRect(oceanLabel);
+  
+  // Debug logging after ocean fit-to-rect finalizes size
+  if (LABEL_DEBUG) {
+    // Try to find the ocean label group if already bound, otherwise log datum
+    const g = d3.select('#labels-features').selectAll('g.label');
+    logProbe('ocean-fit:final-size', g);
+  }
   
   return oceanLabel;
 }
@@ -426,6 +546,14 @@ export function annealLabels({ labels, bounds, sweeps = 400, svg }) {
       // Set x,y to the center of the placed position for clamping
       l.x = l.placed.x + l.width / 2;
       l.y = l.placed.y + l.height / 2;
+      
+      // 🔒 Post-measure clamp: ensures center stays inside the keep rect
+      const r = l.keepWithinRect;
+      const halfW = l._box.w / 2;
+      const halfH = l._box.h / 2;
+      l.x = Math.min(Math.max(l.x, r.x0 + halfW), r.x1 - halfW);
+      l.y = Math.min(Math.max(l.y, r.y0 + halfH), r.y1 - halfH);
+      
       clampToKeepRect(l);
       // Update placed position to match clamped position
       l.placed.x = l.x - l.width / 2;
@@ -1745,32 +1873,54 @@ export function filterByZoom(placed, k) {
     }
   }
 
-  const lim = {
-    ocean: 4,
-    lake:   k < 1   ? 1  : k < 2 ? 3  : k < 4 ? 10 : 25,
-    island: k < 1   ? 2  : k < 2 ? 4  : k < 4 ? 10 : 20,
-    other:  k < 2   ? 0  : k < 4 ? 5  : 15
-  };
+  // Get dynamic budgets based on zoom level
+  const budgets = labelBudgetByZoom(k);
+  console.log('[labels] dynamic budgets', budgets);
 
-  const out = [
-    ...buckets.ocean.slice(0, lim.ocean),
-    ...buckets.lake.slice(0, lim.lake),
-    ...buckets.island.slice(0, lim.island),
-    ...buckets.other.slice(0, lim.other),
-  ];
+  // Apply gating for island and lake labels (size + separation)
+  const z = d3.zoomTransform(d3.select('#world').node() || d3.select('svg').node());
+  const visible = [];
+
+  // Ocean labels (always show 1)
+  visible.push(...buckets.ocean.slice(0, budgets.ocean));
+
+  // Island labels with gating
+  const islandCandidates = buckets.island
+    .filter(l => l.featurePixelArea >= minAreaPx('island', z.k))
+    .sort((a,b) => b.featureWorldArea - a.featureWorldArea);
+
+  const keptIslands = [];
+  for (const l of islandCandidates) {
+    if (keptIslands.length >= budgets.island) break;
+    if (tooCloseToAny(l, keptIslands, 36 / z.k)) continue; // ~36px separation
+    keptIslands.push(l);
+  }
+  visible.push(...keptIslands);
+
+  // Lake labels with gating
+  const lakeCandidates = buckets.lake
+    .filter(l => l.featurePixelArea >= minAreaPx('lake', z.k))
+    .sort((a,b) => b.featureWorldArea - a.featureWorldArea);
+
+  const keptLakes = [];
+  for (const l of lakeCandidates) {
+    if (keptLakes.length >= budgets.lake) break;
+    if (tooCloseToAny(l, keptLakes, 36 / z.k)) continue; // ~36px separation
+    keptLakes.push(l);
+  }
+  visible.push(...keptLakes);
 
   // Debug logging
-  console.log(`[labels] zoom filter: k=${k.toFixed(2)}, total=${placed.length}, visible=${out.length}`);
-  console.log(`[labels] limits: ocean=${lim.ocean}, lake=${lim.lake}, island=${lim.island}, other=${lim.other}`);
-  console.log(`[labels] buckets: ocean=${buckets.ocean.length}, lake=${buckets.lake.length}, island=${buckets.island.length}, other=${buckets.other.length}`);
+  console.log(`[labels] zoom filter: k=${k.toFixed(2)}, total=${placed.length}, visible=${visible.length}`);
+  console.log(`[labels] budgets: ocean=${budgets.ocean}, island=${budgets.island}, lake=${budgets.lake}`);
+  console.log(`[labels] buckets: ocean=${buckets.ocean.length}, island=${buckets.island.length}, lake=${buckets.lake.length}`);
   console.log(`[labels] visible by kind:`, {
-    ocean: buckets.ocean.slice(0, lim.ocean).length,
-    lake: buckets.lake.slice(0, lim.lake).length,
-    island: buckets.island.slice(0, lim.island).length,
-    other: buckets.other.slice(0, lim.other).length
+    ocean: buckets.ocean.slice(0, budgets.ocean).length,
+    island: keptIslands.length,
+    lake: keptLakes.length
   });
 
-  return out;
+  return visible;
 }
 
 // DEBUG: Helper function to inspect all labels
@@ -1977,6 +2127,19 @@ export function renderLabels({ svg, placed, groupId }) {
     if (d.baseStrokePx == null) d.baseStrokePx = 2;          // default outline
   });
   
+  // Tag labels with stable uid and pick a probe once
+  const labels = g.selectAll('g.label');
+  labels.each(function(d){
+    // stable uid for debugging & joins
+    if (d.uid == null) d.uid = `lbl_${d.kind}_${Math.random().toString(36).slice(2,7)}`;
+    // establish baselines once (Prompt 7 set these; keep here to be safe)
+    if (d.baseFontPx == null) d.baseFontPx = d.fontPx || 28;
+    if (d.baseStrokePx == null) d.baseStrokePx = 2;
+  });
+  // choose one probe label for this run
+  pickProbeLabel(labels);
+  logProbe('renderLabels:after-join', labels);
+  
   // Set position and transform
   merged.attr('transform', function(d) {
     if (!d) return 'translate(0,0)'; // Safety guard
@@ -2102,6 +2265,12 @@ export function updateLabelZoom({ svg, groupId = 'labels-features' }) {
   // Keep strokes crisp with zoom; do NOT change font-size here
   g.selectAll('text.stroke')
     .style('stroke-width', d => (d.baseStrokePx ? d.baseStrokePx / k : 2 / k));
+  
+  // Debug logging inside updateLabelZoom (after applying transform)
+  if (LABEL_DEBUG) {
+    const sel = g.selectAll('g.label');
+    logProbe('updateLabelZoom:after-apply', sel);
+  }
 }
 
 // Real LOD: compute the visible set and toggle class

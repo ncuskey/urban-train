@@ -14,7 +14,7 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction, getVisibleWorldBounds, padBounds } from "./modules/interaction.js";
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
-import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect } from "./modules/labels.js";
+import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, logProbe, LABEL_DEBUG } from "./modules/labels.js";
 
 // === Minimal Perf HUD ==========================================
 const Perf = (() => {
@@ -802,6 +802,12 @@ async function generate(count) {
           // Render all labels including oceans
           renderLabels({ svg: svgSel, placed: placedFeatures, groupId: 'labels-features' });
           
+          // Debug logging after SA placement render
+          if (LABEL_DEBUG) {
+            const g = svgSel.select('#labels-features').selectAll('g.label');
+            logProbe('post-SA-render', g);
+          }
+          
           // Update visibility and zoom
           const k0 = (d3.zoomTransform(svgSel.node()).k || 1);
           updateLabelVisibility({
@@ -829,6 +835,12 @@ async function generate(count) {
           
           // Render all labels
           renderLabels({ svg: svgSel, placed: placedFeatures, groupId: 'labels-features' });
+          
+          // Debug logging after SA placement render
+          if (LABEL_DEBUG) {
+            const g = svgSel.select('#labels-features').selectAll('g.label');
+            logProbe('post-SA-render', g);
+          }
           
           // Update visibility and zoom
           const k0 = (d3.zoomTransform(svgSel.node()).k || 1);

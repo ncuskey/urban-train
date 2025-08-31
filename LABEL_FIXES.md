@@ -222,3 +222,81 @@ window.toggleLabelScaling();
 
 **Files Changed**:
 - `src/modules/labels.js` - Fixed all D3 callback functions to use explicit function declarations and proper null checking
+
+### Dynamic Budgets and Gating (2025-08-30)
+
+**Issue**: At minimum zoom, too many island and lake labels were visible, causing crowding and poor readability. Static limits didn't scale well with zoom levels.
+
+**Root Cause**: 
+- Static label limits (e.g., 4 islands, 3 lakes) didn't adapt to zoom level
+- No size-based filtering to prioritize larger, more important features
+- No proximity checking to prevent label clustering
+- Fixed thresholds didn't account for zoom-dependent visibility needs
+
+**Solution**:
+1. **Dynamic budget scaling**: `labelBudgetByZoom()` provides zoom-dependent label counts
+   - Minimum zoom (k=1.1): 1 island, 1 lake, 1 ocean
+   - Maximum zoom (k=2.3): 10 islands, 12 lakes, 1 ocean
+   - Smooth linear interpolation between extremes
+
+2. **Size-based gating**: `minAreaPx()` filters labels by pixel area with zoom scaling
+   - Island threshold: 6000px² base at k≈1.0, scales down with zoom
+   - Lake threshold: 4000px² base at k≈1.0, scales down with zoom
+   - Higher zoom = lower thresholds = more labels visible
+
+3. **Proximity-based separation**: `tooCloseToAny()` prevents label clustering
+   - Minimum 36px separation in world coordinates
+   - Zoom-aware scaling (36/k) for consistent screen separation
+   - Greedy selection: keeps largest features that don't overlap
+
+4. **Progressive reveal system**: Labels appear smoothly as you zoom in
+   - Quality over quantity: largest features shown first
+   - No sudden jumps: gradual increase in label density
+   - Crowding prevention: maintains proper label spacing
+
+**Implementation Details**:
+```javascript
+// Dynamic budgets based on zoom level
+function labelBudgetByZoom(k) {
+  const t = Math.max(0, Math.min(1, (k - 1.1) / 1.2)); // tune
+  return { ocean: 1, island: Math.round(1 + 9*t), lake: Math.round(1 + 11*t) };
+}
+
+// Minimum area thresholds for label visibility
+function minAreaPx(kind, k) {
+  const base = kind === 'island' ? 6000 : 4000; // at k≈1.0; tune
+  const scale = Math.max(0.4, 1.2 - 0.4*(k - 1));
+  return base * scale;
+}
+
+// Check if label is too close to any kept labels
+function tooCloseToAny(l, kept, minSepWorld) {
+  for (const o of kept) {
+    const dx = l.x - o.x, dy = l.y - o.y;
+    if (Math.hypot(dx, dy) < minSepWorld) return true;
+  }
+  return false;
+}
+```
+
+**Budget Scaling Examples**:
+- **k=1.1 (min)**: 1 island, 1 lake, 1 ocean
+- **k=1.5 (medium)**: 4 islands, 5 lakes, 1 ocean  
+- **k=2.0 (high)**: 8 islands, 10 lakes, 1 ocean
+- **k=2.3 (max)**: 10 islands, 12 lakes, 1 ocean
+
+**Area Threshold Scaling**:
+- **k=1.1**: Island ≥ 7200px², Lake ≥ 4800px²
+- **k=1.5**: Island ≥ 6000px², Lake ≥ 4000px²
+- **k=2.0**: Island ≥ 4800px², Lake ≥ 3200px²
+- **k=2.3**: Island ≥ 4320px², Lake ≥ 2880px²
+
+**Benefits**:
+- **Clean minimum zoom**: No overwhelming label density
+- **Progressive discovery**: Users discover more details as they zoom
+- **Quality focus**: Always shows the most important features first
+- **Performance**: Fewer labels to render at minimum zoom
+- **Visual quality**: No crowding, proper separation maintained
+
+**Files Changed**:
+- `src/modules/labels.js` - Added dynamic budget functions and updated `filterByZoom` with gating logic

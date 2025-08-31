@@ -151,13 +151,24 @@ For comprehensive debugging and testing, see the `/dev/` directory:
 
 ### **Label Settings**
 ```javascript
-{
-  minLakeArea: 0,      // No minimum size - all lakes get names
-  minIslandArea: 0,    // No minimum size - all islands get names
-  maxOceans: 3,
-  maxLakes: 15,
-  maxIslands: 20
+// Dynamic budgets based on zoom level
+function labelBudgetByZoom(k) {
+  const t = Math.max(0, Math.min(1, (k - 1.1) / 1.2));
+  return { ocean: 1, island: Math.round(1 + 9*t), lake: Math.round(1 + 11*t) };
 }
+
+// Minimum area thresholds with zoom scaling
+function minAreaPx(kind, k) {
+  const base = kind === 'island' ? 6000 : 4000; // at k≈1.0
+  const scale = Math.max(0.4, 1.2 - 0.4*(k - 1));
+  return base * scale;
+}
+
+// Budget scaling examples:
+// k=1.1 (min): 1 island, 1 lake, 1 ocean
+// k=1.5 (medium): 4 islands, 5 lakes, 1 ocean  
+// k=2.0 (high): 8 islands, 10 lakes, 1 ocean
+// k=2.3 (max): 10 islands, 12 lakes, 1 ocean
 ```
 
 ### **SA Labeler Configuration**
@@ -224,6 +235,9 @@ function labelFontFamily() {
 - **Simulated Annealing** for global label placement optimization
 - **Performance guardrails** with dynamic sweeps based on cluster size
 - **Cluster-based processing** to prevent excessive computation
+- **Dynamic label budgets** with zoom-dependent scaling to prevent crowding
+- **Size-based gating** prioritizes larger, more important features
+- **Proximity-based separation** prevents label clustering with 36px minimum spacing
 - **Ocean labels in world space**: Ocean labels participate in collision avoidance and zoom/pan with the map
 - **Higher mass for ocean labels**: Ocean labels have 3x higher mass in SA energy function, making smaller labels move around them
 - **Fit-to-rect functionality**: Ocean labels automatically scale font size and use two-line breaks to fit within their boundaries
