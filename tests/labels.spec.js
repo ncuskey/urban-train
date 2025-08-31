@@ -40,3 +40,25 @@ test('zoom counter-scaling keeps font sizes stable', async ({ page }) => {
 
   expect(Math.abs(size2 - size1)).toBeLessThan(1.0);
 });
+
+test('tiered LOD ramps with zoom', async ({ page }) => {
+  await page.goto('http://localhost:8000/index.html');
+  await page.waitForSelector('#labels-overlay');
+
+  // Helper to count visible text by tier class
+  async function visibleCount(sel){
+    return page.$$eval(sel, els => els.filter(e => e.classList.contains('is-visible')).length);
+  }
+
+  // Low zoom → expect mostly tier-2 or higher
+  const lowT4 = await visibleCount('#labels-overlay text.tier-4');
+  expect(lowT4).toBeLessThan(2);
+
+  // Zoom in a lot
+  await page.mouse.wheel(0, -1600);
+  await page.waitForTimeout(500);
+
+  // Now Tier 4 should start appearing
+  const highT4 = await visibleCount('#labels-overlay text.tier-4');
+  expect(highT4).toBeGreaterThanOrEqual(2);
+});

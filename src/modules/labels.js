@@ -52,6 +52,52 @@ const worldRectToScreenRect = ({x,y,w,h}) => {
 const keyWorld = d => `w:${d.kind}:${d.id}`;
 const keyOcean = d => `ocean:${d.id || 0}`;
 
+// --- LOD helpers (tier-aware) ---
+function lerp(a,b,t){ return a + (b-a)*t; }
+function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+// Smoothstep from edge0..edge1
+function smooth01(x0, x1, k){ return clamp01((k - x0) / Math.max(1e-6, (x1 - x0))); }
+
+// Keep a smoothed k to reduce flicker near thresholds
+let __LOD_prevK = 1.0;
+export function getSmoothedK(k){
+  const α = 0.25;               // smoothing factor; 0=no smoothing, 1=instant
+  __LOD_prevK = (1-α)*__LOD_prevK + α*k;
+  return __LOD_prevK;
+}
+
+// LOD visibility policy by tier (2..4); tier 1 (ocean) is always visible
+// Zoom breakpoints (D3 k): start to reveal, then ramp to full density
+const LOD_BREAKS = {
+  t2: { start: 1.12, full: 1.35 },  // Major Islands (unchanged)
+  t3: { start: 1.45, full: 1.85 },  // Minor Islands & Large Lakes (later)
+  t4: { start: 1.90, full: 2.40 }   // Tiny Islands & Small Lakes (even later)
+};
+
+// Per-tier separation in *screen* pixels (counter-scaled to world later)
+function separationPxForTier(tier){
+  return tier === 2 ? 38 : tier === 3 ? 28 : 22;
+}
+
+// Minimum feature screen area (px^2) by tier as a function of k
+function minAreaPxForTier(tier, k){
+  const s2 = smooth01(LOD_BREAKS.t2.start, LOD_BREAKS.t2.full, k);
+  const s3 = smooth01(LOD_BREAKS.t3.start, LOD_BREAKS.t3.full, k);
+  const s4 = smooth01(LOD_BREAKS.t4.start, LOD_BREAKS.t4.full, k);
+  if (tier === 2) return Math.round(lerp(420,  80, s2));
+  if (tier === 3) return Math.round(lerp(360,  60, s3));
+  return                Math.round(lerp(280,  28, s4)); // tier 4
+}
+
+// Budget (how many labels per tier) given k and candidate count n
+function tierBudget(tier, k, n){
+  const b = tier === 2 ? LOD_BREAKS.t2 : tier === 3 ? LOD_BREAKS.t3 : LOD_BREAKS.t4;
+  const s = smooth01(b.start, b.full, k);
+  const base   = tier === 2 ? 2 : 0;
+  const growth = tier === 2 ? 6 : tier === 3 ? 10 : 14;
+  return Math.min(n, Math.round(base + growth * s));
+}
+
 // Overlay-only updater for ocean labels (no world label interference)
 export function updateOverlayOceanLabel(k) {
   // Recompute font size/position for ocean text if you need to respond to zoom k.
@@ -149,27 +195,7 @@ function timeit(tag, fn) {
   return out;
 }
 
-// Dynamic label budgets based on zoom level
-function labelBudgetByZoom(k) {
-  const t = Math.max(0, Math.min(1, (k - 1.1) / 1.2)); // tune
-  return { ocean: 1, island: Math.round(1 + 9*t), lake: Math.round(1 + 11*t) };
-}
 
-// Minimum area thresholds for label visibility
-function minAreaPx(kind, k) {
-  const base = kind === 'island' ? 6000 : 4000; // at k≈1.0; tune
-  const scale = Math.max(0.4, 1.2 - 0.4*(k - 1));
-  return base * scale;
-}
-
-// Check if label is too close to any kept labels
-function tooCloseToAny(l, kept, minSepWorld) {
-  for (const o of kept) {
-    const dx = l.x - o.x, dy = l.y - o.y;
-    if (Math.hypot(dx, dy) < minSepWorld) return true;
-  }
-  return false;
-}
 
 // --- pixel text measurement (cached canvas) ---
 const __measureCtx = (() => {
@@ -474,19 +500,20 @@ export function fitOceanToRectPx(label, rectPx, pad = 10) {
   const maxW = Math.max(0, rectPx.w - 2 * pad);
   const maxH = Math.max(0, rectPx.h - 2 * pad);
 
-  const MAX_OCEAN_PX = 42; // hard cap so we never explode
+  const MIN_OCEAN_PX = 34;           // screen pixels floor
+  const MAX_OCEAN_PX = 44;           // existing cap is fine
   const lineH = f => f * 1.2;
 
   // Prefer label.baseFontPx first, then shrink until it fits
   const preferred = Math.min(label.baseFontPx || 40, MAX_OCEAN_PX);
   let best = null;
 
-  // try preferred first, then step down
-  for (let f = preferred; f >= 12; f -= 1) {
+  // Try preferred → down to MIN_OCEAN_PX, then continue if needed
+  for (let f = preferred; f >= 12; f--) {
     // try one line
     const fitsOne = textWidthPx(text, f, fam) <= maxW && lineH(f) <= maxH;
     if (fitsOne) {
-      best = f;
+      best = Math.max(f, MIN_OCEAN_PX);
       break;
     }
   }
@@ -500,12 +527,12 @@ export function fitOceanToRectPx(label, rectPx, pad = 10) {
   if (wpx > maxW || hpx > maxH) {
     const sp = bestTwoLineSplit(words);
     // try two-line with preferred size first, then step down
-    for (let f = preferred; f >= 12; f -= 1) {
+    for (let f = preferred; f >= 12; f--) {
       const w1 = textWidthPx(sp.a, f, fam);
       const w2 = textWidthPx(sp.b, f, fam);
       const H = lineH(f) * 2;
       if (Math.max(w1, w2) <= maxW && H <= maxH) {
-        fontPx = f;
+        fontPx = Math.max(f, MIN_OCEAN_PX);
         lines = [sp.a, sp.b];
         wpx = Math.max(w1, w2);
         hpx = H;
@@ -1579,6 +1606,13 @@ export function buildFeatureLabels({
     }
   }
 
+  // DEBUG once per run
+  if (!window.__loggedTierStats) {
+    const c = (k) => labels.filter(x => x.kind !== 'ocean' && x.tier === k).length;
+    console.log('[tiers] counts:', { t2: c(2), t3: c(3), t4: c(4) });
+    window.__loggedTierStats = true;
+  }
+
   // NOTE: Labels will be processed by placeLabelsAvoidingCollisions() which checks USE_SA_LABELER flag
   return labels;
 }
@@ -2151,88 +2185,68 @@ function checkPartialClear(qt, x, y, w, h, area = 0) {
 }
 
 // ---- Zoom filtering with progressive reveal ----
-export function filterByZoom(placed, k) {
-  // Don't run LOD before autofit has finished
-  const svgSel = asSel(d3.select("svg"));
-  const zoomLocked = svgSel.attr("data-zoom-locked") === "1";
-  if (!zoomLocked) return placed; // Return all labels if zoom not locked yet
-  
-  // Safety check: ensure placed is valid
-  if (!Array.isArray(placed) || placed.length === 0) {
-    console.warn('[labels] filterByZoom: no labels to filter');
-    return [];
-  }
-  
-  // Filter out ocean labels - they're handled separately in overlay
-  const worldOnly = placed.filter(l => l.kind !== 'ocean');
-  
-  // Bucket by kind (placed is already sorted by priority and area)
-  const buckets = { lake: [], island: [], other: [] };
-  for (const l of worldOnly) {
-    if (l?.kind) {
-      (buckets[l.kind] ?? buckets.other).push(l);
+export function filterByZoom(placed, k){
+  // Until zoom is "locked" post-autofit, show everything (existing behavior)
+  const svg = d3.select('svg');
+  if (svg.empty() || svg.attr('data-zoom-locked') !== '1') return placed;
+
+  // Smooth k to reduce flicker near thresholds
+  const ks = getSmoothedK(k);
+
+  // Always keep the (single) ocean label
+  const oceans   = placed.filter(p => p.kind === 'ocean');
+
+  // Group non-ocean by tier (expects .tier set earlier in buildFeatureLabels)
+  const t2 = placed.filter(p => p.kind !== 'ocean' && (p.tier === 2));
+  const t3 = placed.filter(p => p.kind !== 'ocean' && (p.tier === 3));
+  const t4 = placed.filter(p => p.kind !== 'ocean' && (p.tier === 4));
+
+  // Sort candidates biggest-first with a tiny bias for higher tier at equal area
+  const area = p => (p.area || 0);
+  const bias = p => (5 - (p.tier || 4)) * 1e-6;
+  const byArea = (a,b) => (area(b)+bias(b)) - (area(a)+bias(a));
+  [t2,t3,t4].forEach(arr => arr.sort(byArea));
+
+  // Tier-wise budgets and thresholds (screen px^2); spacing per tier (px)
+  function acceptGreedy(candidates, tier, out){
+    const minPx = minAreaPxForTier(tier, ks);
+    const sepPx = separationPxForTier(tier);
+    const budget = tierBudget(tier, ks, candidates.length);
+
+    // world-space separation threshold
+    const sepWorld = sepPx / ks;
+
+    // For speed, maintain accepted list and reject too-close ones
+    for (let i=0; i<candidates.length && out.length < 9999; i++){
+      const p = candidates[i];
+
+      // Pixel area gating: worldArea * k^2
+      const pxArea = (p.area || 0) * ks * ks;
+      if (pxArea < minPx) continue;
+
+      // Separation gating vs already-accepted non-ocean labels
+      let close = false;
+      for (let j=0; j<out.length; j++){
+        const q = out[j];
+        if (q.kind === 'ocean') continue;
+        const dx = (p.x - q.x), dy = (p.y - q.y);
+        if (dx*dx + dy*dy < (sepWorld*sepWorld)) { close = true; break; }
+      }
+      if (close) continue;
+
+      out.push(p);
+      // Stop if this tier has met its budget
+      const countThisTier = out.filter(x => x.tier === tier && x.kind !== 'ocean').length;
+      if (countThisTier >= budget) break;
     }
   }
 
-  // Get dynamic budgets based on zoom level (ocean budget not used for world labels)
-  const budgets = labelBudgetByZoom(k);
-  console.log('[labels] dynamic budgets', budgets);
+  const keep = [...oceans];
+  acceptGreedy(t2, 2, keep);
+  acceptGreedy(t3, 3, keep);
+  acceptGreedy(t4, 4, keep);
 
-  // Apply gating for island and lake labels (size + separation)
-  const z = d3.zoomTransform(d3.select('#world').node() || d3.select('svg').node());
-  const visible = [];
-
-  // Island labels with gating
-  const islandCandidates = buckets.island
-    .filter(l => {
-      // Compute pixel area from world area: area * k²
-      const featurePixelArea = (l.area || 0) * z.k * z.k;
-      return featurePixelArea >= minAreaPx('island', z.k);
-    });
-  
-  // Bias LOD to prefer higher tiers at equal/near-equal area
-  const S = p => (p.area || 0);
-  const W = p => (5 - (p.tier || 4)); // tier 1 = weight 4, tier 4 = weight 1
-  const score = p => S(p) * 1 + W(p) * 1e-6; // tiny bias
-  islandCandidates.sort((a,b) => score(b) - score(a));
-
-  const keptIslands = [];
-  for (const l of islandCandidates) {
-    if (keptIslands.length >= budgets.island) break;
-    if (tooCloseToAny(l, keptIslands, 36 / z.k)) continue; // ~36px separation
-    keptIslands.push(l);
-  }
-  visible.push(...keptIslands);
-
-  // Lake labels with gating
-  const lakeCandidates = buckets.lake
-    .filter(l => {
-      // Compute pixel area from world area: area * k²
-      const featurePixelArea = (l.area || 0) * z.k * z.k;
-      return featurePixelArea >= minAreaPx('lake', z.k);
-    });
-  
-  // Bias LOD to prefer higher tiers at equal/near-equal area
-  lakeCandidates.sort((a,b) => score(b) - score(a));
-
-  const keptLakes = [];
-  for (const l of lakeCandidates) {
-    if (keptLakes.length >= budgets.lake) break;
-    if (tooCloseToAny(l, keptLakes, 36 / z.k)) continue; // ~36px separation
-    keptLakes.push(l);
-  }
-  visible.push(...keptLakes);
-
-  // Debug logging (commented out to reduce spam)
-  // console.log(`[labels] zoom filter: k=${k.toFixed(2)}, total=${worldOnly.length}, visible=${visible.length}`);
-  // console.log(`[labels] budgets: island=${budgets.island}, lake=${budgets.lake}`);
-  // console.log(`[labels] buckets: island=${buckets.island.length}, lake=${buckets.lake.length}`);
-  // console.log(`[labels] visible by kind:`, {
-  //   island: keptIslands.length,
-  //   lake: keptLakes.length
-  // });
-
-  return visible;
+  return keep;
 }
 
 // DEBUG: Helper function to inspect all labels
@@ -2452,11 +2466,11 @@ export function renderOceanInWorld(svg, text) {
     .style('paint-order', 'stroke')
     .text(text);
   
-  // Set font size based on available space
+  // Set font size based on available space - use screen pixels directly
   if (window.state && window.state.ocean && window.state.ocean.rectPx) {
     const { rectPx } = window.state.ocean;
     const px = fitFontPx(text, rectPx.w * 0.9);
-    t.style('font-size', px + 'px');
+    t.style('font-size', `${px}px`); // screen-space target
   } else {
     t.style('font-size', '28px');
   }
@@ -2799,40 +2813,44 @@ export function updateLabelZoom({ svg, groupId = 'labels-world' }) {
 
 
 // Real LOD: compute the visible set and toggle class
-export function updateLabelVisibility({ svg, groupId, placed, k, filterByZoom }) {
-  // Safety check: ensure placed is valid
-  if (!Array.isArray(placed) || placed.length === 0) {
-    console.warn('[labels] updateLabelVisibility: no labels to process');
-    return;
+export function updateLabelVisibility(opts = {}) {
+  const placed = Array.isArray(opts.placed) ? opts.placed : [];
+
+  // Back-compat: compute 'visible' if not provided
+  let visible = Array.isArray(opts.visible) ? opts.visible : null;
+
+  if (!visible) {
+    const svg = d3.select('svg');
+    const k =
+      typeof opts.k === 'number'
+        ? opts.k
+        : (svg.empty() ? 1 : d3.zoomTransform(svg.node()).k);
+
+    const fbz = typeof opts.filterByZoom === 'function'
+      ? opts.filterByZoom
+      : (arr) => arr; // identity if no filter provided
+
+    try {
+      visible = fbz(placed, k);
+      if (!Array.isArray(visible)) visible = placed;
+    } catch (e) {
+      console.warn('[lod] fallback to placed after filter error:', e);
+      visible = placed;
+    }
   }
-  
-  // Filter out ocean labels - they're handled separately in overlay
-  const worldOnly = placed.filter(l => l.kind !== 'ocean');
-  
-  const visible = new Set(filterByZoom(worldOnly, k).map(function(d) { return d && d.id ? d.id : null; }).filter(Boolean));
+
+  const visIds = new Set((visible || []).map(d => d && d.id).filter(Boolean));
+  const isVisible = d => !!(d && visIds.has(d.id));
+
+  // Overlay labels
+  d3.select('#labels-overlay')
+    .selectAll('text')
+    .classed('is-visible', isVisible);
+
+  // World-space (ocean etc.)
   d3.select('#labels-world')
-    .selectAll('g.label text')
-    .classed('is-visible', function(d) { return d && d.id && visible.has(d.id); });
-  
-  // Quick self-check: log zoom level and visible count - commented out to reduce spam
-  // console.log(`[LOD] k=${k.toFixed(2)}, visible=${visible.size}/${worldOnly.length} labels`);
-  
-  // Debug breakdown by kind (world labels only) - commented out to reduce spam
-  // const buckets = { lake: [], island: [], other: [] };
-  // for (const l of worldOnly) {
-  //   if (l?.kind) {
-  //     (buckets[l.kind] ?? buckets.other).push(l);
-  //   }
-  // }
-  
-  // const visibleByKind = { lake: [], island: [], other: [] };
-  // for (const l of worldOnly) {
-  //   if (l?.id && visible.has(l.id)) {
-  //     (visibleByKind[l?.kind] ?? visibleByKind.other).push(l);
-  //   }
-  // }
-  
-  // console.log(`[LOD] Breakdown: lake=${visibleByKind.lake.length}/${buckets.lake.length}, island=${visibleByKind.island.length}/${buckets.island.length}`);
+    .selectAll('text')
+    .classed('is-visible', isVisible);
 }
 
 /**
@@ -3363,6 +3381,7 @@ function pxToWorldRect(px, t) {
 function fitFontPx(text, maxWidthPx, basePx = 28, family = labelFontFamily()) {
   // Use the existing measureTextWidth function for consistency
   const svg = d3.select('svg');
+  const MIN_OCEAN_PX = 34; // screen pixels floor
   let fs = basePx;
   
   while (fs > 12) { // don't go smaller than 12px
@@ -3371,7 +3390,7 @@ function fitFontPx(text, maxWidthPx, basePx = 28, family = labelFontFamily()) {
     fs -= 2; // reduce by 2px each iteration
   }
   
-  return fs;
+  return Math.max(fs, MIN_OCEAN_PX); // enforce minimum
 }
 
 // Optional (nice UX): only accept rects that can fit the text horizontally at (or slightly below) your base font size

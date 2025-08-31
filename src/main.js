@@ -827,6 +827,14 @@ async function generate(count) {
             // No need for post-fit nudge since fitTextToRect handles positioning
           }
 
+          // Re-apply LOD now that zoom is locked and oceans are placed
+          {
+            const svg = d3.select('svg');
+            const k = d3.zoomTransform(svg.node()).k;
+            const visible = filterByZoom(featureLabels, k);
+            updateLabelVisibility({ placed: featureLabels, visible });
+          }
+
           // Draw debug rectangle
           if (LABEL_DEBUG) drawDebugOceanRect(pxRect);
           

@@ -134,15 +134,15 @@ text.place-label.ocean {
 
 /* Label visibility control - hidden by default, shown only when JS sets class */
 #labels text {
-  opacity: 0 !important;
+  opacity: 0;
   pointer-events: none;
-  display: none; /* Fallback for better visibility control */
+  transition: opacity 140ms ease-out;
 }
 
 #labels text.is-visible {
-  opacity: 1 !important;
+  opacity: 1;
   pointer-events: auto;
-  display: block; /* Fallback for better visibility control */
+  /* keep display: block so the transition is visible */
 }
 
 /* Different styling for different feature types */

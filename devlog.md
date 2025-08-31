@@ -123,6 +123,181 @@ Each tier has a corresponding base font size:
 - Tier 3: 18px (Minor Islands/Large Lakes)
 - Tier 4: 14px (Tiny Islands/Small Lakes)
 
+## Tier-Aware Level of Detail (LOD) System
+
+The tier-aware LOD system provides progressive disclosure of labels based on zoom level, with different tiers appearing at different zoom thresholds to maintain clean, readable maps at all zoom levels.
+
+### Core Implementation
+
+**LOD Helper Functions**
+```javascript
+// Smooth zoom factor to reduce flicker near thresholds
+export function getSmoothedK(k) {
+  const α = 0.25; // smoothing factor
+  __LOD_prevK = (1-α)*__LOD_prevK + α*k;
+  return __LOD_prevK;
+}
+
+// Zoom breakpoints for each tier
+const LOD_BREAKS = {
+  t2: { start: 1.12, full: 1.35 },  // Major Islands
+  t3: { start: 1.45, full: 1.85 },  // Minor Islands & Large Lakes
+  t4: { start: 1.90, full: 2.40 }   // Tiny Islands & Small Lakes
+};
+
+// Minimum area thresholds by tier
+function minAreaPxForTier(tier, k) {
+  const s2 = smooth01(LOD_BREAKS.t2.start, LOD_BREAKS.t2.full, k);
+  const s3 = smooth01(LOD_BREAKS.t3.start, LOD_BREAKS.t3.full, k);
+  const s4 = smooth01(LOD_BREAKS.t4.start, LOD_BREAKS.t4.full, k);
+  if (tier === 2) return Math.round(lerp(420, 80, s2));
+  if (tier === 3) return Math.round(lerp(360, 60, s3));
+  return Math.round(lerp(280, 28, s4)); // tier 4
+}
+
+// Budget management per tier
+function tierBudget(tier, k, n) {
+  const b = tier === 2 ? LOD_BREAKS.t2 : tier === 3 ? LOD_BREAKS.t3 : LOD_BREAKS.t4;
+  const s = smooth01(b.start, b.full, k);
+  const base = tier === 2 ? 2 : 0;
+  const growth = tier === 2 ? 6 : tier === 3 ? 10 : 14;
+  return Math.min(n, Math.round(base + growth * s));
+}
+```
+
+**Tier-Aware Filtering**
+The `filterByZoom` function now processes labels by tier:
+
+```javascript
+export function filterByZoom(placed, k) {
+  // Smooth k to reduce flicker near thresholds
+  const ks = getSmoothedK(k);
+  
+  // Always keep ocean labels (Tier 1)
+  const oceans = placed.filter(p => p.kind === 'ocean');
+  
+  // Group by tier
+  const t2 = placed.filter(p => p.kind !== 'ocean' && p.tier === 2);
+  const t3 = placed.filter(p => p.kind !== 'ocean' && p.tier === 3);
+  const t4 = placed.filter(p => p.kind !== 'ocean' && p.tier === 4);
+  
+  // Sort by area with tier bias
+  const area = p => (p.area || 0);
+  const bias = p => (5 - (p.tier || 4)) * 1e-6;
+  const byArea = (a,b) => (area(b)+bias(b)) - (area(a)+bias(a));
+  [t2,t3,t4].forEach(arr => arr.sort(byArea));
+  
+  // Process each tier with greedy acceptance
+  const keep = [...oceans];
+  acceptGreedy(t2, 2, keep);
+  acceptGreedy(t3, 3, keep);
+  acceptGreedy(t4, 4, keep);
+  
+  return keep;
+}
+```
+
+### Zoom Behavior
+
+**Progressive Disclosure**
+- **k < 1.12**: Only Tier 1 (oceans) and some Tier 2 (major islands) visible
+- **k ≈ 1.35**: Tier 2 reaches full density
+- **k ≈ 1.45**: Tier 3 (minor islands/large lakes) starts appearing
+- **k ≈ 1.85**: Tier 3 reaches full density
+- **k ≈ 1.90**: Tier 4 (tiny islands/small lakes) starts appearing
+- **k ≈ 2.40**: Tier 4 reaches full density
+
+**Smooth Transitions**
+- Uses `smooth01()` function for gradual transitions between start and full thresholds
+- Smoothed zoom factor prevents flickering near tier boundaries
+- Area thresholds relax as zoom increases
+
+### Ocean Font Floor
+
+**Minimum Size Enforcement**
+Ocean labels maintain a minimum readable size:
+
+```javascript
+const MIN_OCEAN_PX = 34; // screen pixels floor
+const MAX_OCEAN_PX = 44; // maximum size
+
+// Enforce minimum in fitting functions
+best = Math.max(f, MIN_OCEAN_PX);
+```
+
+**Benefits**
+- Prevents ocean labels from becoming too small to read
+- Maintains visual prominence of ocean features
+- Ensures consistent readability across all zoom levels
+
+### CSS Transitions
+
+**Smooth Visibility Changes**
+Labels fade in/out instead of popping:
+
+```css
+#labels text {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease-out;
+}
+
+#labels text.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+```
+
+**Benefits**
+- Eliminates jarring pop-in/pop-out effects
+- Provides smooth visual transitions
+- Maintains professional appearance
+
+### Integration Points
+
+**Post-Autofit LOD Application**
+LOD is immediately applied after autofit and ocean placement:
+
+```javascript
+// Re-apply LOD now that zoom is locked and oceans are placed
+{
+  const svg = d3.select('svg');
+  const k = d3.zoomTransform(svg.node()).k;
+  const visible = filterByZoom(featureLabels, k);
+  updateLabelVisibility({ placed: featureLabels, visible });
+}
+```
+
+**Zoom Handler Integration**
+The zoom handler uses the new tier-aware filtering:
+
+```javascript
+// Update visibility with tier-aware filtering
+const visible = filterByZoom(window.__labelsPlaced.features, t.k);
+updateLabelVisibility({ placed: window.__labelsPlaced.features, visible });
+```
+
+### Performance Optimizations
+
+**Efficient Processing**
+- Single pass through labels by tier
+- Greedy acceptance algorithm for each tier
+- Minimal DOM updates with CSS transitions
+- Smoothed zoom factor reduces unnecessary recalculations
+
+**Memory Management**
+- No additional data structures required
+- Tier information stored as simple integer properties
+- Efficient Set-based visibility tracking
+
+### Benefits
+
+1. **Clean Visual Hierarchy**: Important features appear first, details emerge progressively
+2. **Consistent Performance**: Predictable label counts at each zoom level
+3. **Smooth User Experience**: No jarring pop-in/pop-out effects
+4. **Maintainable Code**: Clear separation of concerns and well-defined thresholds
+5. **Flexible Configuration**: Easy to adjust tier thresholds and budgets
+
 ### Implementation Details
 
 **Quantile-Based Classification**
