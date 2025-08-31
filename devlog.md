@@ -681,6 +681,93 @@ const res = fitTextToRect({
 - Proper line spacing and alignment
 - Optimized for readability at all zoom levels
 
+### Ocean Label Wrapping Implementation (2025-01-27)
+
+#### Fixed-Size Ocean Labels with Multiline Wrapping
+
+**Overview**
+Implemented fixed-size ocean labels with intelligent multiline wrapping to handle long ocean names while maintaining consistent visual appearance across zoom levels.
+
+**Key Features**
+
+**1. Fixed Font Size**
+- Ocean labels maintain 22px font size regardless of zoom level
+- CSS-based styling with `!important` declarations to override existing styles
+- Consistent bold weight (700) and proper text anchoring
+
+**2. Intelligent Text Wrapping**
+- Automatic wrapping to 85% of available rectangle width
+- Uses SVG `<tspan>` elements for native multiline support
+- Robust width calculation with fallback estimation if `getComputedTextLength()` fails
+
+**3. Perfect Centering**
+- All wrapped lines share the same horizontal center
+- Eliminates inherited `dx` offsets that cause line drift
+- Vertical centering of the entire text block within the rectangle
+
+**Implementation Details**
+
+**CSS Styling**
+```css
+/* Ocean label: fixed size, bold, centered */
+#labels-world text.label--ocean,
+.label.ocean text.label--ocean {
+  font-size: 22px !important;
+  font-weight: 700 !important;
+  text-anchor: middle !important;
+  dominant-baseline: middle !important;
+  pointer-events: none !important;
+}
+```
+
+**Text Wrapping Function**
+```javascript
+window.wrapText = function wrapText(textSel, maxWidth, lineHeightEm = 1.2) {
+  textSel.each(function () {
+    const text = d3.select(this);
+    
+    // Normalize anchoring and clear any inherited dx
+    const cx = +text.attr("x") || 0;
+    const cy = +text.attr("y") || 0;
+    text.attr("text-anchor", "middle").attr("dx", null);
+    
+    // Rebuild tspans with consistent centering
+    const newLine = (dyEm) =>
+      text.append("tspan")
+        .attr("x", cx)
+        .attr("y", cy)
+        .attr("dx", 0)
+        .attr("dy", dyEm);
+    
+    // ... word wrapping logic ...
+    
+    // Final guard: re-center every line after vertical centering
+    text.selectAll("tspan")
+      .attr("y", function () { return +d3.select(this).attr("y") + shift; })
+      .attr("x", cx)
+      .attr("dx", 0);
+  });
+}
+```
+
+**Integration with Ocean Label System**
+- Applied in `renderOceanInWorld()` function
+- Converts world rectangle coordinates to screen pixels for wrapping
+- Maintains compatibility with existing ocean label placement algorithms
+
+**Testing and Verification**
+- Created `dev/test-ocean-wrapping.html` for isolated testing
+- Test case: "Expanse Of Wandering Clouds" with debug visualization
+- Verifies proper centering and wrapping behavior
+- Includes visual debugging with center point and rectangle bounds
+
+**Benefits**
+- **Consistent appearance**: Fixed font size prevents zoom-based size changes
+- **Better readability**: Long ocean names wrap cleanly without overflow
+- **Professional appearance**: Proper centering and spacing
+- **Cross-browser compatibility**: Robust fallbacks for text measurement
+- **Maintainable code**: Clear separation of styling (CSS) and logic (JS)
+
 ---
 
 ## Autofit System

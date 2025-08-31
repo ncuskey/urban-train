@@ -300,3 +300,14 @@ text.place-label.ocean {
   font-weight: 600;
   letter-spacing: 0.1px;
 }
+
+/* Ocean label: fixed size, bold, centered */
+#labels-world text.label--ocean,
+.label.ocean text.label--ocean {
+  font-size: 22px !important;           /* adjust as desired */
+  font-weight: 700 !important;
+  text-anchor: middle !important;
+  dominant-baseline: middle !important;
+  pointer-events: none !important;
+}
+.hidden { display: none; }

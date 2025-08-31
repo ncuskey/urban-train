@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Ocean Label Wrapping Test</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .error { color: red; }
+        .success { color: green; }
+        .info { color: blue; }
+        .warning { color: orange; }
+        
+        #test-svg {
+            border: 1px solid #ccc;
+            background: #f0f0f0;
+        }
+        
+        /* Debug rectangle to show centering */
+        .debug-rect {
+            fill: none;
+            stroke: red;
+            stroke-width: 1;
+            stroke-dasharray: 5,5;
+        }
+        
+        .debug-center {
+            fill: red;
+            stroke: none;
+        }
+    </style>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <h1>Ocean Label Wrapping Test</h1>
+    
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>SVG Test Area</h2>
+        <svg id="test-svg" width="800" height="600">
+            <g id="viewport">
+                <g id="world">
+                    <g id="map"></g>
+                    <g id="labels-world"></g>
+                </g>
+            </g>
+        </svg>
+    </div>
+
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script type="module">
+        // Import the functions we need to test
+        import { renderOceanInWorld } from '../src/modules/labels.js';
+        
+        // Test function
+        function testOceanWrapping() {
+            const svg = d3.select('#test-svg');
+            const results = d3.select('#results');
+            
+            // Create a mock ocean state with a long name
+            window.state = {
+                ocean: {
+                    text: "Expanse Of Wandering Clouds",
+                    rectWorld: {
+                        x: 100,
+                        y: 100,
+                        w: 300,
+                        h: 150
+                    }
+                }
+            };
+            
+            // Render the ocean label
+            renderOceanInWorld(svg, window.state.ocean.text);
+            
+            // Add debug visualization
+            const { rectWorld } = window.state.ocean;
+            const cx = rectWorld.x + rectWorld.w / 2;
+            const cy = rectWorld.y + rectWorld.h / 2;
+            
+            // Draw debug rectangle
+            svg.select('#world').append('rect')
+                .attr('class', 'debug-rect')
+                .attr('x', rectWorld.x)
+                .attr('y', rectWorld.y)
+                .attr('width', rectWorld.w)
+                .attr('height', rectWorld.h);
+            
+            // Draw center point
+            svg.select('#world').append('circle')
+                .attr('class', 'debug-center')
+                .attr('cx', cx)
+                .attr('cy', cy)
+                .attr('r', 3);
+            
+            // Check if the label was created with the correct class
+            const oceanText = svg.select('.label--ocean');
+            if (!oceanText.empty()) {
+                results.html('<div class="success">✅ Ocean label created with label--ocean class</div>');
+                
+                // Check if text wrapping was applied (should have tspans)
+                const tspans = oceanText.selectAll('tspan');
+                if (tspans.size() > 1) {
+                    results.html(results.html() + '<div class="success">✅ Text wrapping applied with ' + tspans.size() + ' lines</div>');
+                } else {
+                    results.html(results.html() + '<div class="warning">⚠️ Text wrapping may not have been applied (only 1 line)</div>');
+                }
+                
+                // Log the text content for debugging
+                console.log('Ocean text content:', oceanText.text());
+                console.log('Number of tspans:', tspans.size());
+                tspans.each(function(d, i) {
+                    console.log('Tspan ' + i + ':', d3.select(this).text());
+                });
+                
+            } else {
+                results.html('<div class="error">❌ Ocean label not found</div>');
+            }
+        }
+        
+        // Run the test when the page loads
+        window.addEventListener('load', testOceanWrapping);
+    </script>
+</body>
+</html>

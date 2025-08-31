@@ -216,6 +216,78 @@ export function textWidthPx(str, sizePx, family = labelFontFamily()) {
   return (m && m.width) ? m.width : 0;
 }
 
+// [ocean-wrap] only define once
+if (typeof window.__wrapText__ === "undefined") {
+  window.__wrapText__ = true;
+  window.wrapText = function wrapText(textSel, maxWidth, lineHeightEm = 1.2) {
+    textSel.each(function () {
+      const text = d3.select(this);
+
+      // Normalize anchoring and clear any inherited dx on the <text> itself
+      const cx = +text.attr("x") || 0;
+      const cy = +text.attr("y") || 0;
+      text.attr("text-anchor", "middle").attr("dx", null);
+
+      // Rebuild tspans
+      const words = (text.text() || "").split(/\s+/).filter(Boolean);
+      text.text(""); // clear
+      let line = [], lineNumber = 0;
+
+      // helper to create a new centered tspan with dx=0
+      const newLine = (dyEm) =>
+        text.append("tspan")
+          .attr("x", cx)
+          .attr("y", cy)
+          .attr("dx", 0)
+          .attr("dy", dyEm);
+
+      let tspan = newLine("0em");
+
+      for (const w of words) {
+        line.push(w);
+        tspan.text(line.join(" "));
+        
+        // Use getComputedTextLength if available, otherwise estimate
+        let textWidth = 0;
+        try {
+          textWidth = tspan.node().getComputedTextLength();
+        } catch (e) {
+          // Fallback: estimate width based on character count and font size
+          const fontSize = parseFloat(text.style('font-size')) || 22;
+          const avgCharWidth = fontSize * 0.6; // rough estimate
+          textWidth = tspan.text().length * avgCharWidth;
+        }
+        
+        if (textWidth > maxWidth) {
+          line.pop();
+          tspan.text(line.join(" "));
+          line = [w];
+          tspan = newLine(`${++lineNumber * lineHeightEm}em`).text(w);
+        }
+      }
+
+      // vertical center the block around (cx, cy)
+      try {
+        const bbox = this.getBBox();
+        const midY = cy;
+        const shift = midY - (bbox.y + bbox.height / 2);
+
+        // FINAL GUARD: re-center every line & kill dx again after y-shift
+        text.selectAll("tspan")
+          .attr("y", function () { return +d3.select(this).attr("y") + shift; })
+          .attr("x", cx)
+          .attr("dx", 0);
+      } catch (e) {
+        // If getBBox fails, just center the first tspan
+        const firstTspan = text.select("tspan");
+        if (!firstTspan.empty()) {
+          firstTspan.attr("x", cx).attr("dx", 0).attr("y", cy);
+        }
+      }
+    });
+  }
+}
+
 export function getZoomK() {
   const world = d3.select('#world').node() || d3.select('svg').node();
   return d3.zoomTransform(world).k || 1;
@@ -2460,19 +2532,24 @@ export function renderOceanInWorld(svg, text) {
   
   // Create or update the text element
   const t = gOcean.selectAll('text').data([0]).join('text')
+    .attr('class', 'label--ocean')
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'middle')
     .attr('vector-effect', 'non-scaling-stroke')
     .style('paint-order', 'stroke')
     .text(text);
   
-  // Set font size based on available space - use screen pixels directly
-  if (window.state && window.state.ocean && window.state.ocean.rectPx) {
-    const { rectPx } = window.state.ocean;
-    const px = fitFontPx(text, rectPx.w * 0.9);
-    t.style('font-size', `${px}px`); // screen-space target
-  } else {
-    t.style('font-size', '28px');
+  // Apply text wrapping if we have a rectangle
+  if (window.state && window.state.ocean && window.state.ocean.rectWorld) {
+    const { rectWorld } = window.state.ocean;
+    // Convert world rect to screen pixels for wrapping
+    const z = d3.zoomTransform(svg.node());
+    const rectPx = {
+      w: rectWorld.w * z.k,
+      h: rectWorld.h * z.k
+    };
+    // Wrap text to 85% of rectangle width
+    window.wrapText(t, rectPx.w * 0.85);
   }
   
   // VERIFICATION CHECKS - Log parent transform and verify roundtrip coordinates
