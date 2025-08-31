@@ -651,6 +651,12 @@ async function generate(count) {
       await window.fitLand();
       console.log('[autofit] ✅ Promise-based autofit completed successfully');
       
+      // Set flag to prevent re-fitting after autofit
+      state.didAutofitToLand = true;
+      
+      // Lock zoom to prevent zooming out beyond autofit level
+      lockZoomToAutofitLevel();
+      
       // Now place ocean labels with the correct post-autofit bounds
       placeOceanLabelsAfterAutofit();
       
@@ -671,14 +677,33 @@ async function generate(count) {
         // Start the autofit
         await window.fitLand();
         
+        // Lock zoom to prevent zooming out beyond autofit level
+        lockZoomToAutofitLevel();
+        
       } catch (error2) {
         console.warn('[autofit] Method 2 failed, falling back to Method 3:', error2);
         
         // Method 3: Direct call with afterLayout safety
         console.log('[autofit] 🔄 Method 3: Using afterLayout fallback...');
         await window.fitLand();
+        
+        // Lock zoom to prevent zooming out beyond autofit level
+        lockZoomToAutofitLevel();
+        
         afterLayout(placeOceanLabelsAfterAutofit);
       }
+    }
+  }
+
+  // Helper function to lock zoom to prevent zooming out beyond autofit level
+  function lockZoomToAutofitLevel() {
+    const currentZoom = d3.zoomTransform(svgSel.node());
+    const autofitZoomLevel = currentZoom.k;
+    const zoom = svgSel.node().__ZOOM__;
+    if (zoom) {
+      // Set minimum zoom to the autofit level to prevent zooming out
+      zoom.scaleExtent([autofitZoomLevel, 32]);
+      console.log(`[autofit] 🔒 Locked zoom extent: [${autofitZoomLevel.toFixed(2)}, 32]`);
     }
   }
 

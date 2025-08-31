@@ -46,7 +46,7 @@ export function computeLabelMetrics({ svg, labels }) {
       const startX = r.x0 + Math.max(0, (r.x1 - r.x0 - width) / 2);
       const startY = r.y0 + Math.max(0, (r.y1 - r.y0 - height) / 2);
 
-      return {
+      const result = {
         ...l,
         font,
         // start box top-left inside the rectangle
@@ -58,6 +58,14 @@ export function computeLabelMetrics({ svg, labels }) {
         // anchor at rect center so "distance to anchor" doesn't yank back to original centroid
         anchor: { x: (r.x0 + r.x1) / 2, y: (r.y0 + r.y1) / 2, r: 4 }
       };
+      
+      // Ensure the label stays within its keepWithinRect
+      if (result.keepWithinRect) {
+        result._box = { w: width, h: height };
+        clampToKeepRect(result);
+      }
+      
+      return result;
     }
 
     return {
@@ -195,20 +203,24 @@ function fitOceanLabelToRect(oceanLabel, rect, svg) {
   oceanLabel.width = finalWidth;
   oceanLabel.height = finalHeight;
   
+  // Set _box for clamping and ensure the label stays within bounds
+  oceanLabel._box = { w: finalWidth, h: finalHeight };
+  clampToKeepRect(oceanLabel);
+  
   return oceanLabel;
 }
 
 // Clamp label to its keepWithinRect constraint
 function clampToKeepRect(lbl) {
-  if (!lbl.keepWithinRect) return;
-  const w = lbl._box?.w || lbl.width || 80, h = lbl._box?.h || lbl.height || 18; // measured label box in world units
-  const r = lbl.keepWithinRect;
-  lbl.x = Math.min(Math.max(lbl.x, r.x0 + w/2), r.x1 - w/2);
-  lbl.y = Math.min(Math.max(lbl.y, r.y0 + h/2), r.y1 - h/2);
+  if (!lbl || !lbl.keepWithinRect || !lbl._box) return;
+  const {x0, y0, x1, y1} = lbl.keepWithinRect;
+  const halfW = lbl._box.w / 2, halfH = lbl._box.h / 2;
+  lbl.x = Math.min(Math.max(lbl.x, x0 + halfW), x1 - halfW);
+  lbl.y = Math.min(Math.max(lbl.y, y0 + halfH), y1 - halfH);
 }
 
 // Custom energy function that gives ocean labels higher mass/penalty
-function customEnergy(index, lab, anc) {
+function customEnergy(index, lab, anc, originalLabels, bounds) {
   // Standard energy weights
   const w_len = 0.2;      // leader line length 
   const w_inter = 1.0;    // leader line intersection
@@ -218,6 +230,11 @@ function customEnergy(index, lab, anc) {
   
   // Higher mass multiplier for ocean labels (makes them harder to move)
   const oceanMassMultiplier = 3.0;
+  
+  // Get current zoom transform for world coordinate calculations
+  const worldNode = d3.select('#world').node() || d3.select('svg').node();
+  const z = d3.zoomTransform(worldNode);
+  const padWorld = 16 / z.k; // ~16px in world coordinates
   
   const m = lab.length;
   let ener = 0;
@@ -264,7 +281,7 @@ function customEnergy(index, lab, anc) {
       overlap_area = x_overlap * y_overlap;
       
       // Apply higher penalty for ocean labels (they're "heavier")
-      const massMultiplier = (labels[index] && labels[index].kind === 'ocean') ? oceanMassMultiplier : 1.0;
+      const massMultiplier = (originalLabels && originalLabels[index] && originalLabels[index].kind === 'ocean') ? oceanMassMultiplier : 1.0;
       ener += (overlap_area * w_lab2 * massMultiplier);
     }
 
@@ -279,6 +296,32 @@ function customEnergy(index, lab, anc) {
     ener += (overlap_area * w_lab_anc);
   }
   
+  // Add ocean separation penalty for soft avoidance
+  if (originalLabels && originalLabels[index] && originalLabels[index].kind === 'ocean') {
+    // Convert current label position to world coordinates for separation calculation
+    const currentLabel = {
+      ...originalLabels[index],
+      x: (lab[index].x + lab[index].width/2 + (bounds?.x0 || 0)) / z.k,
+      y: (lab[index].y + lab[index].height/2 + (bounds?.y0 || 0)) / z.k,
+      _box: { w: lab[index].width / z.k, h: lab[index].height / z.k }
+    };
+    
+    // Get other labels in world coordinates
+    const otherLabels = [];
+    for (let i = 0; i < originalLabels.length; i++) {
+      if (i === index) continue; // Skip the current label
+      const originalLabel = originalLabels[i];
+      otherLabels.push({
+        ...originalLabel,
+        x: (lab[i].x + lab[i].width/2 + (bounds?.x0 || 0)) / z.k,
+        y: (lab[i].y + lab[i].height/2 + (bounds?.y0 || 0)) / z.k,
+        _box: { w: lab[i].width / z.k, h: lab[i].height / z.k }
+      });
+    }
+    
+    ener += oceanSeparationPenalty(currentLabel, otherLabels, padWorld) * 5; // weight to taste
+  }
+  
   return ener;
 }
 
@@ -287,6 +330,29 @@ function intersect(x1, x2, x3, x4, y1, y2, y3, y4) {
   const mua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / ((y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1));
   const mub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / ((y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1));
   return !(mua < 0 || mua > 1 || mub < 0 || mub > 1);
+}
+
+// Helper function to calculate rectangle-to-rectangle distance
+function rectRectDistance(a, b) {
+  const dx = Math.max(0, Math.max(a.x0 - b.x1, b.x0 - a.x1));
+  const dy = Math.max(0, Math.max(a.y0 - b.y1, b.y0 - a.y1));
+  return Math.hypot(dx, dy);
+}
+
+// Calculate separation penalty for ocean labels to avoid other labels
+function oceanSeparationPenalty(lbl, others, minPadWorld) {
+  if (lbl.kind !== 'ocean' || !lbl._box) return 0;
+  const me = { x0: lbl.x - lbl._box.w/2, x1: lbl.x + lbl._box.w/2,
+               y0: lbl.y - lbl._box.h/2, y1: lbl.y + lbl._box.h/2 };
+  let p = 0;
+  for (const o of others) {
+    if (o === lbl || !o._box) continue;
+    const ot = { x0: o.x - o._box.w/2, x1: o.x + o._box.w/2,
+                 y0: o.y - o._box.h/2, y1: o.y + o._box.h/2 };
+    const d = rectRectDistance(me, ot);
+    if (d < minPadWorld) p += (minPadWorld - d) * (minPadWorld - d);
+  }
+  return p;
 }
 
 // Wrapper around D3-Labeler simulated annealing
@@ -339,7 +405,7 @@ export function annealLabels({ labels, bounds, sweeps = 400, svg }) {
   }));
 
   // Use custom energy function with higher mass for ocean labels
-  d3.labeler().label(la).anchor(aa).width(+W).height(+H).alt_energy(customEnergy).start(sweeps);
+  d3.labeler().label(la).anchor(aa).width(+W).height(+H).alt_energy((index, lab, anc) => customEnergy(index, lab, anc, labels, {x0, y0})).start(sweeps);
 
   // Map back out and clamp box fully inside bounds
   for (let i=0;i<labels.length;i++) {
@@ -352,6 +418,11 @@ export function annealLabels({ labels, bounds, sweeps = 400, svg }) {
     
     // Apply keepWithinRect constraints for ocean labels
     if (l.keepWithinRect) {
+      // Set _box property for clamping
+      l._box = { w: l.width, h: l.height };
+      // Set x,y to the center of the placed position for clamping
+      l.x = l.placed.x + l.width / 2;
+      l.y = l.placed.y + l.height / 2;
       clampToKeepRect(l);
       // Update placed position to match clamped position
       l.placed.x = l.x - l.width / 2;
@@ -465,9 +536,9 @@ export function placeOceanLabelInRect(oceanLabel, rect, svg, opts = {}) {
   // Clean up temp element
   t.remove();
 
-  // If font size would be below minimum, try gentle panning
+  // If font size would be below minimum, try gentle panning (but not after autofit)
   let panned = false;
-  if (fs <= minFS && textW > maxW) {
+  if (fs <= minFS && textW > maxW && !window.state?.didAutofitToLand) {
     const t = d3.zoomTransform(svg.node());
     const viewport = [0, 0, +svg.attr('width'), +svg.attr('height')];
     const worldBounds = [
@@ -1135,7 +1206,7 @@ function clampWithinRect(d) {
 export function placeLabelsAvoidingCollisions({ svg, labels }) {
   // Check feature flag for new annealer system
   if (USE_SA_LABELER) {
-    console.log('[labels] Using SA labeler for lake/island labels (ocean excluded)');
+    console.log('[labels] Using SA labeler for all feature labels (ocean included)');
     
     const metrics = computeLabelMetrics({ svg, labels });
     const clusters = findLabelClusters(metrics);
@@ -1143,9 +1214,9 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
     const placed = [];
     const processedIds = new Set();
     
-    // Step 1: Process lake/island clusters with performance guardrails
+    // Step 1: Process all feature clusters with performance guardrails
     for (const cluster of clusters) {
-      const members = cluster; // include ocean so it participates in collision avoidance
+      const members = cluster; // include ocean labels in SA
       if (!members.length) continue;
       
       // Skip annealing for clusters of size 1-2 (no benefit)
@@ -2170,7 +2241,7 @@ function pointIsOcean(x, y, { onlyOcean = true } = {}) {
 }
 
 // 2) Build water mask + SAT (of LAND)
-function buildWaterMaskSAT(bounds, step = 8, pointIsOcean) {
+function buildWaterMaskSAT(bounds, step = 8, pointIsOcean, existingLabels = []) {
   const [minX, minY, maxX, maxY] = bounds;
   const cols = Math.max(1, Math.floor((maxX - minX) / step));
   const rows = Math.max(1, Math.floor((maxY - minY) / step));
@@ -2181,6 +2252,41 @@ function buildWaterMaskSAT(bounds, step = 8, pointIsOcean) {
       const x = minX + c * step + step / 2;
       const y = minY + r * step + step / 2;
       mask[r][c] = pointIsOcean(x, y) ? 1 : 0;
+    }
+  }
+  
+  // Paint existing label areas as land (hard avoidance)
+  const labelPadPx = 16; // ~16px padding around labels
+  for (const label of existingLabels) {
+    if (!label._box || label.kind === 'ocean') continue; // Skip ocean labels and labels without boxes
+    
+    // Convert label bounds to screen coordinates
+    const worldNode = d3.select('#world').node() || d3.select('svg').node();
+    const z = d3.zoomTransform(worldNode);
+    const labelX0 = label.x - label._box.w/2;
+    const labelY0 = label.y - label._box.h/2;
+    const labelX1 = label.x + label._box.w/2;
+    const labelY1 = label.y + label._box.h/2;
+    
+    // Convert to screen coordinates
+    const screenX0 = labelX0 * z.k + z.x - labelPadPx;
+    const screenY0 = labelY0 * z.k + z.y - labelPadPx;
+    const screenX1 = labelX1 * z.k + z.x + labelPadPx;
+    const screenY1 = labelY1 * z.k + z.y + labelPadPx;
+    
+    // Find grid cells that overlap with the label area
+    const gridX0 = Math.max(0, Math.floor((screenX0 - minX) / step));
+    const gridY0 = Math.max(0, Math.floor((screenY0 - minY) / step));
+    const gridX1 = Math.min(cols - 1, Math.floor((screenX1 - minX) / step));
+    const gridY1 = Math.min(rows - 1, Math.floor((screenY1 - minY) / step));
+    
+    // Paint the label area as land (mask = 0)
+    for (let r = gridY0; r <= gridY1; r++) {
+      for (let c = gridX0; c <= gridX1; c++) {
+        if (r >= 0 && r < rows && c >= 0 && c < cols) {
+          mask[r][c] = 0; // Mark as land
+        }
+      }
     }
   }
 
@@ -2396,24 +2502,26 @@ export function findOceanLabelRectAfterAutofit(
 ) {
   console.log(`[ocean] Using post-autofit bounds: [${visibleBounds.join(', ')}]`);
 
-  const transform = d3.zoomTransform(d3.select('#world').node() || d3.select('svg').node());
+  const worldNode = d3.select('#world').node() || d3.select('svg').node();
+  const z = d3.zoomTransform(worldNode);
+  const pxToWorld = (px, py) => ({ x: (px - z.x)/z.k, y: (py - z.y)/z.k });
 
-  function pxToWorld(x, y) { 
-    return { x: (x - transform.x) / transform.k, y: (y - transform.y) / transform.k }; 
+  function pixelPointIsOcean(px, py) {
+    const radius = 3; // ≈ 7x7 window
+    for (let dy=-radius; dy<=radius; dy++) {
+      for (let dx=-radius; dx<=radius; dx++) {
+        const {x, y} = pxToWorld(px+dx, py+dy);
+        const c = getCellAtXY?.(x, y);
+        if (c && (c.height ?? 1) > seaLevel) return false;
+      }
+    }
+    return true;
   }
 
-  function localPointIsOcean(px, py, { onlyOcean = true } = {}) {
-    const { x, y } = pxToWorld(px, py);           // ← convert to world
-    const cell = getCellAtXY?.(x, y);
-    if (!cell) return true;
-    let height = cell.height ?? cell.data?.height ?? cell.polygon?.height ?? null;
-    const featureType = cell.featureType ?? cell.data?.featureType ?? null;
-    if (height == null) return true;
-    const water = height <= seaLevel;
-    return onlyOcean ? (water && featureType !== 'Lake') : water;
-  }
-
-  const satEnv = buildWaterMaskSAT(visibleBounds, step, localPointIsOcean);
+  // Get existing visible labels for hard avoidance
+  const existingLabels = window.__labelsPlaced?.features || [];
+  
+  const satEnv = buildWaterMaskSAT(visibleBounds, step, pixelPointIsOcean, existingLabels);
 
   // NEW: collect top-K horizontal rects, then re-rank by a label-friendly score
   const candidates = largestHorizontalWaterRects(satEnv, 12);
@@ -2439,20 +2547,21 @@ export function findOceanLabelRectAfterAutofit(
 
   console.log(`[ocean] Final pixels (ranked): ${bestPx.w}x${bestPx.h} at (${bestPx.x},${bestPx.y})`);
   
-  // Convert screen coordinates to world coordinates using the same transform
-  function screenToWorldRect(s) {
-    return {
-      x0: (s.x - transform.x) / transform.k,
-      y0: (s.y - transform.y) / transform.k,
-      x1: (s.x + s.w - transform.x) / transform.k,
-      y1: (s.y + s.h - transform.y) / transform.k,
-    };
+  // Inset the rectangle to provide edge margins
+  const edgePadPx = 20;
+  function insetPxRect(r, pad) {
+    return { x: r.x+pad, y: r.y+pad, w: Math.max(0, r.w-2*pad), h: Math.max(0, r.h-2*pad) };
   }
+  const safePxRect = insetPxRect(bestPx, edgePadPx);
   
-  const oceanRectWorld = screenToWorldRect(bestPx);
-  bestPx._debugRectScreen = bestPx; // Store screen coords for debug overlay
-  bestPx.keepWithinRect = oceanRectWorld; // Store world bounds for SA
-  
+  const worldRect = {
+    x0: (safePxRect.x         - z.x)/z.k,
+    y0: (safePxRect.y         - z.y)/z.k,
+    x1: (safePxRect.x+safePxRect.w - z.x)/z.k,
+    y1: (safePxRect.y+safePxRect.h - z.y)/z.k
+  };
+  bestPx._debugRectScreen = bestPx; // for dashed red box
+  bestPx.keepWithinRect   = worldRect; // use this for placement
   return bestPx;
 }
 

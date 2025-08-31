@@ -13,10 +13,13 @@ Ocean labels were being placed **before** the autofit animation completed, resul
 - Poor label placement quality
 - Timing race conditions
 
-### **Root Cause**
-The original implementation placed ocean labels immediately after calling `fitToLand()`, but `fitToLand()` was synchronous and didn't wait for the D3 transition to complete.
+### **Secondary Issue**
+After autofit completed, users could manually zoom out beyond the autofit level, losing the tight-to-land view that autofit established.
 
-## Solution: Promise-Based Autofit
+### **Root Cause**
+The original implementation placed ocean labels immediately after calling `fitToLand()`, but `fitToLand()` was synchronous and didn't wait for the D3 transition to complete. Additionally, the zoom extent was not constrained after autofit, allowing users to zoom out beyond the optimal view.
+
+## Solution: Promise-Based Autofit + Zoom Locking
 
 ### **1. Updated `fitToLand()` Function**
 
@@ -85,6 +88,26 @@ export function getVisibleWorldBounds(svg, width, height) {
 }
 ```
 
+### **4. Zoom Locking After Autofit**
+
+Added to `main.js` to prevent zooming out beyond the autofit level:
+
+```javascript
+// Helper function to lock zoom to prevent zooming out beyond autofit level
+function lockZoomToAutofitLevel() {
+  const currentZoom = d3.zoomTransform(svgSel.node());
+  const autofitZoomLevel = currentZoom.k;
+  const zoom = svgSel.node().__ZOOM__;
+  if (zoom) {
+    // Set minimum zoom to the autofit level to prevent zooming out
+    zoom.scaleExtent([autofitZoomLevel, 32]);
+    console.log(`[autofit] 🔒 Locked zoom extent: [${autofitZoomLevel.toFixed(2)}, 32]`);
+  }
+}
+```
+
+This function is called after each successful autofit completion to ensure users cannot manually zoom out beyond the optimal view established by autofit.
+
 ## Implementation in Main Generation Flow
 
 ### **Before (Incorrect Timing)**:
@@ -114,7 +137,10 @@ if (AUTO_FIT) {
   await window.fitLand();
   console.log('[autofit] Autofit completed, now placing ocean labels...');
   
-  // 4. Place ocean labels with correct post-autofit bounds
+  // 4. Lock zoom to prevent zooming out beyond autofit level
+  lockZoomToAutofitLevel();
+  
+  // 5. Place ocean labels with correct post-autofit bounds
   const featureLabels = window.__featureLabels || [];
   const oceanLabels = featureLabels.filter(l => l.kind === 'ocean');
   
@@ -140,12 +166,17 @@ if (AUTO_FIT) {
 - Rectangle finder works with the correct viewport
 - Better label placement quality
 
-### **3. Clean Async Flow**
+### **3. Zoom Locking**
+- Users cannot zoom out beyond the autofit level
+- Maintains the tight-to-land view established by autofit
+- Still allows zooming in for detailed inspection
+
+### **4. Clean Async Flow**
 - Promise-based approach ensures proper sequencing
 - Easy to extend with additional post-autofit operations
 - Clear separation of concerns
 
-### **4. Maintains Existing Behavior**
+### **5. Maintains Existing Behavior**
 - All existing functionality preserved
 - Just reordered for correct timing
 - No breaking changes to the API
@@ -156,6 +187,8 @@ if (AUTO_FIT) {
 The implementation includes comprehensive logging:
 ```
 [autofit] Starting autofit to land...
+[autofit] ✅ Promise-based autofit completed successfully
+[autofit] 🔒 Locked zoom extent: [1.23, 32]
 [autofit] Autofit completed, now placing ocean labels...
 [ocean] DEBUG: After autofit, featureLabels available: {...}
 [ocean] DEBUG: Post-autofit bounds: {...}
@@ -193,6 +226,7 @@ placeOceanLabels(); // Too early!
 2. **Custom transition easing**: Add easing functions to the Promise
 3. **Progress callbacks**: Add progress events during transitions
 4. **Cancellation support**: Allow autofit operations to be cancelled
+5. **Zoom extent persistence**: Save and restore zoom constraints across sessions
 
 ### **Integration Points**
 - **Refine operations**: Wait for autofit before refining coastlines
@@ -201,11 +235,12 @@ placeOceanLabels(); // Too early!
 
 ## Conclusion
 
-The Promise-based autofit implementation resolves the timing issues that were causing poor ocean label placement. By ensuring that ocean labels are placed after the autofit animation completes, the system now provides:
+The Promise-based autofit implementation resolves the timing issues that were causing poor ocean label placement. By ensuring that ocean labels are placed after the autofit animation completes, and by locking the zoom extent to prevent zooming out beyond the autofit level, the system now provides:
 
 - **Better label quality**: Labels positioned for the correct viewport
 - **Reliable timing**: No more race conditions
+- **Preserved view**: Users cannot accidentally zoom out beyond the optimal autofit level
 - **Cleaner code**: Async/await pattern for complex operations
 - **Future extensibility**: Easy to add post-autofit operations
 
-This improvement maintains all existing functionality while fixing the core timing issue that was affecting label placement quality.
+This improvement maintains all existing functionality while fixing both the core timing issue that was affecting label placement quality and the user experience issue of losing the tight-to-land view.
