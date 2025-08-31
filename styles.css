@@ -279,3 +279,24 @@ text.place-label.ocean {
 
 /* Ocean label crisp outlines that don't fatten/thin with zoom */
 .label.ocean text { vector-effect: non-scaling-stroke; }
+
+/* Tier-based label styling */
+.label.tier-1 text {
+  font-weight: 900;
+  letter-spacing: 0.5px;
+}
+
+.label.tier-2 text {
+  font-weight: 800;
+  letter-spacing: 0.3px;
+}
+
+.label.tier-3 text {
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.label.tier-4 text {
+  font-weight: 600;
+  letter-spacing: 0.1px;
+}

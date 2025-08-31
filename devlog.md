@@ -7,14 +7,15 @@ This document consolidates the development history, implementation details, and 
 1. [Project Overview](#project-overview)
 2. [Core Architecture](#core-architecture)
 3. [Label System Evolution](#label-system-evolution)
-4. [Ocean Label Implementation](#ocean-label-implementation)
-5. [Counter-Scaling Implementation](#counter-scaling-implementation)
-6. [Autofit System](#autofit-system)
-7. [Font System](#font-system)
-8. [Names System](#names-system)
-9. [Performance Optimizations](#performance-optimizations)
-10. [Bug Fixes and Improvements](#bug-fixes-and-improvements)
-11. [Technical Decisions](#technical-decisions)
+4. [Tiering System Implementation](#tiering-system-implementation)
+5. [Ocean Label Implementation](#ocean-label-implementation)
+6. [Counter-Scaling Implementation](#counter-scaling-implementation)
+7. [Autofit System](#autofit-system)
+8. [Font System](#font-system)
+9. [Names System](#names-system)
+10. [Performance Optimizations](#performance-optimizations)
+11. [Bug Fixes and Improvements](#bug-fixes-and-improvements)
+12. [Technical Decisions](#technical-decisions)
 
 ---
 
@@ -98,6 +99,132 @@ The system uses a sophisticated multi-layered approach:
 - **Sampling**: For larger clusters, samples 500 random combinations
 - **Scoring**: Minimizes total distance from feature centroids while avoiding collisions
 - **Fallback**: If no collision-free placement found, uses overlapped centroid placement
+
+---
+
+## Tiering System Implementation
+
+The tiering system introduces a hierarchical approach to label sizing and visibility, ensuring that more important features receive appropriate visual prominence while maintaining readability across all zoom levels.
+
+### Core Concepts
+
+**Feature Tiers**
+The system assigns labels to one of four tiers based on feature type and area:
+
+- **Tier 1 (Oceans)**: Always assigned to ocean features, regardless of size
+- **Tier 2 (Major Islands)**: Islands in the top 15% by area (85th percentile+)
+- **Tier 3 (Minor Islands/Large Lakes)**: Islands in top 50% by area OR lakes in top 30% by area
+- **Tier 4 (Tiny Islands/Small Lakes)**: All remaining features
+
+**Base Font Sizes**
+Each tier has a corresponding base font size:
+- Tier 1: 40px (Oceans)
+- Tier 2: 24px (Major Islands)  
+- Tier 3: 18px (Minor Islands/Large Lakes)
+- Tier 4: 14px (Tiny Islands/Small Lakes)
+
+### Implementation Details
+
+**Quantile-Based Classification**
+```javascript
+function quantilesOf(arr, qs=[0.5, 0.7, 0.85]) {
+  if (!arr.length) return { q50: Infinity, q70: Infinity, q85: Infinity };
+  const a = [...arr].sort((x,y)=>x-y);
+  const pick = q => a[Math.max(0, Math.min(a.length-1, Math.floor(q*(a.length-1))))];
+  return { q50: pick(0.5), q70: pick(0.7), q85: pick(0.85) };
+}
+```
+
+**Tier Assignment Logic**
+```javascript
+function rankTier(label, q) {
+  if (label.kind === 'ocean') return 1; // Ocean = Tier 1
+  const A = label.area || 0;
+  if (label.kind === 'island') {
+    if (A >= q.islands.q85) return 2;       // Major Island
+    if (A >= q.islands.q50) return 3;       // Minor Island
+    return 4;                               // Tiny Island
+  }
+  if (label.kind === 'lake') {
+    if (A >= q.lakes.q70) return 3;         // Large Lake
+    return 4;                               // Small Lake
+  }
+  return 4;
+}
+```
+
+### Ocean Label Integration
+
+**Preferred Size Respect**
+The ocean fitter now respects the tier-assigned base font size:
+```javascript
+// Prefer label.baseFontPx first, then shrink until it fits
+const preferred = Math.min(label.baseFontPx || 40, MAX_OCEAN_PX);
+for (let f = preferred; f >= 12; f -= 1) {
+  // try preferred first, then step down
+  if (fitsOne(f)) {
+    best = f;
+    break;
+  }
+}
+```
+
+This ensures oceans maintain their Tier 1 prominence (40px) when space allows, only shrinking when the rectangle is too small.
+
+### LOD Bias System
+
+**Tier-Preferential Filtering**
+The Level of Detail system now biases toward higher-tier features when areas are similar:
+
+```javascript
+const S = p => (p.area || 0);                    // Area score (primary)
+const W = p => (5 - (p.tier || 4));             // Tier weight (secondary)
+const score = p => S(p) * 1 + W(p) * 1e-6;     // Combined score
+```
+
+**Benefits**
+- **Area Priority**: Area remains the primary factor in LOD decisions
+- **Tier Tiebreaker**: When features have similar areas, higher tiers are preferred
+- **Subtle Effect**: Bias is small enough to not disrupt overall area-based sorting
+- **Consistent Application**: Applied to both islands and lakes
+
+### Visual Styling
+
+**CSS Tier Classes**
+Each label receives a tier-specific CSS class for styling:
+```css
+.label.tier-1 text { font-weight: 900; letter-spacing: 0.5px; }
+.label.tier-2 text { font-weight: 800; letter-spacing: 0.3px; }
+.label.tier-3 text { font-weight: 700; letter-spacing: 0.2px; }
+.label.tier-4 text { font-weight: 600; letter-spacing: 0.1px; }
+```
+
+**Counter-Scaling Integration**
+The tiering system works seamlessly with the existing counter-scaling system:
+- Base font sizes are assigned according to tier
+- Counter-scaling maintains consistent screen sizes during zoom
+- Tier-based styling (font weight, letter spacing) enhances visual hierarchy
+
+### Performance Impact
+
+**Minimal Overhead**
+- Quantile calculations are performed once during label building
+- Tier assignment is O(n) where n is the number of labels
+- LOD bias adds negligible computational cost
+- No impact on rendering performance
+
+**Memory Efficiency**
+- Tier information is stored as simple integer properties
+- CSS classes are lightweight and cached by the browser
+- No additional data structures required
+
+### Benefits
+
+1. **Visual Hierarchy**: Clear distinction between feature importance
+2. **Consistent Sizing**: Predictable font sizes based on feature significance
+3. **Improved Readability**: Important features are more prominent
+4. **Zoom-Aware**: System works across all zoom levels
+5. **Maintainable**: Simple, predictable tier assignment logic
 
 **Size-Based Zoom Filtering**
 Progressive disclosure based on zoom level and fixed limits:

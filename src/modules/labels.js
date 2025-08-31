@@ -11,6 +11,38 @@
 
 import {getZoomState} from './interaction.js';
 
+// --- Tiering helper functions ---
+
+// helper (add at top-level in labels.js)
+export function quantilesOf(arr, qs=[0.5, 0.7, 0.85]) {
+  if (!arr.length) return { q50: Infinity, q70: Infinity, q85: Infinity };
+  const a = [...arr].sort((x,y)=>x-y);
+  const pick = q => a[Math.max(0, Math.min(a.length-1, Math.floor(q*(a.length-1))))];
+  return { q50: pick(0.5), q70: pick(0.7), q85: pick(0.85) };
+}
+
+export function baseFontPxForTier(tier) {
+  return tier === 1 ? 40
+       : tier === 2 ? 24
+       : tier === 3 ? 18
+       :               14; // tier 4
+}
+
+export function rankTier(label, q) {
+  if (label.kind === 'ocean') return 1; // Ocean = Tier 1
+  const A = label.area || 0;
+  if (label.kind === 'island') {
+    if (A >= q.islands.q85) return 2;       // Major Island
+    if (A >= q.islands.q50) return 3;       // Minor Island
+    return 4;                               // Tiny Island
+  }
+  if (label.kind === 'lake') {
+    if (A >= q.lakes.q70) return 3;         // Large Lake
+    return 4;                               // Small Lake
+  }
+  return 4;
+}
+
 const worldRectToScreenRect = ({x,y,w,h}) => {
   const t = d3.zoomTransform(d3.select('svg').node()); 
   return { x:x*t.k + t.x, y:y*t.k + t.y, w:w*t.k, h:h*t.k };
@@ -445,33 +477,41 @@ export function fitOceanToRectPx(label, rectPx, pad = 10) {
   const MAX_OCEAN_PX = 42; // hard cap so we never explode
   const lineH = f => f * 1.2;
 
-  // try one line
-  const fitsOne = f => textWidthPx(text, f, fam) <= maxW && lineH(f) <= maxH;
-  let lo = 8, hi = MAX_OCEAN_PX, best = lo;
-  while (lo <= hi) { const mid = (lo + hi) >> 1; if (fitsOne(mid)) { best = mid; lo = mid + 1; } else { hi = mid - 1; } }
+  // Prefer label.baseFontPx first, then shrink until it fits
+  const preferred = Math.min(label.baseFontPx || 40, MAX_OCEAN_PX);
+  let best = null;
+
+  // try preferred first, then step down
+  for (let f = preferred; f >= 12; f -= 1) {
+    // try one line
+    const fitsOne = textWidthPx(text, f, fam) <= maxW && lineH(f) <= maxH;
+    if (fitsOne) {
+      best = f;
+      break;
+    }
+  }
 
   let lines = [text];
-  let fontPx = best;
+  let fontPx = best || 12; // fallback to 12px if nothing fits
   let wpx = textWidthPx(text, fontPx, fam);
   let hpx = lineH(fontPx);
 
   // if one line doesn't fit, go to two
   if (wpx > maxW || hpx > maxH) {
     const sp = bestTwoLineSplit(words);
-    const fitsTwo = f => {
+    // try two-line with preferred size first, then step down
+    for (let f = preferred; f >= 12; f -= 1) {
       const w1 = textWidthPx(sp.a, f, fam);
       const w2 = textWidthPx(sp.b, f, fam);
       const H = lineH(f) * 2;
-      return Math.max(w1, w2) <= maxW && H <= maxH;
-    };
-    lo = 8; hi = MAX_OCEAN_PX; best = lo;
-    while (lo <= hi) { const mid = (lo + hi) >> 1; if (fitsTwo(mid)) { best = mid; lo = mid + 1; } else { hi = mid - 1; } }
-    fontPx = best;
-    lines = [sp.a, sp.b];
-    const w1 = textWidthPx(lines[0], fontPx, fam);
-    const w2 = textWidthPx(lines[1], fontPx, fam);
-    wpx = Math.max(w1, w2);
-    hpx = lineH(fontPx) * 2;
+      if (Math.max(w1, w2) <= maxW && H <= maxH) {
+        fontPx = f;
+        lines = [sp.a, sp.b];
+        wpx = Math.max(w1, w2);
+        hpx = H;
+        break;
+      }
+    }
   }
 
   // store pixel and world boxes + fonts
@@ -1522,8 +1562,25 @@ export function buildFeatureLabels({
     { oceans: oceans.length, lakes: lakes.length, islands: islands.length,
       waterComps: waterComps.length, landComps: landComps.length });
 
+  // Assemble all labels
+  const labels = [...oceans, ...lakes, ...islands];
+
+  // Compute per-kind quantiles and assign tiers
+  const islandAreas = labels.filter(l => l.kind==='island').map(l => l.area||0);
+  const lakeAreas   = labels.filter(l => l.kind==='lake').map(l => l.area||0);
+  const q = { islands: quantilesOf(islandAreas), lakes: quantilesOf(lakeAreas) };
+
+  for (const l of labels) {
+    l.tier = rankTier(l, q);
+    if (l.kind === 'ocean') {
+      l.baseFontPx = 40; // preferred; fitter may shrink
+    } else {
+      l.baseFontPx = baseFontPxForTier(l.tier);
+    }
+  }
+
   // NOTE: Labels will be processed by placeLabelsAvoidingCollisions() which checks USE_SA_LABELER flag
-  return [...oceans, ...lakes, ...islands];
+  return labels;
 }
 
 // --- helpers ----------------------------------------------------------
@@ -2131,8 +2188,13 @@ export function filterByZoom(placed, k) {
       // Compute pixel area from world area: area * k²
       const featurePixelArea = (l.area || 0) * z.k * z.k;
       return featurePixelArea >= minAreaPx('island', z.k);
-    })
-    .sort((a,b) => (b.area || 0) - (a.area || 0));
+    });
+  
+  // Bias LOD to prefer higher tiers at equal/near-equal area
+  const S = p => (p.area || 0);
+  const W = p => (5 - (p.tier || 4)); // tier 1 = weight 4, tier 4 = weight 1
+  const score = p => S(p) * 1 + W(p) * 1e-6; // tiny bias
+  islandCandidates.sort((a,b) => score(b) - score(a));
 
   const keptIslands = [];
   for (const l of islandCandidates) {
@@ -2148,8 +2210,10 @@ export function filterByZoom(placed, k) {
       // Compute pixel area from world area: area * k²
       const featurePixelArea = (l.area || 0) * z.k * z.k;
       return featurePixelArea >= minAreaPx('lake', z.k);
-    })
-    .sort((a,b) => (b.area || 0) - (a.area || 0));
+    });
+  
+  // Bias LOD to prefer higher tiers at equal/near-equal area
+  lakeCandidates.sort((a,b) => score(b) - score(a));
 
   const keptLakes = [];
   for (const l of lakeCandidates) {
@@ -2448,7 +2512,7 @@ export function renderLabels({ svg, placed, groupId }) {
   sel.exit().remove();
   
   // Create new labels
-  const enter = sel.enter().append('g').attr('class', 'label');
+  const enter = sel.enter().append('g').attr('class', d => `label ${d.kind} tier-${d.tier || 4}`);
   
   // Add stroke and fill text elements
   enter.append('text').attr('class', 'stroke')
@@ -2520,7 +2584,7 @@ export function renderLabels({ svg, placed, groupId }) {
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'central')
         .style('font-size', d => {
-          // Non-ocean labels will be handled by updateLabelZoom
+          // Non-ocean labels use baseFontPx from tiering
           // Ocean labels use their stored world font size
           return (d.font_world_px ?? (d.baseFontPx || 24)) + 'px';
         })
@@ -2603,7 +2667,7 @@ export function renderLabels({ svg, placed, groupId }) {
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'central')
         .style('font-size', d => {
-          // Non-ocean labels will be handled by updateLabelZoom
+          // Non-ocean labels use baseFontPx from tiering
           // Ocean labels use their stored world font size
           return (d.font_world_px ?? (d.baseFontPx || 24)) + 'px';
         })
