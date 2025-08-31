@@ -1645,8 +1645,9 @@ export function renderLabels({ svg, placed, groupId }) {
     return;
   }
   
-  // Keyed join on stable IDs
-  const sel = g.selectAll('g.label').data(placed, d => d?.id || d?.text || Math.random());
+  // Keyed join on stable IDs - filter out null/undefined elements
+  const validPlaced = placed.filter(Boolean);
+  const sel = g.selectAll('g.label').data(validPlaced, function(d) { return d && d.id ? d.id : (d && d.text ? d.text : Math.random()); });
   
   // Remove old labels
   sel.exit().remove();
@@ -1662,7 +1663,7 @@ export function renderLabels({ svg, placed, groupId }) {
   const merged = enter.merge(sel);
   
   // Set position and transform
-  merged.attr('transform', d => {
+  merged.attr('transform', function(d) {
     if (!d) return 'translate(0,0)'; // Safety guard
     const p = labelDrawXY(d);
     // last-resort guard: never return NaN
@@ -1673,46 +1674,46 @@ export function renderLabels({ svg, placed, groupId }) {
   
   // Update stroke text
   merged.select('text.stroke')
-    .text(d => d?.text || '')
+    .text(function(d) { return d && d.text ? d.text : ''; })
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'central')
-    .attr('font-size', d => d?.font || 16) // Use computed font size from metrics
+    .attr('font-size', function(d) { return d && d.font ? d.font : 16; }) // Use computed font size from metrics
     .classed('is-visible', false) // Hidden by default
-    .classed('ocean', d?.kind === 'ocean') // Add ocean class for styling
-    .classed('lake', d?.kind === 'lake') // Add lake class for styling
-    .classed('island', d?.kind === 'island'); // Add island class for styling
+    .classed('ocean', function(d) { return d && d.kind === 'ocean'; }) // Add ocean class for styling
+    .classed('lake', function(d) { return d && d.kind === 'lake'; }) // Add lake class for styling
+    .classed('island', function(d) { return d && d.kind === 'island'; }); // Add island class for styling
   
   // Update fill text
   merged.select('text.fill')
-    .text(d => d?.text || '')
+    .text(function(d) { return d && d.text ? d.text : ''; })
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'central')
-    .attr('font-size', d => d?.font || 16) // Use computed font size from metrics
+    .attr('font-size', function(d) { return d && d.font ? d.font : 16; }) // Use computed font size from metrics
     .classed('is-visible', false) // Hidden by default
-    .classed('ocean', d?.kind === 'ocean') // Add ocean class for styling
-    .classed('lake', d?.kind === 'lake') // Add lake class for styling
-    .classed('island', d?.kind === 'island'); // Add island class for styling
+    .classed('ocean', function(d) { return d && d.kind === 'ocean'; }) // Add ocean class for styling
+    .classed('lake', function(d) { return d && d.kind === 'lake'; }) // Add lake class for styling
+    .classed('island', function(d) { return d && d.kind === 'island'; }); // Add island class for styling
   
   if (window.DEBUG) console.log('[labels] DEBUG: Rendered', merged.size(), 'labels');
   
   // Debug overlay: show final boxes behind text
   if (window.DEBUG && DEBUG_LABEL_BOXES) {
-    const dbg = d3.select('#labels-debug').selectAll('rect').data(placed, d => d?.id || d?.text || Math.random());
+    const dbg = d3.select('#labels-debug').selectAll('rect').data(placed.filter(Boolean), function(d) { return d && d.id ? d.id : (d && d.text ? d.text : Math.random()); });
     dbg.enter().append('rect')
       .attr('fill', 'none')
       .attr('stroke', '#000')
       .attr('stroke-opacity', 0.25)
       .merge(dbg)
-      .attr('x', d => {
+      .attr('x', function(d) {
         if (!d) return 0;
         return (d.placed ? d.placed.x : d.x - (d.width || 0)/2);
       })
-      .attr('y', d => {
+      .attr('y', function(d) {
         if (!d) return 0;
         return (d.placed ? d.placed.y : d.y - (d.height || 0)/2);
       })
-      .attr('width',  d => d?.width || 0)
-      .attr('height', d => d?.height || 0);
+      .attr('width',  function(d) { return d && d.width ? d.width : 0; })
+      .attr('height', function(d) { return d && d.height ? d.height : 0; });
     dbg.exit().remove();
   }
   
@@ -1732,7 +1733,7 @@ export function renderLabels({ svg, placed, groupId }) {
     }
     return n;
   }
-  console.log('[labels] overlaps after SA:', countOverlaps(placed));
+  console.log('[labels] overlaps after SA:', countOverlaps(validPlaced));
 }
 
 // On zoom: update transform with scaling
@@ -1741,10 +1742,10 @@ export function updateLabelZoom({ svg, groupId, k }) {
   const safeK = Number.isFinite(k) && k > 0 ? k : 1;
   
   svg.select(`#${groupId}`).selectAll('g.label')
-    .attr('transform', d => {
+    .attr('transform', function(d) {
       if (!d) return 'translate(0,0) scale(1)'; // Safety guard
       const p = labelDrawXY(d);
-      const labelScale = d?.scale || 1.0;
+      const labelScale = d && d.scale ? d.scale : 1.0;
       // last-resort guard: never return NaN
       const x = safe(p.x, 0);
       const y = safe(p.y, 0);
@@ -1760,10 +1761,10 @@ export function updateLabelVisibility({ svg, groupId, placed, k, filterByZoom })
     return;
   }
   
-  const visible = new Set(filterByZoom(placed, k).map(d => d?.id).filter(Boolean));
+  const visible = new Set(filterByZoom(placed, k).map(function(d) { return d && d.id ? d.id : null; }).filter(Boolean));
   svg.select(`#${groupId}`)
     .selectAll('g.label text')
-    .classed('is-visible', d => d?.id && visible.has(d.id));
+    .classed('is-visible', function(d) { return d && d.id && visible.has(d.id); });
   
   // Quick self-check: log zoom level and visible count
   console.log(`[LOD] k=${k.toFixed(2)}, visible=${visible.size}/${placed.length} labels`);

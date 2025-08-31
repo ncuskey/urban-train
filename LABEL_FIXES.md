@@ -180,4 +180,25 @@ window.toggleLabelScaling();
 
 - `src/main.js` - Added `computeMapLabels` function and updated label rendering
 - `styles.css` - Added feature-specific label styling
+- `src/modules/labels.js` - Fixed ReferenceError in D3 callbacks and improved null safety
 - `LABEL_FIXES.md` - This documentation file
+
+## Recent Bug Fixes
+
+### ReferenceError: d is not defined (2025-08-30)
+
+**Issue**: The `renderLabels` function was throwing a ReferenceError when trying to access properties on `d` in D3 callbacks, particularly when the `placed` array contained `undefined` or `null` elements.
+
+**Root Cause**: 
+- Arrow functions (`=>`) in D3 callbacks can have issues with data binding context
+- Optional chaining (`?.`) wasn't sufficient when `d` itself was `undefined`
+- Some elements in the `placed` array were `undefined` or `null`
+
+**Solution**:
+1. **Converted arrow functions to explicit function declarations**: Changed `d => ...` to `function(d) { ... }` in all D3 callbacks
+2. **Enhanced null safety**: Used explicit `function(d) { return d && d.property ? d.property : defaultValue; }` syntax
+3. **Added data filtering**: Filter out null/undefined elements before binding data to D3 selections
+4. **Updated all affected functions**: `renderLabels`, `updateLabelZoom`, `updateLabelVisibility`, and debug overlay functions
+
+**Files Changed**:
+- `src/modules/labels.js` - Fixed all D3 callback functions to use explicit function declarations and proper null checking
