@@ -14,7 +14,7 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction, getVisibleWorldBounds, padBounds } from "./modules/interaction.js";
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
-import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, placeOceanLabelAt, clearScreenLabels, clearExistingOceanLabels, placeOceanLabelCentered } from "./modules/labels.js";
+import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, placeOceanLabelAt, clearScreenLabels, clearExistingOceanLabels, placeOceanLabelCentered } from "./modules/labels.js";
 
 // === Minimal Perf HUD ==========================================
 const Perf = (() => {
@@ -542,6 +542,9 @@ async function generate(count) {
       });
     }
 
+    // Ensure every label has width/height before placement
+    ensureMetrics(featureLabels, svgSel);
+    
     const placedFeatures = placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels });
     
     if (window.DEBUG) {

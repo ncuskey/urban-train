@@ -1,7 +1,9 @@
 // d3 is global
 
-// gate the new behavior
-export const USE_SA_LABELER = true; // can toggle off to revert
+// Safety toggles for easy rollback
+export const USE_SA_LABELER = true;       // master switch
+export const USE_SA_FOR_OCEANS = true;    // polish oceans in keepWithinRect
+export const DEBUG_LABEL_BOXES = false;   // show rects behind text
 
 // Accurate text measurement using ghost element
 export function measureTextWidth(svg, text, { fontSize = 28, family = 'serif', weight = 700 } = {}) {
@@ -25,6 +27,26 @@ export function computeLabelMetrics({ svg, labels }) {
     const width = measureTextWidth(svg, l.text, { fontSize: font, weight: 700 });
     const height = Math.max(10, Math.round(font * 0.9));
 
+    // Seed ocean labels inside their chosen rectangle
+    if (l.kind === 'ocean' && l.keepWithinRect) {
+      const r = l.keepWithinRect;
+      const startX = r.x0 + Math.max(0, (r.x1 - r.x0 - width) / 2);
+      const startY = r.y0 + Math.max(0, (r.y1 - r.y0 - height) / 2);
+
+      return {
+        ...l,
+        font,
+        // start box top-left inside the rectangle
+        x: startX,
+        y: startY,
+        // rectangle dims used by the annealer
+        width,
+        height,
+        // anchor at rect center so "distance to anchor" doesn't yank back to original centroid
+        anchor: { x: (r.x0 + r.x1) / 2, y: (r.y0 + r.y1) / 2, r: 4 }
+      };
+    }
+
     return {
       ...l,
       font,
@@ -40,42 +62,82 @@ export function computeLabelMetrics({ svg, labels }) {
   });
 }
 
+// Clamp label box to bounds to ensure it stays within designated area
+function clampBoxToBounds(lbl, bounds) {
+  const x0 = bounds ? bounds.x0 : 0;
+  const y0 = bounds ? bounds.y0 : 0;
+  const W  = bounds ? bounds.x1 - bounds.x0 : +d3.select('svg').attr('width');
+  const H  = bounds ? bounds.y1 - bounds.y0 : +d3.select('svg').attr('height');
+
+  // clamp top-left in local coords
+  const minX = x0,                 maxX = x0 + W - lbl.width;
+  const minY = y0,                 maxY = y0 + H - lbl.height;
+
+  lbl.placed.x = Math.max(minX, Math.min(maxX, lbl.placed.x));
+  lbl.placed.y = Math.max(minY, Math.min(maxY, lbl.placed.y));
+}
+
 // Wrapper around D3-Labeler simulated annealing
-export function annealLabels({ labels, bounds, sweeps = 400 }) {
+export function annealLabels({ labels, bounds, sweeps = 400, svg }) {
   if (!labels.length) return labels;
 
-  // switch to a local coord system if bounds provided
-  const offsetX = bounds ? bounds.x0 : 0;
-  const offsetY = bounds ? bounds.y0 : 0;
-  const W = bounds ? (bounds.x1 - bounds.x0) : d3.select('svg').attr('width');
-  const H = bounds ? (bounds.y1 - bounds.y0) : d3.select('svg').attr('height');
+  // Resolve drawing surface dimensions
+  const svgSel = svg || d3.select('svg');
+  let surfaceW = +svgSel.attr('width');
+  let surfaceH = +svgSel.attr('height');
+  if (!Number.isFinite(surfaceW) || !Number.isFinite(surfaceH)) {
+    // fallback to client box
+    const node = svgSel.node();
+    surfaceW = node?.clientWidth  || 800;
+    surfaceH = node?.clientHeight || 600;
+  }
 
-  const labelArray = labels.map(l => ({
-    x: l.x - offsetX,
-    y: l.y - offsetY,
-    width: l.width,
+  const x0 = bounds ? bounds.x0 : 0;
+  const y0 = bounds ? bounds.y0 : 0;
+  const W  = bounds ? (bounds.x1 - bounds.x0) : surfaceW;
+  const H  = bounds ? (bounds.y1 - bounds.y0) : surfaceH;
+
+  // seed: make sure every label has metrics and a starting box top-left
+  for (const l of labels) {
+    if (!Number.isFinite(l.width) || !Number.isFinite(l.height)) {
+      // if you wired ensureMetrics already, this shouldn't happen
+      l.width  = l.width  || 40;
+      l.height = l.height || 14;
+    }
+    if (!Number.isFinite(l.x) || !Number.isFinite(l.y)) {
+      // start from anchor if centroid missing
+      const ax = l.anchor?.x ?? 0, ay = l.anchor?.y ?? 0;
+      l.x = ax - l.width / 2;
+      l.y = ay - l.height / 2;
+    }
+  }
+
+  // Build SA arrays in local coords
+  const la = labels.map(l => ({
+    x: l.x - x0,
+    y: l.y - y0,
+    width:  l.width,
     height: l.height,
-    name: l.text
+    name:   l.text || ''
   }));
-  const anchorArray = labels.map(l => ({
-    x: l.anchor.x - offsetX,
-    y: l.anchor.y - offsetY,
-    r: l.anchor.r ?? 3
+  const aa = labels.map(l => ({
+    x: (l.anchor?.x ?? (l.x + l.width/2)) - x0,
+    y: (l.anchor?.y ?? (l.y + l.height/2)) - y0,
+    r: l.anchor?.r ?? 3
   }));
 
-  // run simulated annealing
-  d3.labeler()
-    .label(labelArray)
-    .anchor(anchorArray)
-    .width(+W)
-    .height(+H)
-    .start(sweeps);
+  d3.labeler().label(la).anchor(aa).width(+W).height(+H).start(sweeps);
 
-  // map back to world coords
-  return labels.map((l, i) => ({
-    ...l,
-    placed: { x: labelArray[i].x + offsetX, y: labelArray[i].y + offsetY }
-  }));
+  // Map back out and clamp box fully inside bounds
+  for (let i=0;i<labels.length;i++) {
+    const l = labels[i], bx = la[i].x + x0, by = la[i].y + y0;
+    l.placed = { x: bx, y: by };
+    const minX = x0, maxX = x0 + W - l.width;
+    const minY = y0, maxY = y0 + H - l.height;
+    l.placed.x = Math.max(minX, Math.min(maxX, l.placed.x));
+    l.placed.y = Math.max(minY, Math.min(maxY, l.placed.y));
+  }
+  return labels;
 }
 
 // Try to pan the viewport to give more space for the label
@@ -908,8 +970,9 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
     }
     
     // Step 2: Process ocean labels with keepWithinRect (smaller sweeps)
-    const oceansWithKeepRect = metrics.filter(l => l.kind === 'ocean' && l.keepWithinRect);
-    for (const ocean of oceansWithKeepRect) {
+    if (USE_SA_FOR_OCEANS) {
+      const oceansWithKeepRect = metrics.filter(l => l.kind === 'ocean' && l.keepWithinRect);
+      for (const ocean of oceansWithKeepRect) {
       const rect = ocean.keepWithinRect; // {x0,y0,x1,y1}
       const neighbors = metrics.filter(l =>
         l.id !== ocean.id &&
@@ -931,6 +994,9 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
         continue;
       }
 
+      // Seed ocean into its rectangle before annealing
+      seedOceanIntoRect(ocean);
+      
       // Ocean polishing: smaller sweeps since rectangle already did most work
       const sweeps = Math.min(500, Math.max(300, 300 + neighbors.length * 10));
       
@@ -949,6 +1015,7 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
       
       // Mark as processed
       annealed.forEach(l => processedIds.add(l.id));
+    }
     }
     
     // Step 3: Merge in any labels we skipped (oceans without keepWithinRect, or clusters too small)
@@ -976,6 +1043,53 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
     // Debug: Check for remaining overlaps (post-assertion)
     if (window.DEBUG) {
       checkRemainingOverlaps(placed);
+    }
+    
+    // One-cluster fallback: if overlaps remain, run a single anneal over all non-ocean labels
+    function countOverlaps(arr){
+      let n=0;
+      for (let i=0;i<arr.length;i++){
+        const a = arr[i], ax = (a.placed?.x ?? a.x - a.width/2), ay = (a.placed?.y ?? a.y - a.height/2);
+        for (let j=i+1;j<arr.length;j++){
+          const b = arr[j], bx = (b.placed?.x ?? b.x - b.width/2), by = (b.placed?.y ?? b.y - b.height/2);
+          if (ax < bx + b.width && ax + a.width > bx && ay < by + b.height && ay + a.height > by) n++;
+        }
+      }
+      return n;
+    }
+    
+    const overlapCount = countOverlaps(placed);
+    if (overlapCount > 0) {
+      console.log(`[labels] ${overlapCount} overlaps detected, running fallback one-cluster anneal`);
+      
+      // Get all non-ocean labels for fallback annealing
+      const nonOceanLabels = placed.filter(l => l.kind !== 'ocean');
+      if (nonOceanLabels.length > 1) {
+        // Calculate bounds for all non-ocean labels
+        const xs = nonOceanLabels.map(l => l.placed?.x ?? l.x), ys = nonOceanLabels.map(l => l.placed?.y ?? l.y);
+        const pad = 64;
+        const bounds = { 
+          x0: Math.min(...xs) - pad, 
+          y0: Math.min(...ys) - pad,
+          x1: Math.max(...xs) + pad, 
+          y1: Math.max(...ys) + pad 
+        };
+        
+        // Run fallback annealing with moderate sweeps
+        const sweeps = Math.min(600, Math.max(400, 400 + nonOceanLabels.length * 5));
+        const fallbackAnnealed = annealLabels({ labels: nonOceanLabels, bounds, sweeps });
+        
+        // Update placed labels with fallback results
+        for (const fallbackLabel of fallbackAnnealed) {
+          const originalIndex = placed.findIndex(l => l.id === fallbackLabel.id);
+          if (originalIndex !== -1) {
+            placed[originalIndex] = fallbackLabel;
+          }
+        }
+        
+        const newOverlapCount = countOverlaps(placed);
+        console.log(`[labels] fallback anneal complete: ${overlapCount} → ${newOverlapCount} overlaps`);
+      }
     }
     
     return placed;
@@ -1473,6 +1587,72 @@ export function debugLabels() {
 
 // --- Render ----------------------------------------------------------
 
+// Safe number helper
+function safe(val, fallback=0) {
+  return Number.isFinite(val) ? val : fallback;
+}
+
+// Ensure every label has width/height (once per cycle)
+export function ensureMetrics(labels, svg) {
+  // Debug: check what we're getting
+  if (window.DEBUG) {
+    console.log('[ensureMetrics] svg type:', typeof svg, 'svg.append:', typeof svg?.append);
+  }
+  
+  for (const d of labels) {
+    // font by kind — match your current styles
+    if (!Number.isFinite(d.font)) {
+      d.font = (d.kind === 'ocean' ? 28 : d.kind === 'lake' ? 14 : 12);
+    }
+    if (!Number.isFinite(d.width) || d.width <= 0) {
+      const approx = Math.max(8, (d.text?.length || 0) * d.font * 0.6);
+      // Safety check: ensure svg is a D3 selection
+      if (svg && typeof svg.append === 'function') {
+        const measured = measureTextWidth(svg, d.text, { fontSize: d.font, weight: 700 });
+        d.width = Number.isFinite(measured) && measured > 0 ? measured : approx;
+      } else {
+        d.width = approx;
+      }
+    }
+    if (!Number.isFinite(d.height) || d.height <= 0) {
+      d.height = Math.max(10, Math.round(d.font * 0.9));
+    }
+  }
+}
+
+// Seed ocean labels inside their chosen rectangle
+function seedOceanIntoRect(oceanLabel) {
+  const r = oceanLabel.keepWithinRect;
+  if (!r) return;
+  const availW = Math.max(0, r.x1 - r.x0 - oceanLabel.width);
+  const availH = Math.max(0, r.y1 - r.y0 - oceanLabel.height);
+  oceanLabel.x = r.x0 + availW / 2;
+  oceanLabel.y = r.y0 + availH / 2;
+  oceanLabel.anchor = {
+    x: r.x0 + (r.x1 - r.x0)/2,
+    y: r.y0 + (r.y1 - r.y0)/2,
+    r: 4
+  };
+}
+
+// Helper function to get label position, preferring SA output when present
+function labelDrawXY(d) {
+  const w = safe(d.width, 0);
+  const h = safe(d.height, 0);
+
+  // If SA ran, we have a box top-left at placed.x/y
+  if (d.placed && Number.isFinite(d.placed.x) && Number.isFinite(d.placed.y)) {
+    // Convert box top-left -> text center (middle/white stroke looks right ~0.75h)
+    return {
+      x: d.placed.x + w / 2,
+      y: d.placed.y + h * 0.75
+    };
+  }
+
+  // Fallback to centroid if no SA placement
+  return { x: safe(d.x, 0), y: safe(d.y, 0) };
+}
+
 // Render all labels once with keyed join (hidden by default)
 export function renderLabels({ svg, placed, groupId }) {
   const g = svg.select(`#${groupId}`);
@@ -1498,14 +1678,20 @@ export function renderLabels({ svg, placed, groupId }) {
   const merged = enter.merge(sel);
   
   // Set position and transform
-  merged.attr('transform', d => `translate(${d.placed.x},${d.placed.y})`);
+  merged.attr('transform', d => {
+    const p = labelDrawXY(d);
+    // last-resort guard: never return NaN
+    const x = safe(p.x, 0);
+    const y = safe(p.y, 0);
+    return `translate(${x},${y})`;
+  });
   
   // Update stroke text
   merged.select('text.stroke')
     .text(d => d.text)
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'central')
-    .attr('font-size', d => d.fontSize || 16) // Use computed font size or default
+    .attr('font-size', d => d.font || 16) // Use computed font size from metrics
     .classed('is-visible', false); // Hidden by default
   
   // Update fill text
@@ -1513,18 +1699,54 @@ export function renderLabels({ svg, placed, groupId }) {
     .text(d => d.text)
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'central')
-    .attr('font-size', d => d.fontSize || 16) // Use computed font size or default
+    .attr('font-size', d => d.font || 16) // Use computed font size from metrics
     .classed('is-visible', false); // Hidden by default
   
   if (window.DEBUG) console.log('[labels] DEBUG: Rendered', merged.size(), 'labels');
+  
+  // Debug overlay: show final boxes behind text
+  if (window.DEBUG && DEBUG_LABEL_BOXES) {
+    const dbg = d3.select('#labels-debug').selectAll('rect').data(placed, d => d.id);
+    dbg.enter().append('rect')
+      .attr('fill', 'none')
+      .attr('stroke', '#000')
+      .attr('stroke-opacity', 0.25)
+      .merge(dbg)
+      .attr('x', d => (d.placed ? d.placed.x : d.x - d.width/2))
+      .attr('y', d => (d.placed ? d.placed.y : d.y - d.height/2))
+      .attr('width',  d => d.width)
+      .attr('height', d => d.height);
+    dbg.exit().remove();
+  }
+  
+  // Count overlaps after placement
+  function countOverlaps(arr){
+    let n=0;
+    for (let i=0;i<arr.length;i++){
+      const a = arr[i], ax = (a.placed?.x ?? a.x - a.width/2), ay = (a.placed?.y ?? a.y - a.height/2);
+      for (let j=i+1;j<arr.length;j++){
+        const b = arr[j], bx = (b.placed?.x ?? b.x - b.width/2), by = (b.placed?.y ?? b.y - b.height/2);
+        if (ax < bx + b.width && ax + a.width > bx && ay < by + b.height && ay + a.height > by) n++;
+      }
+    }
+    return n;
+  }
+  console.log('[labels] overlaps after SA:', countOverlaps(placed));
 }
 
 // On zoom: update transform with scaling
 export function updateLabelZoom({ svg, groupId, k }) {
+  // last-resort guard: ensure k is finite and positive
+  const safeK = Number.isFinite(k) && k > 0 ? k : 1;
+  
   svg.select(`#${groupId}`).selectAll('g.label')
     .attr('transform', d => {
+      const p = labelDrawXY(d);
       const labelScale = d.scale || 1.0;
-      return `translate(${d.placed.x},${d.placed.y}) scale(${labelScale / k})`;
+      // last-resort guard: never return NaN
+      const x = safe(p.x, 0);
+      const y = safe(p.y, 0);
+      return `translate(${x},${y}) scale(${labelScale / safeK})`;
     });
 }
 

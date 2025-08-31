@@ -17,6 +17,8 @@ A web-based procedural map generator that creates Voronoi-based terrain with int
 - **Cluster-based optimization**: Groups nearby labels for simultaneous optimization
 - **Ocean polishing**: Specialized SA optimization for ocean labels within their water boundaries
 - **Size-based zoom filtering**: Features appear progressively based on area and zoom level
+- **Robust error handling**: Multiple safety layers prevent crashes from invalid data
+- **Ocean seeding**: Labels start inside their designated rectangles for faster convergence
 
 ### 🎯 **Interactive Features**
 - **Pan and zoom** with smooth performance
@@ -33,6 +35,15 @@ The label placement system uses an advanced Simulated Annealing (SA) algorithm:
 - **Performance guardrails**: Dynamic sweeps based on cluster size with intelligent fallbacks
 - **Ocean polishing**: Specialized SA optimization for ocean labels within their water boundaries
 - **Collision avoidance**: Minimizes overlaps while maintaining proximity to feature centroids
+- **Box clamping**: Ensures labels stay within designated bounds after annealing
+- **One-cluster fallback**: Additional annealing pass for any remaining overlaps
+
+### **Safety and Robustness**
+- **Input validation**: All coordinates and dimensions validated before processing
+- **NaN protection**: Multiple layers prevent NaN/Infinity values in transforms
+- **Fallback metrics**: Approximate text measurements when precise measurement fails
+- **Ocean seeding**: Labels start inside their rectangles for optimal SA convergence
+- **Zoom safety**: Finite zoom factors prevent rendering crashes
 
 ### **Size-Based Zoom Filtering**
 - **Oceans**: Always visible
@@ -45,6 +56,7 @@ The label placement system uses an advanced Simulated Annealing (SA) algorithm:
 - **Priority-based placement** (oceans > lakes > islands)
 - **Ocean boundary constraints** with specialized polishing
 - **Visual indicators** for overlapped labels (reduced opacity)
+- **Overlap counting**: Debug output shows remaining overlaps after placement
 
 ## Quick Start
 
@@ -77,6 +89,12 @@ runSelfTests()
 
 // Performance monitoring
 Timers.report()
+
+// Enable debug mode for detailed logging
+window.DEBUG = true
+
+// Show label bounding boxes
+DEBUG_LABEL_BOXES = true
 ```
 
 ### **Development Tools**
@@ -113,7 +131,7 @@ For comprehensive debugging and testing, see the `/dev/` directory:
 2. **Voronoi** → `buildVoronoi`, `detectNeighbors`
 3. **Heightmap** → `randomMap` (heights ∈ [0,1])
 4. **Features** → `markFeatures` (sets `featureType`, components)
-5. **Labels** → `buildFeatureLabels` → `placeLabelsAvoidingCollisions` → `filterByZoom`
+5. **Labels** → `buildFeatureLabels` → `ensureMetrics` → `placeLabelsAvoidingCollisions` → `filterByZoom`
 6. **Interaction** → `attachInteraction` (zoom, hover HUD)
 7. **Autofit** → `fitToLand` (Promise-based, uses `computeLandBBox`)
 8. **Ocean Labels** → Placed after autofit with correct post-transform bounds
@@ -133,14 +151,19 @@ For comprehensive debugging and testing, see the `/dev/` directory:
 
 ### **SA Labeler Configuration**
 ```javascript
+// Safety toggles for easy rollback
+export const USE_SA_LABELER = true;       // master switch
+export const USE_SA_FOR_OCEANS = true;    // polish oceans in keepWithinRect
+export const DEBUG_LABEL_BOXES = false;   // show rects behind text
+
 {
-  USE_SA_LABELER: true,  // Toggle between SA and original system
   clusterRadius: 200,    // Pixels for cluster detection
   sweeps: {
     small: 200,          // Base sweeps for small clusters
     medium: 400,         // Medium clusters
     large: 800,          // Large clusters (with 30% reduction for >60 labels)
-    ocean: 400           // Ocean polishing sweeps
+    ocean: 400,          // Ocean polishing sweeps
+    fallback: 500        // One-cluster fallback sweeps
   }
 }
 ```
@@ -167,12 +190,15 @@ const [x0, y0, x1, y1] = getVisibleWorldBounds(svg, width, height);
 - **Cluster-based processing** to prevent excessive computation
 - **Ocean boundary constraints** for specialized optimization
 - **Layer management** to minimize DOM manipulation
+- **Text measurement caching** - computed once per render cycle
+- **Robust error handling** prevents crashes from invalid data
 
 ### **Memory Usage**
 - **Cluster formation**: O(n²) for initial clustering
 - **SA optimization**: O(sweeps × cluster_size) per cluster
 - **Performance guardrails**: Skip annealing for clusters ≤2 labels
 - **Dynamic sweeps**: Adaptive computation based on cluster size
+- **One-cluster fallback**: Additional pass only when overlaps remain
 
 ## Development
 
@@ -197,6 +223,7 @@ const [x0, y0, x1, y1] = getVisibleWorldBounds(svg, width, height);
 - **Self-tests**: `runSelfTests()` validates invariants
 - **Focused tests**: `test-*.html` pages for specific functionality
 - **Manual verification**: Console debugging and visual inspection
+- **Overlap counting**: Debug output shows placement quality
 
 ## SA Labeler Migration
 
@@ -212,13 +239,19 @@ The label placement system has been upgraded from a "cluster jiggling" algorithm
 - ✅ **Step 6**: LOD & zoom transforms unchanged
 - ✅ **Step 7**: Debug toggle & fallback path
 - ✅ **Step 8**: Performance guardrails
+- ✅ **Patch 1**: Safe label positioning with NaN protection
+- ✅ **Patch 2**: Ensure metrics for all labels
+- ✅ **Patch 3**: Hardened annealer wrapper
+- ✅ **Patch 4**: Ocean seeding in rectangles
+- ✅ **Patch 5**: Last-resort zoom scaling guards
 
-### **Feature Flag**
+### **Feature Flags**
 The system can be toggled between old and new algorithms:
 ```javascript
 // In src/modules/labels.js
-export const USE_SA_LABELER = true;  // New SA system
-export const USE_SA_LABELER = false; // Original system
+export const USE_SA_LABELER = true;       // master switch
+export const USE_SA_FOR_OCEANS = true;    // polish oceans in keepWithinRect
+export const DEBUG_LABEL_BOXES = false;   // show rects behind text
 ```
 
 ### **Testing**
@@ -236,6 +269,7 @@ Comprehensive test suite available:
 - **Deterministic generation** - maintain seedable RNG
 - **Modular design** - keep functions focused and testable
 - **SA labeler ready** - system supports both old and new algorithms
+- **Robust error handling** - prevent crashes from edge cases
 
 ### **Debugging Tips**
 - Use `debugLabels()` for comprehensive inspection
@@ -244,6 +278,8 @@ Comprehensive test suite available:
 - Test with various zoom levels and feature densities
 - Use `getSALabelerStatus()` to check SA system status
 - Enable debug mode with `window.DEBUG = true` for detailed logging
+- Watch overlap counts in console for placement quality
+- Use `DEBUG_LABEL_BOXES = true` to visualize label bounding boxes
 
 ## License
 
