@@ -1427,9 +1427,19 @@ function checkPartialClear(qt, x, y, w, h, area = 0) {
 
 // ---- Zoom filtering with progressive reveal ----
 export function filterByZoom(placed, k) {
+  // Safety check: ensure placed is valid
+  if (!Array.isArray(placed) || placed.length === 0) {
+    console.warn('[labels] filterByZoom: no labels to filter');
+    return [];
+  }
+  
   // Bucket by kind (placed is already sorted by priority and area)
   const buckets = { ocean: [], lake: [], island: [], other: [] };
-  for (const l of placed) (buckets[l.kind] ?? buckets.other).push(l);
+  for (const l of placed) {
+    if (l?.kind) {
+      (buckets[l.kind] ?? buckets.other).push(l);
+    }
+  }
 
   const lim = {
     ocean: 4,
@@ -1486,12 +1496,12 @@ export function debugLabels() {
   // Check for potential issues
   const issues = [];
   placed.forEach(l => {
-    if (!l.id) issues.push(`Label missing ID: ${l}`);
-    if (!l.text) issues.push(`Label missing text: ${l.id}`);
-    if (l.placed.x == null || l.placed.y == null) issues.push(`Label missing position: ${l.id}`);
-    if (l.w <= 0 || l.h <= 0) issues.push(`Label invalid size: ${l.id} (${l.w}x${l.h})`);
-    if (l.scale <= 0) issues.push(`Label invalid scale: ${l.id} (${l.scale})`);
-    if (l.area <= 0) issues.push(`Label invalid area: ${l.id} (${l.area})`);
+    if (!l?.id) issues.push(`Label missing ID: ${l}`);
+    if (!l?.text) issues.push(`Label missing text: ${l?.id || 'unknown'}`);
+    if (!l?.placed || l.placed.x == null || l.placed.y == null) issues.push(`Label missing position: ${l?.id || 'unknown'}`);
+    if (!l?.w || l.w <= 0 || !l?.h || l.h <= 0) issues.push(`Label invalid size: ${l?.id || 'unknown'} (${l?.w || 0}x${l?.h || 0})`);
+    if (!l?.scale || l.scale <= 0) issues.push(`Label invalid scale: ${l?.id || 'unknown'} (${l?.scale || 0})`);
+    if (!l?.area || l.area <= 0) issues.push(`Label invalid area: ${l?.id || 'unknown'} (${l?.area || 0})`);
   });
   
   if (issues.length > 0) {
@@ -1508,7 +1518,7 @@ export function debugLabels() {
   // Show visible vs hidden breakdown
   const visibleByKind = { ocean: [], lake: [], island: [] };
   visible.forEach(l => {
-    const kind = l.kind || 'other';
+    const kind = l?.kind || 'other';
     if (visibleByKind[kind]) visibleByKind[kind].push(l);
   });
   
@@ -1520,17 +1530,17 @@ export function debugLabels() {
   
   // Show all labels with their data
   console.table(placed.map(l => ({
-    id: l.id,
-    kind: l.kind,
-    text: l.text,
-    area: l.area,
-    x: l.placed.x,
-    y: l.placed.y,
-    w: l.w,
-    h: l.h,
-    scale: l.scale,
-    priority: l.priority,
-    visible: visible.some(v => v.id === l.id)
+    id: l?.id || 'unknown',
+    kind: l?.kind || 'other',
+    text: l?.text || '',
+    area: l?.area || 0,
+    x: l?.placed?.x || l?.x || 0,
+    y: l?.placed?.y || l?.y || 0,
+    w: l?.w || 0,
+    h: l?.h || 0,
+    scale: l?.scale || 0,
+    priority: l?.priority || 0,
+    visible: visible.some(v => v?.id === l?.id)
   })));
   
   return placed;
@@ -1551,22 +1561,24 @@ export function ensureMetrics(labels, svg) {
   }
   
   for (const d of labels) {
+    if (!d) continue; // Skip undefined labels
+    
     // font by kind — match your current styles
     if (!Number.isFinite(d.font)) {
-      d.font = (d.kind === 'ocean' ? 28 : d.kind === 'lake' ? 14 : 12);
+      d.font = (d?.kind === 'ocean' ? 28 : d?.kind === 'lake' ? 14 : 12);
     }
     if (!Number.isFinite(d.width) || d.width <= 0) {
-      const approx = Math.max(8, (d.text?.length || 0) * d.font * 0.6);
+      const approx = Math.max(8, (d?.text?.length || 0) * (d.font || 16) * 0.6);
       // Safety check: ensure svg is a D3 selection
       if (svg && typeof svg.append === 'function') {
-        const measured = measureTextWidth(svg, d.text, { fontSize: d.font, weight: 700 });
+        const measured = measureTextWidth(svg, d?.text || '', { fontSize: d.font || 16, weight: 700 });
         d.width = Number.isFinite(measured) && measured > 0 ? measured : approx;
       } else {
         d.width = approx;
       }
     }
     if (!Number.isFinite(d.height) || d.height <= 0) {
-      d.height = Math.max(10, Math.round(d.font * 0.9));
+      d.height = Math.max(10, Math.round((d.font || 16) * 0.9));
     }
   }
 }
@@ -1730,8 +1742,9 @@ export function updateLabelZoom({ svg, groupId, k }) {
   
   svg.select(`#${groupId}`).selectAll('g.label')
     .attr('transform', d => {
+      if (!d) return 'translate(0,0) scale(1)'; // Safety guard
       const p = labelDrawXY(d);
-      const labelScale = d.scale || 1.0;
+      const labelScale = d?.scale || 1.0;
       // last-resort guard: never return NaN
       const x = safe(p.x, 0);
       const y = safe(p.y, 0);
@@ -1741,22 +1754,32 @@ export function updateLabelZoom({ svg, groupId, k }) {
 
 // Real LOD: compute the visible set and toggle class
 export function updateLabelVisibility({ svg, groupId, placed, k, filterByZoom }) {
-  const visible = new Set(filterByZoom(placed, k).map(d => d.id));
+  // Safety check: ensure placed is valid
+  if (!Array.isArray(placed) || placed.length === 0) {
+    console.warn('[labels] updateLabelVisibility: no labels to process');
+    return;
+  }
+  
+  const visible = new Set(filterByZoom(placed, k).map(d => d?.id).filter(Boolean));
   svg.select(`#${groupId}`)
     .selectAll('g.label text')
-    .classed('is-visible', d => visible.has(d.id));
+    .classed('is-visible', d => d?.id && visible.has(d.id));
   
   // Quick self-check: log zoom level and visible count
   console.log(`[LOD] k=${k.toFixed(2)}, visible=${visible.size}/${placed.length} labels`);
   
   // Debug breakdown by kind
   const buckets = { ocean: [], lake: [], island: [], other: [] };
-  for (const l of placed) (buckets[l.kind] ?? buckets.other).push(l);
+  for (const l of placed) {
+    if (l?.kind) {
+      (buckets[l.kind] ?? buckets.other).push(l);
+    }
+  }
   
   const visibleByKind = { ocean: [], lake: [], island: [], other: [] };
   for (const l of placed) {
-    if (visible.has(l.id)) {
-      (visibleByKind[l.kind] ?? visibleByKind.other).push(l);
+    if (l?.id && visible.has(l.id)) {
+      (visibleByKind[l?.kind] ?? visibleByKind.other).push(l);
     }
   }
   
