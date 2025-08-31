@@ -23,7 +23,7 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction, getVisibleWorldBounds, padBounds } from "./modules/interaction.js";
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
-import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, logProbe, LABEL_DEBUG, clampToKeepRect, getZoomK, textWidthPx, labelFontFamily } from "./modules/labels.js";
+import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, logProbe, LABEL_DEBUG, clampToKeepRect, getZoomK, textWidthPx, labelFontFamily, placeOceanLabelInScreenSpace, renderOceanOnly, renderNonOceanLabels } from "./modules/labels.js";
 
 // === Minimal Perf HUD ==========================================
 const Perf = (() => {
@@ -572,7 +572,12 @@ async function generate(count) {
       });
     }
 
-    renderLabels({ svg: svgSel, placed: placedFeatures, groupId: 'labels-features', k: 1 });
+    // Set up split layers for ocean and non-ocean labels
+    const gAll = svgSel.select('#labels-all');    // islands + lakes (world layer)
+    const gOcean = svgSel.select('#labels-ocean'); // ocean only (screen layer)
+    
+    // Initial render of non-ocean labels only
+    renderNonOceanLabels(gAll, placedFeatures);
 
     // stash for zoom visibility updates (will be updated after autofit + ocean placement)
     window.__labelsPlaced = { features: placedFeatures };
@@ -815,6 +820,15 @@ async function generate(count) {
           // Draw debug rectangle
           drawDebugOceanRect(pxRect);
           
+          // Set up split layers for ocean and non-ocean labels
+          const gAll = svgSel.select('#labels-all');    // islands + lakes (world layer)
+          const gOcean = svgSel.select('#labels-ocean'); // ocean only (screen layer)
+          
+          // Place ocean label in screen space using the SAT rectangle
+          if (ocean && pxRect) {
+            renderOceanOnly(gOcean, ocean, pxRect);
+          }
+          
           // Guard: if ocean label was placed successfully (has keepWithinRect)
           // skip re-running global culls to avoid nuking island/lake labels.
           const okOcean = ocean && ocean.keepWithinRect;
@@ -825,19 +839,19 @@ async function generate(count) {
             // Ensure metrics are computed for the updated ocean labels
             ensureMetrics(featureLabels, svgSel);
             
-                      // Run collision avoidance (now includes oceans with keepWithinRect)
-          const placedFeatures = timeit('SA collision avoidance', () => placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels }));
+            // Run collision avoidance (now includes oceans with keepWithinRect)
+            const placedFeatures = timeit('SA collision avoidance', () => placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels }));
             
             // Apply LOD filtering after autofit + ocean placement (single pass)
             const t = d3.zoomTransform(svgSel.node());
             const selected = filterByZoom(placedFeatures, t.k);
             
-            // Render all labels including oceans (with LOD filtering applied)
-            renderLabels({ svg: svgSel, placed: selected, groupId: 'labels-features' });
+            // Render non-ocean labels only (ocean is handled separately)
+            renderNonOceanLabels(gAll, selected);
             
             // Debug logging after SA placement render
             if (LABEL_DEBUG) {
-              const g = svgSel.select('#labels-features').selectAll('g.label');
+              const g = gAll.selectAll('g.label');
               logProbe('post-SA-render', g);
             }
             
@@ -846,11 +860,12 @@ async function generate(count) {
           } else {
             console.log('[labels] Skipping global LOD/budget re-cull after ocean fit (ok==true)');
             
-            // Still need to render the ocean label with its new keepWithinRect property
-            // to trigger the assertions and show the fitted text
+            // Apply LOD filtering to non-ocean labels only
             const t = d3.zoomTransform(svgSel.node());
             const selected = filterByZoom(featureLabels, t.k);
-            renderLabels({ svg: svgSel, placed: selected, groupId: 'labels-features' });
+            
+            // Render non-ocean labels only (ocean is handled separately)
+            renderNonOceanLabels(gAll, selected);
             
             // Store updated labels
             window.__labelsPlaced = { features: selected };
@@ -858,6 +873,10 @@ async function generate(count) {
           
         } else {
           console.warn('[ocean] ❌ No suitable SAT rectangle found; ocean labels will use default placement.');
+          
+          // Set up split layers for ocean and non-ocean labels
+          const gAll = svgSel.select('#labels-all');    // islands + lakes (world layer)
+          const gOcean = svgSel.select('#labels-ocean'); // ocean only (screen layer)
           
           // Run normal label system without ocean constraints
           console.log('[ocean] 🔄 Running normal label system without ocean constraints...');
@@ -872,12 +891,12 @@ async function generate(count) {
           const t = d3.zoomTransform(svgSel.node());
           const selected = filterByZoom(placedFeatures, t.k);
           
-          // Render all labels (with LOD filtering applied)
-          renderLabels({ svg: svgSel, placed: selected, groupId: 'labels-features' });
+          // Render non-ocean labels only (ocean is handled separately)
+          renderNonOceanLabels(gAll, selected);
           
           // Debug logging after SA placement render
           if (LABEL_DEBUG) {
-            const g = svgSel.select('#labels-features').selectAll('g.label');
+            const g = gAll.selectAll('g.label');
             logProbe('post-SA-render', g);
           }
           

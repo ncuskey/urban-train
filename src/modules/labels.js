@@ -15,15 +15,14 @@ import {getZoomState} from './interaction.js';
 function assertOceanWithinRect(textSel, rectPx, pad=2) {
   const n = textSel.node();
   if (!n) return;
-  const {k, x, y} = getZoomState();
-  // Convert text bbox (world) → screen pixels to compare with rectPx
-  const bb = n.getBBox(); // world units
-  const tlx = bb.x * k + x, tly = bb.y * k + y;
-  const brx = (bb.x + bb.width) * k + x, bry = (bb.y + bb.height) * k + y;
-  const ok = (tlx >= rectPx.x + pad) && (tly >= rectPx.y + pad) &&
-             (brx <= rectPx.x + rectPx.w - pad) &&
-             (bry <= rectPx.y + rectPx.h - pad);
-  console.log('[assert] ocean in rect?', ok, {bboxPx:{x:tlx,y:tly,w:brx-tlx,h:bry-tly}, rectPx});
+  const b = n.getBBox(); // in px because the element lives in the screen layer
+  const ok =
+    b.x >= rectPx.x + pad &&
+    b.y >= rectPx.y + pad &&
+    (b.x + b.width)  <= (rectPx.x + rectPx.w - pad) &&
+    (b.y + b.height) <= (rectPx.y + rectPx.h - pad);
+
+  DBG.assert && console.log('[assert] ocean in rect?', ok, {bboxPx: b, rectPx});
   return ok;
 }
 
@@ -61,7 +60,7 @@ export const LABEL_DEBUG = true;  // flip to false to silence logs
 let __labelProbeId = null; // chosen once per run
 let __lastProbe = null; // cache for last probe state
 
-const DBG = {labels:true, ocean:true, cost:true};
+const DBG = {labels:true, ocean:true, cost:true, assert:true};
 function timeit(tag, fn) {
   if (!DBG.cost) return fn();
   const t0 = performance.now();
@@ -119,6 +118,29 @@ export function getZoomK() {
 
 // Keep ocean labels away from edges by this many screen pixels
 const OCEAN_EDGE_PAD_PX = 24; // tweak 20–32 to taste
+
+// Place text element inside a rectangle with space-aware centering
+export function placeTextInRect(textSel, rect, {space='px', lineH=1.1} = {}) {
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+
+  textSel
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'middle');
+
+  if (space === 'px') {
+    // element lives in screen space
+    textSel.attr('x', cx).attr('y', cy);
+    // recenter tspans if any
+    const tspan = textSel.selectAll('tspan');
+    if (!tspan.empty()) tspan.attr('x', cx).attr('dy', (d,i)=> i? (lineH+'em') : 0);
+  } else {
+    // world space (for later, if you move ocean into the world layer)
+    textSel.attr('x', cx).attr('y', cy);
+    const tspan = textSel.selectAll('tspan');
+    if (!tspan.empty()) tspan.attr('x', cx).attr('dy', (d,i)=> i? (lineH+'em') : 0);
+  }
+}
 
 function insetPxRect(rect, pad) {
   return {
@@ -200,7 +222,7 @@ function __measureTextWidth(containerSel, cls, text, fontPx) {
 }
 
 // Single or two-line fit with shrink-to-fit
-export function fitTextToRect({ svg, textSel, text, rect, pad=8, maxPx=200, minPx=14, lineH=1.1 }) {
+export function fitTextToRect({ svg, textSel, text, rect, pad=8, maxPx=200, minPx=14, lineH=1.1, k }) {
   if (!textSel || textSel.empty()) return {ok:false, reason:'empty-selection'};
   const node = textSel.node();
   if (!node) return {ok:false, reason:'no-node'};
@@ -213,17 +235,23 @@ export function fitTextToRect({ svg, textSel, text, rect, pad=8, maxPx=200, minP
   const svgSel = asSel(svg);
   const measure = svgSel.select("g.__measure");
 
-  const innerW = Math.max(1, rect.w - 2 * pad);
-  const innerH = Math.max(1, rect.h - 2 * pad);
+  // rect is in WORLD units now, so our target W/H are just rect.w/h minus padding
+  const targetW = Math.max(0, rect.w - 2 * pad);
+  const targetH = Math.max(0, rect.h - 2 * pad);
   const words  = text.split(/\s+/);
 
-  let fontPx = __clamp(Math.floor(innerH / (words.length >= 3 ? 2.4 : 1.4)), minPx, maxPx);
+  let fontPx = __clamp(Math.floor(targetH / (words.length >= 3 ? 2.4 : 1.4)), minPx, maxPx);
   let lines = [text];
+
+
+
+  // measure() already returns width in WORLD units (because it's unscaled on <svg>)
+  const measureText = (fontPx, s) => __measureTextWidth(measure, "label ocean", s, fontPx);
 
   const tryLayout = (fontPx) => {
     // 1) single line
-    const w1 = __measureTextWidth(measure, "label ocean", text, fontPx);
-    if (w1 <= innerW && fontPx <= innerH) {
+    const w1 = measureText(fontPx, text);
+    if (w1 <= targetW && fontPx <= targetH) {
       textSel.text(text)
         .style("font-size", fontPx + "px");
       lines = [text];
@@ -234,14 +262,14 @@ export function fitTextToRect({ svg, textSel, text, rect, pad=8, maxPx=200, minP
     for (let i = 1; i < words.length; i++) {
       const L = words.slice(0, i).join(" ");
       const R = words.slice(i).join(" ");
-      const wL = __measureTextWidth(measure, "label ocean", L, fontPx);
-      const wR = __measureTextWidth(measure, "label ocean", R, fontPx);
+      const wL = measureText(fontPx, L);
+      const wR = measureText(fontPx, R);
       const wMax = Math.max(wL, wR);
       if (!best || wMax < best.wMax) best = { L, R, wMax };
     }
     if (best) {
       const h2 = fontPx * lineH * 2;
-      if (best.wMax <= innerW && h2 <= innerH) {
+      if (best.wMax <= targetW && h2 <= targetH) {
         textSel.text(null)
           .style("font-size", fontPx + "px");
         textSel.append("tspan").attr("x", 0).attr("dy", -fontPx * 0.6).text(best.L);
@@ -2263,6 +2291,26 @@ function labelDrawXY(d) {
   return { x: d.x || 0, y: d.y || 0 };
 }
 
+// Render non-ocean labels only (islands and lakes)
+export function renderNonOceanLabels(gAll, labels) {
+  // Filter out ocean labels
+  const nonOceanLabels = labels.filter(d => d.kind !== 'ocean');
+  
+  if (nonOceanLabels.length === 0) {
+    // Clear layer if no non-ocean labels
+    gAll.selectAll('*').remove();
+    return;
+  }
+
+  // Ensure labels-all layer exists
+  if (gAll.empty()) {
+    gAll = d3.select('svg').append('g').attr('id', 'labels-all');
+  }
+
+  // Render non-ocean labels using existing renderLabels logic
+  renderLabels({ svg: d3.select('svg'), placed: nonOceanLabels, groupId: 'labels-all' });
+}
+
 // Render all labels once with keyed join (hidden by default)
 export function renderLabels({ svg, placed, groupId }) {
   const g = svg.select(`#${groupId}`);
@@ -2364,40 +2412,37 @@ export function renderLabels({ svg, placed, groupId }) {
       
       // Handle ocean labels with keepWithinRect using fitTextToRect
       if (d.kind === 'ocean' && d.keepWithinRect) {
-        // 1) Build a **pixel** rect for fitting (what the fitter expects)
-        //    We have world rect stored → convert back to px for fitting only.
-        const {k, x, y} = getZoomState();
+        // Use world coordinates directly with fitTextToRect
+        const {k} = getZoomState();
         const rw = d.keepWithinRect; // world units
-        const rectPx = { x: rw.x * k + x, y: rw.y * k + y, w: rw.w * k, h: rw.h * k };
 
-        // 2) Run fitter in pixels (unchanged API)
+        // Run fitter with world coordinates
         const res = fitTextToRect({
           svg,
           textSel: textElement,
           text: d.text,
-          rect: rectPx,
+          rect: rw,
           pad: 8,
           maxPx: 200,
           minPx: 14,
-          lineH: 1.1
+          lineH: 1.1,
+          k
         });
 
-        // 3) APPLY as **world** values:
-        //    font-size must be scaled down by k; position x/y must be world.
+        // Apply results and place text in rect
         if (res && res.ok) {
-          const fsWorld = pxToWorldFont(res.fontPx);
-          textElement.attr('font-size', fsWorld);
-          // place anchor at res.anchorPx (center or top-left per fitter); assume center here:
-          const axPx = res.anchorPx?.x ?? (rectPx.x + rectPx.w / 2);
-          const ayPx = res.anchorPx?.y ?? (rectPx.y + rectPx.h / 2);
-          const aw = screenToWorldXY(axPx, ayPx);
-          textElement.attr('x', aw.x).attr('y', aw.y);
-          textElement.attr('text-anchor', 'middle').attr('dominant-baseline', 'middle');
+          textElement.attr('font-size', res.fontPx);
           textElement.attr('data-fit', JSON.stringify({fontPx: res.fontPx, k}));
+          // Place text in the SAT rectangle (world units)
+          placeTextInRect(textElement, rw);
+          // Convert back to screen for assertion check
+          const rectPx = { x: rw.x * k + getZoomState().x, y: rw.y * k + getZoomState().y, w: rw.w * k, h: rw.h * k };
           assertOceanWithinRect(textElement, rectPx, 2);
         } else {
           console.warn('[ocean] fit failed; falling back to min size world units');
-          textElement.attr('font-size', pxToWorldFont(14));
+          textElement.attr('font-size', 14);
+          // Still place text in rect even with fallback font size
+          placeTextInRect(textElement, rw);
         }
       } else if (d.lines && d.lines.length === 2) {
         // Use the lines array from fitOceanToRectPx
@@ -2449,40 +2494,37 @@ export function renderLabels({ svg, placed, groupId }) {
       
       // Handle ocean labels with keepWithinRect using fitTextToRect
       if (d.kind === 'ocean' && d.keepWithinRect) {
-        // 1) Build a **pixel** rect for fitting (what the fitter expects)
-        //    We have world rect stored → convert back to px for fitting only.
-        const {k, x, y} = getZoomState();
+        // Use world coordinates directly with fitTextToRect
+        const {k} = getZoomState();
         const rw = d.keepWithinRect; // world units
-        const rectPx = { x: rw.x * k + x, y: rw.y * k + y, w: rw.w * k, h: rw.h * k };
 
-        // 2) Run fitter in pixels (unchanged API)
+        // Run fitter with world coordinates
         const res = fitTextToRect({
           svg,
           textSel: textElement,
           text: d.text,
-          rect: rectPx,
+          rect: rw,
           pad: 8,
           maxPx: 200,
           minPx: 14,
-          lineH: 1.1
+          lineH: 1.1,
+          k
         });
 
-        // 3) APPLY as **world** values:
-        //    font-size must be scaled down by k; position x/y must be world.
+        // Apply results and place text in rect
         if (res && res.ok) {
-          const fsWorld = pxToWorldFont(res.fontPx);
-          textElement.attr('font-size', fsWorld);
-          // place anchor at res.anchorPx (center or top-left per fitter); assume center here:
-          const axPx = res.anchorPx?.x ?? (rectPx.x + rectPx.w / 2);
-          const ayPx = res.anchorPx?.y ?? (rectPx.y + rectPx.h / 2);
-          const aw = screenToWorldXY(axPx, ayPx);
-          textElement.attr('x', aw.x).attr('y', aw.y);
-          textElement.attr('text-anchor', 'middle').attr('dominant-baseline', 'middle');
+          textElement.attr('font-size', res.fontPx);
           textElement.attr('data-fit', JSON.stringify({fontPx: res.fontPx, k}));
+          // Place text in the SAT rectangle (world units)
+          placeTextInRect(textElement, rw);
+          // Convert back to screen for assertion check
+          const rectPx = { x: rw.x * k + getZoomState().x, y: rw.y * k + getZoomState().y, w: rw.w * k, h: rw.h * k };
           assertOceanWithinRect(textElement, rectPx, 2);
         } else {
           console.warn('[ocean] fit failed; falling back to min size world units');
-          textElement.attr('font-size', pxToWorldFont(14));
+          textElement.attr('font-size', 14);
+          // Still place text in rect even with fallback font size
+          placeTextInRect(textElement, rw);
         }
       } else if (d.lines && d.lines.length === 2) {
         // Use the lines array from fitOceanToRectPx
@@ -3082,7 +3124,8 @@ export function findOceanLabelRectAfterAutofit(
   const rWorld = screenRectToWorldRect({x: bestPx.x, y: bestPx.y, w: bestPx.w, h: bestPx.h});
   bestPx._debugRectScreen = bestPx; // for dashed red box
   bestPx.keepWithinRect = {...rWorld, units: 'world'}; // use this for placement
-  console.log('[ocean] Stored world rect:', rWorld);
+  
+  DBG.ocean && console.log('[ocean] Stored world rect:', rWorld);
   return bestPx;
 }
 
@@ -3143,6 +3186,65 @@ export function drawDebugOceanRect(pxRect) {
     .attr('stroke-width', 2);
 
   console.log(`[ocean] Debug rect clamped to viewport: ${clamped.width}x${clamped.height} at (${clamped.x},${clamped.y})`);
+}
+
+// Render ocean labels only (separate layer to avoid affecting other labels)
+export function renderOceanOnly(gOcean, oceanDatum, rectPx) {
+  if (!oceanDatum || !oceanDatum.text) {
+    // Clear ocean layer if no ocean data
+    gOcean.selectAll('*').remove();
+    return;
+  }
+
+  // Ensure ocean label layer exists and is on top
+  if (gOcean.empty()) {
+    gOcean = d3.select('svg').append('g').attr('id', 'labels-ocean');
+  }
+  gOcean.raise();
+
+  // Create or update ocean text element
+  const oceanText = gOcean.selectAll('text.ocean')
+    .data([oceanDatum], d => d.id || 'ocean')
+    .join(
+      enter => enter.append('text')
+        .attr('class', 'ocean')
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'middle')
+        .style('font-family', labelFontFamily())
+        .style('font-weight', '700')
+        .style('fill', '#1a365d')
+        .style('stroke', '#ffffff')
+        .style('stroke-width', '2px')
+        .style('paint-order', 'stroke')
+        .text(d => d.text),
+      update => update,
+      exit => exit.remove()
+    );
+
+  // Place text in the SAT rectangle (screen space)
+  placeTextInRect(oceanText, rectPx, { space: 'px' });
+  
+  // Ensure ocean labels are on top (above raster layer)
+  d3.select('#labels-ocean').raise();
+  
+  console.log(`[ocean] Rendered ocean label in screen space at rect: ${rectPx.w}x${rectPx.h} at (${rectPx.x},${rectPx.y})`);
+}
+
+// Place ocean label in screen space using SAT rectangle
+export function placeOceanLabelInScreenSpace(rectPx, oceanText, svg) {
+  // Ensure ocean label layer exists
+  let gOcean = svg.select('#labels-ocean');
+  if (gOcean.empty()) {
+    gOcean = svg.append('g').attr('id', 'labels-ocean');
+  }
+  
+  // Ensure it's on top
+  gOcean.raise();
+  
+  // Center in screen space
+  placeTextInRect(oceanText, rectPx, { space: 'px' });
+  
+  console.log(`[ocean] Placed ocean label in screen space at rect: ${rectPx.w}x${rectPx.h} at (${rectPx.x},${rectPx.y})`);
 }
 
 // Place ocean label with font scaling to fit the rectangle

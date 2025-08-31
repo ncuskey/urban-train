@@ -4,11 +4,10 @@ import { filterByZoom } from './labels.js';
 
 // Add a tiny accessor so other modules can safely read current zoom.
 export function getZoomState() {
-  // Expect the exported d3 zoom or a module-scoped state you already keep.
-  // Fall back conservatively if not initialized yet.
+  // Use d3.zoomTransform to get current transform state
   try {
     const g = d3.select('#world'); // or the group you pan/zoom
-    const t = g.node().__zoom || {k: 1, x: 0, y: 0};
+    const t = d3.zoomTransform(g.node());
     return {k: t.k || 1, x: t.x || 0, y: t.y || 0};
   } catch (_e) {
     return {k: 1, x: 0, y: 0};
