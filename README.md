@@ -15,11 +15,14 @@ A web-based procedural map generator that creates Voronoi-based terrain with int
 - **Size-aware naming**: Uses feature area to select appropriate terms (e.g., "Mere" vs "Lake" vs "Ocean")
 - **Simulated Annealing placement**: Advanced SA algorithm for optimal label placement with collision avoidance
 - **Cluster-based optimization**: Groups nearby labels for simultaneous optimization
-- **Ocean polishing**: Specialized SA optimization for ocean labels within their water boundaries
+- **Ocean labels in world space**: Ocean labels now participate in collision avoidance and zoom/pan with the map
+- **Higher mass for ocean labels**: Ocean labels have 3x higher mass in SA energy function, making smaller labels move around them
+- **Fit-to-rect functionality**: Ocean labels automatically scale font size and use two-line breaks to fit within their boundaries
+- **Multiline support**: Ocean labels can break into two lines for better fit with proper line spacing
 - **Size-based zoom filtering**: Features appear progressively based on area and zoom level
 - **Robust error handling**: Multiple safety layers prevent crashes from invalid data
-- **Ocean seeding**: Labels start inside their designated rectangles for faster convergence
-- **Consistent styling**: Ocean labels use the same CSS styling as other labels for visual consistency
+- **Consistent font styling**: All labels use unified CSS font variables for consistent appearance
+- **Accurate text measurement**: Font measurements match rendered text exactly using CSS variables
 
 ### 🎯 **Interactive Features**
 - **Pan and zoom** with smooth performance
@@ -34,8 +37,9 @@ The label placement system uses an advanced Simulated Annealing (SA) algorithm:
 - **Cluster detection**: Groups nearby labels (within 200px) for simultaneous optimization
 - **SA optimization**: Uses Monte Carlo optimization with temperature scheduling for global placement
 - **Performance guardrails**: Dynamic sweeps based on cluster size with intelligent fallbacks
-- **Ocean polishing**: Specialized SA optimization for ocean labels within their water boundaries
-- **Post-SAT ocean-only SA**: Additional SA pass after SAT rectangle computation for fine-tuned ocean placement
+- **Ocean labels in world space**: Ocean labels participate in collision avoidance and zoom/pan with the map
+- **Higher mass for ocean labels**: Ocean labels have 3x higher mass in SA energy function, making smaller labels move around them
+- **Custom energy function**: Implements higher penalty for ocean label overlaps to prioritize their placement
 - **Collision avoidance**: Minimizes overlaps while maintaining proximity to feature centroids
 - **Box clamping**: Ensures labels stay within designated bounds after annealing
 - **One-cluster fallback**: Additional annealing pass for any remaining overlaps
@@ -58,8 +62,10 @@ The label placement system uses an advanced Simulated Annealing (SA) algorithm:
 - **Simulated Annealing optimization** for global placement optimization
 - **Cluster-based processing** with performance guardrails
 - **Priority-based placement** (oceans > lakes > islands)
-- **Ocean boundary constraints** with specialized polishing
-- **Post-SAT neighbor optimization**: Includes neighboring labels in ocean SA passes
+- **Ocean labels in world space**: Ocean labels participate in collision avoidance and zoom/pan with the map
+- **Higher mass for ocean labels**: Ocean labels have 3x higher mass in SA energy function, making smaller labels move around them
+- **Fit-to-rect functionality**: Ocean labels automatically scale font size and use two-line breaks to fit within their boundaries
+- **Multiline support**: Ocean labels can break into two lines for better fit with proper line spacing
 - **Visual indicators** for overlapped labels (reduced opacity)
 - **Overlap counting**: Debug output shows remaining overlaps after placement
 
@@ -139,7 +145,7 @@ For comprehensive debugging and testing, see the `/dev/` directory:
 5. **Labels** → `buildFeatureLabels` → `ensureMetrics` → `placeLabelsAvoidingCollisions` → `filterByZoom`
 6. **Interaction** → `attachInteraction` (zoom, hover HUD)
 7. **Autofit** → `fitToLand` (Promise-based, uses `computeLandBBox`)
-8. **Ocean Labels** → Placed after autofit with correct post-transform bounds
+8. **Ocean Labels** → SAT rectangle computation → fit-to-rect → SA collision avoidance with higher mass
 
 ## Configuration
 
@@ -158,7 +164,7 @@ For comprehensive debugging and testing, see the `/dev/` directory:
 ```javascript
 // Safety toggles for easy rollback
 export const USE_SA_LABELER = true;       // master switch
-export const USE_SA_FOR_OCEANS = true;    // polish oceans in keepWithinRect
+// Ocean labels now always participate in SA collision avoidance
 export const DEBUG_LABEL_BOXES = false;   // show rects behind text
 
 {
@@ -167,9 +173,11 @@ export const DEBUG_LABEL_BOXES = false;   // show rects behind text
     small: 200,          // Base sweeps for small clusters
     medium: 400,         // Medium clusters
     large: 800,          // Large clusters (with 30% reduction for >60 labels)
-    ocean: 400,          // Ocean polishing sweeps
     fallback: 500        // One-cluster fallback sweeps
-  }
+  },
+  oceanMassMultiplier: 3.0,  // Higher mass for ocean labels in SA energy function
+  minFontSize: 18,       // Minimum font size for ocean labels
+  maxFontSize: 28        // Maximum font size for ocean labels
 }
 ```
 
@@ -186,6 +194,29 @@ await fitToLand({
 const [x0, y0, x1, y1] = getVisibleWorldBounds(svg, width, height);
 ```
 
+### **Font Consistency**
+```css
+/* Unified font styling for all labels */
+:root { --label-font: Georgia, "Times New Roman", serif; }
+
+#labels text.stroke,
+#labels text.fill,
+#labels-features g.label text.stroke,
+#labels-features g.label text.fill,
+.place-label {
+  font-family: var(--label-font);
+  font-weight: 700;
+}
+```
+
+```javascript
+// Font measurement uses CSS variable for consistency
+function labelFontFamily() {
+  return getComputedStyle(document.documentElement)
+           .getPropertyValue('--label-font').trim() || 'serif';
+}
+```
+
 ## Performance
 
 ### **Optimizations**
@@ -193,9 +224,12 @@ const [x0, y0, x1, y1] = getVisibleWorldBounds(svg, width, height);
 - **Simulated Annealing** for global label placement optimization
 - **Performance guardrails** with dynamic sweeps based on cluster size
 - **Cluster-based processing** to prevent excessive computation
-- **Ocean boundary constraints** for specialized optimization
+- **Ocean labels in world space**: Ocean labels participate in collision avoidance and zoom/pan with the map
+- **Higher mass for ocean labels**: Ocean labels have 3x higher mass in SA energy function, making smaller labels move around them
+- **Fit-to-rect functionality**: Ocean labels automatically scale font size and use two-line breaks to fit within their boundaries
 - **Layer management** to minimize DOM manipulation
 - **Text measurement caching** - computed once per render cycle
+- **Unified font system** with CSS variables for consistent measurements
 - **Robust error handling** prevents crashes from invalid data
 
 ### **Memory Usage**

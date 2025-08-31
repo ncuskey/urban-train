@@ -2,11 +2,17 @@
 
 // Safety toggles for easy rollback
 export const USE_SA_LABELER = true;       // master switch
-export const USE_SA_FOR_OCEANS = true;    // polish oceans in keepWithinRect
+// Ocean labels now always participate in SA collision avoidance
 export const DEBUG_LABEL_BOXES = false;   // show rects behind text
 
+// Get the label font family from CSS variable
+function labelFontFamily() {
+  return getComputedStyle(document.documentElement)
+           .getPropertyValue('--label-font').trim() || 'serif';
+}
+
 // Accurate text measurement using ghost element
-export function measureTextWidth(svg, text, { fontSize = 28, family = getComputedStyle(document.documentElement).getPropertyValue('--label-font')?.trim() || 'serif', weight = 700 } = {}) {
+export function measureTextWidth(svg, text, { fontSize = 28, family = labelFontFamily(), weight = 700 } = {}) {
   const ghost = svg.append('text')
     .attr('x', -99999).attr('y', -99999)
     .attr('font-size', fontSize).attr('font-family', family).attr('font-weight', weight)
@@ -19,13 +25,20 @@ export function measureTextWidth(svg, text, { fontSize = 28, family = getCompute
 // Normalize label data for SA labeler - compute anchors and dimensions
 export function computeLabelMetrics({ svg, labels }) {
   return labels.map(l => {
-    const font = (
+    // Apply fit-to-rect for ocean labels with keepWithinRect
+    if (l.kind === 'ocean' && l.keepWithinRect) {
+      l = fitOceanLabelToRect(l, l.keepWithinRect, svg);
+    }
+    
+    const font = l.fontSize || (
       l.kind === 'ocean'  ? 28 :
       l.kind === 'lake'   ? 14 :
       l.kind === 'island' ? 12 : 12
     );
-    const width = measureTextWidth(svg, l.text, { fontSize: font, weight: 700 });
-    const height = Math.max(10, Math.round(font * 0.9));
+    
+    // Use the fitted dimensions if available, otherwise measure
+    const width = l.width || measureTextWidth(svg, l.multiline ? l.text.split('\n')[0] : l.text, { fontSize: font, weight: 700 });
+    const height = l.height || Math.max(10, Math.round(font * (l.multiline ? 2.4 : 0.9)));
 
     // Seed ocean labels inside their chosen rectangle
     if (l.kind === 'ocean' && l.keepWithinRect) {
@@ -77,6 +90,205 @@ function clampBoxToBounds(lbl, bounds) {
   lbl.placed.y = Math.max(minY, Math.min(maxY, lbl.placed.y));
 }
 
+// Fit ocean label text to rectangle with font scaling and optional line breaks
+function fitOceanLabelToRect(oceanLabel, rect, svg) {
+  if (!oceanLabel.keepWithinRect || !oceanLabel.text) return oceanLabel;
+  
+  const r = oceanLabel.keepWithinRect;
+  const text = oceanLabel.text;
+  const maxWidth = r.x1 - r.x0;
+  const maxHeight = r.y1 - r.y0;
+  const minFontSize = 18; // floor font size
+  const maxFontSize = 28; // starting font size
+  
+  // Try single line first
+  let fontSize = maxFontSize;
+  let textWidth = 0;
+  let textHeight = 0;
+  
+  // Create temporary text element for measurement
+  const tempText = svg.append('text')
+    .attr('x', -99999).attr('y', -99999)
+    .attr('font-family', labelFontFamily())
+    .attr('font-weight', 700)
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'middle');
+  
+  // Try single line with font scaling
+  while (fontSize >= minFontSize) {
+    tempText.attr('font-size', fontSize).text(text);
+    textWidth = tempText.node().getComputedTextLength();
+    textHeight = fontSize * 1.2; // approximate line height
+    
+    if (textWidth <= maxWidth * 0.9 && textHeight <= maxHeight * 0.9) {
+      break; // fits
+    }
+    fontSize -= 2;
+  }
+  
+  // If single line doesn't fit even at minimum font size, try two-line break
+  if (fontSize < minFontSize) {
+    fontSize = maxFontSize;
+    
+    // Find the best break point (prefer breaking at spaces)
+    const words = text.split(' ');
+    let bestBreak = Math.floor(words.length / 2);
+    let bestFit = false;
+    
+    for (let i = 1; i < words.length; i++) {
+      const line1 = words.slice(0, i).join(' ');
+      const line2 = words.slice(i).join(' ');
+      
+      while (fontSize >= minFontSize) {
+        tempText.attr('font-size', fontSize);
+        
+        // Measure both lines
+        tempText.text(line1);
+        const width1 = tempText.node().getComputedTextLength();
+        tempText.text(line2);
+        const width2 = tempText.node().getComputedTextLength();
+        
+        const maxLineWidth = Math.max(width1, width2);
+        const totalHeight = fontSize * 2.4; // two lines with spacing
+        
+        if (maxLineWidth <= maxWidth * 0.9 && totalHeight <= maxHeight * 0.9) {
+          bestBreak = i;
+          bestFit = true;
+          break;
+        }
+        fontSize -= 2;
+      }
+      
+      if (bestFit) break;
+      fontSize = maxFontSize; // reset for next attempt
+    }
+    
+    if (bestFit) {
+      // Update the ocean label with two-line text
+      const line1 = words.slice(0, bestBreak).join(' ');
+      const line2 = words.slice(bestBreak).join(' ');
+      oceanLabel.text = line1 + '\n' + line2;
+      oceanLabel.fontSize = fontSize;
+      oceanLabel.multiline = true;
+    } else {
+      // Fallback: use minimum font size with single line
+      oceanLabel.fontSize = minFontSize;
+      oceanLabel.multiline = false;
+    }
+  } else {
+    // Single line fits
+    oceanLabel.fontSize = fontSize;
+    oceanLabel.multiline = false;
+  }
+  
+  // Clean up temp element
+  tempText.remove();
+  
+  // Recalculate label dimensions with new font size
+  const finalWidth = measureTextWidth(svg, oceanLabel.multiline ? oceanLabel.text.split('\n')[0] : oceanLabel.text, { 
+    fontSize: oceanLabel.fontSize, 
+    family: labelFontFamily(), 
+    weight: 700 
+  });
+  const finalHeight = oceanLabel.multiline ? oceanLabel.fontSize * 2.4 : oceanLabel.fontSize * 1.2;
+  
+  oceanLabel.width = finalWidth;
+  oceanLabel.height = finalHeight;
+  
+  return oceanLabel;
+}
+
+// Clamp label to its keepWithinRect constraint
+function clampToKeepRect(lbl) {
+  if (!lbl.keepWithinRect) return;
+  const w = lbl._box?.w || lbl.width || 80, h = lbl._box?.h || lbl.height || 18; // measured label box in world units
+  const r = lbl.keepWithinRect;
+  lbl.x = Math.min(Math.max(lbl.x, r.x0 + w/2), r.x1 - w/2);
+  lbl.y = Math.min(Math.max(lbl.y, r.y0 + h/2), r.y1 - h/2);
+}
+
+// Custom energy function that gives ocean labels higher mass/penalty
+function customEnergy(index, lab, anc) {
+  // Standard energy weights
+  const w_len = 0.2;      // leader line length 
+  const w_inter = 1.0;    // leader line intersection
+  const w_lab2 = 30.0;    // label-label overlap
+  const w_lab_anc = 30.0; // label-anchor overlap
+  const w_orient = 3.0;   // orientation bias
+  
+  // Higher mass multiplier for ocean labels (makes them harder to move)
+  const oceanMassMultiplier = 3.0;
+  
+  const m = lab.length;
+  let ener = 0;
+  const dx = lab[index].x - anc[index].x;
+  const dy = anc[index].y - lab[index].y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  let overlap = true;
+  let amount = 0;
+  let theta = 0;
+
+  // penalty for length of leader line
+  if (dist > 0) ener += dist * w_len;
+
+  // label orientation bias
+  if (dist > 0) {
+    const dxNorm = dx / dist;
+    const dyNorm = dy / dist;
+    if (dxNorm > 0 && dyNorm > 0) { ener += 0 * w_orient; }
+    else if (dxNorm < 0 && dyNorm > 0) { ener += 1 * w_orient; }
+    else if (dxNorm < 0 && dyNorm < 0) { ener += 2 * w_orient; }
+    else { ener += 3 * w_orient; }
+  }
+
+  const x21 = lab[index].x;
+  const y21 = lab[index].y - lab[index].height + 2.0;
+  const x22 = lab[index].x + lab[index].width;
+  const y22 = lab[index].y + 2.0;
+  let x11, x12, y11, y12, x_overlap, y_overlap, overlap_area;
+
+  for (let i = 0; i < m; i++) {
+    if (i != index) {
+      // penalty for intersection of leader lines
+      overlap = intersect(anc[index].x, lab[index].x, anc[i].x, lab[i].x,
+                        anc[index].y, lab[index].y, anc[i].y, lab[i].y);
+      if (overlap) ener += w_inter;
+
+      // penalty for label-label overlap
+      x11 = lab[i].x;
+      y11 = lab[i].y - lab[i].height + 2.0;
+      x12 = lab[i].x + lab[i].width;
+      y12 = lab[i].y + 2.0;
+      x_overlap = Math.max(0, Math.min(x12,x22) - Math.max(x11,x21));
+      y_overlap = Math.max(0, Math.min(y12,y22) - Math.max(y11,y21));
+      overlap_area = x_overlap * y_overlap;
+      
+      // Apply higher penalty for ocean labels (they're "heavier")
+      const massMultiplier = (labels[index] && labels[index].kind === 'ocean') ? oceanMassMultiplier : 1.0;
+      ener += (overlap_area * w_lab2 * massMultiplier);
+    }
+
+    // penalty for label-anchor overlap
+    x11 = anc[i].x - anc[i].r;
+    y11 = anc[i].y - anc[i].r;
+    x12 = anc[i].x + anc[i].r;
+    y12 = anc[i].y + anc[i].r;
+    x_overlap = Math.max(0, Math.min(x12,x22) - Math.max(x11,x21));
+    y_overlap = Math.max(0, Math.min(y12,y22) - Math.max(y11,y21));
+    overlap_area = x_overlap * y_overlap;
+    ener += (overlap_area * w_lab_anc);
+  }
+  
+  return ener;
+}
+
+// Helper function for line intersection (copied from d3-labeler)
+function intersect(x1, x2, x3, x4, y1, y2, y3, y4) {
+  const mua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / ((y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1));
+  const mub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / ((y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1));
+  return !(mua < 0 || mua > 1 || mub < 0 || mub > 1);
+}
+
 // Wrapper around D3-Labeler simulated annealing
 export function annealLabels({ labels, bounds, sweeps = 400, svg }) {
   if (!labels.length) return labels;
@@ -126,7 +338,8 @@ export function annealLabels({ labels, bounds, sweeps = 400, svg }) {
     r: l.anchor?.r ?? 3
   }));
 
-  d3.labeler().label(la).anchor(aa).width(+W).height(+H).start(sweeps);
+  // Use custom energy function with higher mass for ocean labels
+  d3.labeler().label(la).anchor(aa).width(+W).height(+H).alt_energy(customEnergy).start(sweeps);
 
   // Map back out and clamp box fully inside bounds
   for (let i=0;i<labels.length;i++) {
@@ -136,6 +349,14 @@ export function annealLabels({ labels, bounds, sweeps = 400, svg }) {
     const minY = y0, maxY = y0 + H - l.height;
     l.placed.x = Math.max(minX, Math.min(maxX, l.placed.x));
     l.placed.y = Math.max(minY, Math.min(maxY, l.placed.y));
+    
+    // Apply keepWithinRect constraints for ocean labels
+    if (l.keepWithinRect) {
+      clampToKeepRect(l);
+      // Update placed position to match clamped position
+      l.placed.x = l.x - l.width / 2;
+      l.placed.y = l.y - l.height / 2;
+    }
   }
   return labels;
 }
@@ -212,6 +433,7 @@ export function placeOceanLabelInRect(oceanLabel, rect, svg, opts = {}) {
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'middle')
     .attr('font-size', baseFS)
+    .attr('font-family', labelFontFamily())
     .attr('font-weight', 700)
     .text(oceanLabel.text);
 
@@ -923,7 +1145,7 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
     
     // Step 1: Process lake/island clusters with performance guardrails
     for (const cluster of clusters) {
-      const members = USE_SA_FOR_OCEANS ? cluster : cluster.filter(l => l.kind !== 'ocean');
+      const members = cluster; // include ocean so it participates in collision avoidance
       if (!members.length) continue;
       
       // Skip annealing for clusters of size 1-2 (no benefit)
@@ -1571,14 +1793,18 @@ export function ensureMetrics(labels, svg) {
       const approx = Math.max(8, (d?.text?.length || 0) * (d.font || 16) * 0.6);
       // Safety check: ensure svg is a D3 selection
       if (svg && typeof svg.append === 'function') {
-        const measured = measureTextWidth(svg, d?.text || '', { fontSize: d.font || 16, weight: 700 });
+        // Handle multiline text for measurement
+        const textToMeasure = d.multiline && d.text.includes('\n') ? d.text.split('\n')[0] : d.text;
+        const measured = measureTextWidth(svg, textToMeasure || '', { fontSize: d.font || 16, weight: 700 });
         d.width = Number.isFinite(measured) && measured > 0 ? measured : approx;
       } else {
         d.width = approx;
       }
     }
     if (!Number.isFinite(d.height) || d.height <= 0) {
-      d.height = Math.max(10, Math.round((d.font || 16) * 0.9));
+      // Handle multiline height calculation
+      const heightMultiplier = d.multiline ? 2.4 : 0.9;
+      d.height = Math.max(10, Math.round((d.font || 16) * heightMultiplier));
     }
   }
 }
@@ -1674,25 +1900,63 @@ export function renderLabels({ svg, placed, groupId }) {
   
   // Update stroke text
   merged.select('text.stroke')
-    .text(function(d) { return d && d.text ? d.text : ''; })
-    .attr('text-anchor', 'middle')
-    .attr('dominant-baseline', 'central')
-    .attr('font-size', function(d) { return d && d.font ? d.font : 16; }) // Use computed font size from metrics
-    .classed('is-visible', false) // Hidden by default
-    .classed('ocean', function(d) { return d && d.kind === 'ocean'; }) // Add ocean class for styling
-    .classed('lake', function(d) { return d && d.kind === 'lake'; }) // Add lake class for styling
-    .classed('island', function(d) { return d && d.kind === 'island'; }); // Add island class for styling
+    .each(function(d) {
+      if (!d || !d.text) return;
+      
+      const textElement = d3.select(this);
+      textElement
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'central')
+        .attr('font-size', d.font || 16)
+        .classed('is-visible', false)
+        .classed('ocean', d.kind === 'ocean')
+        .classed('lake', d.kind === 'lake')
+        .classed('island', d.kind === 'island');
+      
+      // Handle multiline text for ocean labels
+      if (d.multiline && d.text.includes('\n')) {
+        const lines = d.text.split('\n');
+        textElement.selectAll('tspan').remove(); // Clear existing tspans
+        lines.forEach((line, i) => {
+          textElement.append('tspan')
+            .attr('x', 0)
+            .attr('dy', i === 0 ? 0 : '1.2em')
+            .text(line);
+        });
+      } else {
+        textElement.text(d.text);
+      }
+    });
   
   // Update fill text
   merged.select('text.fill')
-    .text(function(d) { return d && d.text ? d.text : ''; })
-    .attr('text-anchor', 'middle')
-    .attr('dominant-baseline', 'central')
-    .attr('font-size', function(d) { return d && d.font ? d.font : 16; }) // Use computed font size from metrics
-    .classed('is-visible', false) // Hidden by default
-    .classed('ocean', function(d) { return d && d.kind === 'ocean'; }) // Add ocean class for styling
-    .classed('lake', function(d) { return d && d.kind === 'lake'; }) // Add lake class for styling
-    .classed('island', function(d) { return d && d.kind === 'island'; }); // Add island class for styling
+    .each(function(d) {
+      if (!d || !d.text) return;
+      
+      const textElement = d3.select(this);
+      textElement
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'central')
+        .attr('font-size', d.font || 16)
+        .classed('is-visible', false)
+        .classed('ocean', d.kind === 'ocean')
+        .classed('lake', d.kind === 'lake')
+        .classed('island', d.kind === 'island');
+      
+      // Handle multiline text for ocean labels
+      if (d.multiline && d.text.includes('\n')) {
+        const lines = d.text.split('\n');
+        textElement.selectAll('tspan').remove(); // Clear existing tspans
+        lines.forEach((line, i) => {
+          textElement.append('tspan')
+            .attr('x', 0)
+            .attr('dy', i === 0 ? 0 : '1.2em')
+            .text(line);
+        });
+      } else {
+        textElement.text(d.text);
+      }
+    });
   
   if (window.DEBUG) console.log('[labels] DEBUG: Rendered', merged.size(), 'labels');
   
@@ -2193,7 +2457,7 @@ export function findOceanLabelRectAfterAutofit(
 }
 
 // Optional (nice UX): only accept rects that can fit the text horizontally at (or slightly below) your base font size
-export function fitFontToRect(text, rect, basePx, family = 'serif') {
+export function fitFontToRect(text, rect, basePx, family = labelFontFamily()) {
   // Use the existing measureTextWidth function for consistency
   const svg = d3.select('svg').node() ? d3.select('svg') : d3.select('body').append('svg');
   const textW = measureTextWidth(svg, text, { fontSize: basePx, family, weight: 700 });
@@ -2252,6 +2516,8 @@ export function drawDebugOceanRect(pxRect) {
 }
 
 // Place ocean label with font scaling to fit the rectangle
+// NOTE: This function uses screen coordinates and is primarily for testing.
+// For production use, ocean labels are now handled by the world-space label system.
 export function placeOceanLabelAt(cx, cy, maxWidth, oceanLabel, svg, opts = {}) {
   const {
     baseFS = 28,      // desired ocean font size
@@ -2265,6 +2531,7 @@ export function placeOceanLabelAt(cx, cy, maxWidth, oceanLabel, svg, opts = {}) 
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'middle')
     .attr('font-size', baseFS)
+    .attr('font-family', labelFontFamily())
     .attr('font-weight', 700)
     .text(oceanLabel.text);
 
@@ -2504,9 +2771,20 @@ export function findOceanRectByBBoxes(
   landPadPx = 12,
   minAspect = 2.0
 ) {
-  function localPointIsOcean(x, y) {
+  // Get the active zoom transform from the *world* svg group
+  const world = d3.select('#world').node() || d3.select('svg').node();
+  const z = d3.zoomTransform(world);
+
+  // convert pixel -> world
+  function pxToWorld(px, py) {
+    return { x: (px - z.x) / z.k, y: (py - z.y) / z.k };
+  }
+
+  // Wrapper used by buildWaterMaskSAT
+  function localPointIsOcean(px, py) {
+    const { x, y } = pxToWorld(px, py);         // <-- convert first
     const cell = getCellAtXY?.(x, y);
-    if (!cell) return true;
+    if (!cell) return true;                      // treat unknown as water (safe)
     let h = cell.height ?? cell.data?.height ?? cell.polygon?.height ?? null;
     if (h == null) return true;
     return h <= seaLevel;

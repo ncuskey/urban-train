@@ -14,7 +14,7 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction, getVisibleWorldBounds, padBounds } from "./modules/interaction.js";
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
-import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, placeOceanLabelAt, clearScreenLabels, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, seedOceanIntoWorldRect } from "./modules/labels.js";
+import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect } from "./modules/labels.js";
 
 // === Minimal Perf HUD ==========================================
 const Perf = (() => {
@@ -351,8 +351,7 @@ async function generate(count) {
     existingDebugCircles.remove();
   }
   
-  // Clear any existing screen labels from previous generation
-  clearScreenLabels();
+  // Clear any existing screen labels from previous generation (no longer needed - ocean labels now in world space)
 
   var svg = d3.select("svg"),
     mapWidth = +svg.attr("width"),
@@ -757,9 +756,10 @@ async function generate(count) {
           // Set the world keep-in rect on the ocean label datum
           const ocean = featureLabels.find(l => l.kind === 'ocean');
           if (ocean && pxRect?.keepWithinRect) {
-            ocean.keepWithinRect = pxRect.keepWithinRect; // WORLD rect
-            // Give the solver a sane starting point in WORLD coords
-            seedOceanIntoWorldRect(ocean);
+            ocean.keepWithinRect = pxRect.keepWithinRect;  // WORLD rect
+            // reasonable seed: center of the world rect
+            ocean.x = (ocean.keepWithinRect.x0 + ocean.keepWithinRect.x1) / 2;
+            ocean.y = (ocean.keepWithinRect.y0 + ocean.keepWithinRect.y1) / 2;
           }
 
           // Draw debug rectangle
@@ -847,8 +847,7 @@ async function generate(count) {
 
   // redraw all polygons on SeaInput change 
   $("#seaInput").change(function() {
-    // Clear screen labels since ocean boundaries may have changed
-    clearScreenLabels();
+    // Ocean labels now handled by normal label system - no need to clear screen labels
     
     drawPolygons({
       polygons,
