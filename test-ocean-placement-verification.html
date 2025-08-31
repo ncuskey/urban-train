@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ocean Label Placement Verification</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .success { background-color: #d4edda; border-color: #c3e6cb; }
+        .error { background-color: #f8d7da; border-color: #f5c6cb; }
+        .info { background-color: #d1ecf1; border-color: #bee5eb; }
+        #console { background: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; height: 300px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+        button { margin: 5px; padding: 8px 16px; }
+    </style>
+</head>
+<body>
+    <h1>Ocean Label Placement Verification</h1>
+    
+    <div class="test-section info">
+        <h3>Test Overview</h3>
+        <p>This test verifies that ocean labels are properly placed in the world layer and coordinate transformations work correctly.</p>
+        <ul>
+            <li><strong>Mode A (Recommended):</strong> Ocean label's parent should be the same as other labels</li>
+            <li><strong>Mode B:</strong> Ocean label outside zoomed group with explicit reprojection</li>
+            <li><strong>No in-between:</strong> Should be one or the other, not mixed</li>
+        </ul>
+    </div>
+    
+    <div class="test-section">
+        <h3>Controls</h3>
+        <button onclick="generateMap()">Generate New Map</button>
+        <button onclick="checkOceanLabel()">Check Ocean Label</button>
+        <button onclick="clearConsole()">Clear Console</button>
+        <button onclick="inspectDOM()">Inspect DOM Structure</button>
+    </div>
+    
+    <div class="test-section">
+        <h3>Console Output</h3>
+        <div id="console"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Test Results</h3>
+        <div id="results"></div>
+    </div>
+    
+    <div id="map-container" style="width: 800px; height: 600px; border: 1px solid #ccc; margin: 20px 0;"></div>
+
+    <script type="module">
+        import { RNG } from './src/core/rng.js';
+        import { Timers } from './src/core/timers.js';
+        import { ensureLayers, ensureLabelSubgroups } from './src/render/layers.js';
+        import { runSelfTests, renderSelfTestBadge, clamp01, ensureReciprocalNeighbors } from './src/selftest.js';
+        import { poissonDiscSampler, buildVoronoi, detectNeighbors } from './src/modules/geometry.js';
+        import { randomMap } from './src/modules/heightmap.js';
+        import { markFeatures } from './src/modules/features.js';
+        import { makeNamer } from './src/modules/names.js';
+        import { drawCoastline } from './src/modules/coastline.js';
+        import { drawPolygons } from './src/modules/rendering.js';
+        import { attachInteraction, zoom } from './src/modules/interaction.js';
+        import { fitToLand } from './src/modules/autofit.js';
+        import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, renderOceanInWorld } from './src/modules/labels.js';
+
+        // Console logging with display
+        const originalLog = console.log;
+        const originalWarn = console.warn;
+        const originalError = console.error;
+        
+        function logToDisplay(message, type = 'log') {
+            const consoleDiv = document.getElementById('console');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.style.color = type === 'error' ? 'red' : type === 'warn' ? 'orange' : 'black';
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            consoleDiv.appendChild(logEntry);
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        }
+        
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            logToDisplay(args.join(' '));
+        };
+        
+        console.warn = function(...args) {
+            originalWarn.apply(console, args);
+            logToDisplay('WARN: ' + args.join(' '), 'warn');
+        };
+        
+        console.error = function(...args) {
+            originalError.apply(console, args);
+            logToDisplay('ERROR: ' + args.join(' '), 'error');
+        };
+
+        let svgSel, polygons, diagram;
+
+        async function generateMap() {
+            console.log('=== Generating New Map ===');
+            
+            // Clear previous map
+            const container = document.getElementById('map-container');
+            container.innerHTML = '';
+            
+            // Create SVG
+            svgSel = d3.select('#map-container').append('svg')
+                .attr('width', 800).attr('height', 600)
+                .style('background', '#87CEEB');
+            
+            // Setup layers
+            ensureLayers(svgSel);
+            ensureLabelSubgroups(svgSel);
+            
+            // Generate terrain
+            const rng = new RNG(42);
+            const points = poissonDiscSampler(800, 600, 8, rng);
+            diagram = buildVoronoi(points, 800, 600);
+            polygons = diagram.cells.map(cell => cell.map(point => [point[0], point[1]]));
+            
+            // Detect neighbors
+            detectNeighbors(polygons, diagram);
+            
+            // Generate heightmap
+            randomMap(polygons, 0.2, rng);
+            
+            // Mark features
+            markFeatures(polygons, 0.2);
+            
+            // Draw coastline
+            drawCoastline(svgSel, polygons, 0.2);
+            
+            // Draw polygons
+            drawPolygons(svgSel, polygons);
+            
+            // Build labels
+            const namer = makeNamer(rng);
+            const featureLabels = buildFeatureLabels(polygons, namer);
+            
+            // Render labels
+            renderLabels({ svg: svgSel, placed: featureLabels.filter(l => l.kind !== 'ocean'), groupId: 'labels-world' });
+            
+            // Attach interaction
+            attachInteraction({
+                svg: svgSel,
+                viewbox: svgSel.select('#world'),
+                diagram,
+                polygons,
+                hud: { cellEl: null, heightEl: null, featureEl: null }
+            });
+            
+            // Autofit and place ocean labels
+            try {
+                await fitToLand({
+                    svg: svgSel,
+                    zoom: zoom,
+                    polygons,
+                    width: 800,
+                    height: 600,
+                    seaLevel: 0.2,
+                    preferFeatureType: true,
+                    margin: 0.08,
+                    duration: 100
+                });
+                
+                // Place ocean labels
+                const oceanLabels = featureLabels.filter(l => l.kind === 'ocean');
+                if (oceanLabels.length > 0) {
+                    console.log('Placing ocean labels after autofit...');
+                    renderOceanInWorld(svgSel, oceanLabels[0].text);
+                }
+                
+                console.log('Map generation complete!');
+                
+            } catch (error) {
+                console.error('Error during map generation:', error);
+            }
+        }
+
+        function checkOceanLabel() {
+            console.log('=== Checking Ocean Label ===');
+            
+            if (!window.state || !window.state.ocean) {
+                console.warn('No ocean state found. Generate a map first.');
+                return;
+            }
+            
+            const ocean = window.state.ocean;
+            console.log('Ocean state:', ocean);
+            
+            // Check 1: Verify parent transform
+            const oceanLabel = svgSel.select('.ocean-label');
+            if (oceanLabel.empty()) {
+                console.error('Ocean label not found in DOM');
+                return;
+            }
+            
+            const parentTransform = d3.select(oceanLabel.node().parentNode).attr('transform');
+            console.log('Ocean label parent transform:', parentTransform);
+            
+            // Check 2: Verify roundtrip coordinates
+            const t = d3.zoomTransform(svgSel.node());
+            const r = ocean.rectWorld;
+            const x0 = t.applyX(r.x), y0 = t.applyY(r.y);
+            const x1 = t.applyX(r.x + r.w), y1 = t.applyY(r.y + r.h);
+            
+            console.log('Roundtrip verification:', {
+                worldRect: r,
+                screenRect: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 },
+                zoomTransform: { k: t.k, x: t.x, y: t.y }
+            });
+            
+            // Check 3: Verify parent group
+            const oceanParent = oceanLabel.node().parentNode;
+            const otherLabelsParent = svgSel.select('#labels-world').selectAll('g.label').node()?.parentNode;
+            
+            console.log('Parent group check:', {
+                oceanParent: oceanParent?.id || oceanParent?.className || 'unknown',
+                otherLabelsParent: otherLabelsParent?.id || otherLabelsParent?.className || 'unknown',
+                sameParent: oceanParent === otherLabelsParent
+            });
+            
+            // Display results
+            const resultsDiv = document.getElementById('results');
+            const success = oceanParent === otherLabelsParent;
+            resultsDiv.innerHTML = `
+                <div class="test-section ${success ? 'success' : 'error'}">
+                    <h4>Ocean Label Placement Test</h4>
+                    <p><strong>Result:</strong> ${success ? 'PASSED' : 'FAILED'}</p>
+                    <p><strong>Mode:</strong> ${success ? 'A (Same parent as other labels)' : 'B (Different parent)'}</p>
+                    <p><strong>Parent Transform:</strong> ${parentTransform || 'none'}</p>
+                    <p><strong>Same Parent:</strong> ${oceanParent === otherLabelsParent ? 'Yes' : 'No'}</p>
+                </div>
+            `;
+        }
+
+        function inspectDOM() {
+            console.log('=== DOM Structure Inspection ===');
+            
+            const oceanLabel = svgSel.select('.ocean-label');
+            if (oceanLabel.empty()) {
+                console.warn('Ocean label not found');
+                return;
+            }
+            
+            const oceanParent = oceanLabel.node().parentNode;
+            const otherLabels = svgSel.select('#labels-world').selectAll('g.label').filter(d => d && d.kind !== 'ocean');
+            const otherLabelsParent = otherLabels.node()?.parentNode;
+            
+            console.log('DOM Structure:', {
+                oceanLabel: {
+                    node: oceanLabel.node(),
+                    parent: oceanParent,
+                    parentId: oceanParent?.id,
+                    parentClass: oceanParent?.className,
+                    transform: oceanLabel.attr('transform')
+                },
+                otherLabels: {
+                    count: otherLabels.size(),
+                    parent: otherLabelsParent,
+                    parentId: otherLabelsParent?.id,
+                    parentClass: otherLabelsParent?.className
+                },
+                labelsWorld: {
+                    node: svgSel.select('#labels-world').node(),
+                    id: svgSel.select('#labels-world').attr('id'),
+                    transform: svgSel.select('#labels-world').attr('transform')
+                }
+            });
+        }
+
+        function clearConsole() {
+            document.getElementById('console').innerHTML = '';
+        }
+
+        // Initialize
+        window.generateMap = generateMap;
+        window.checkOceanLabel = checkOceanLabel;
+        window.clearConsole = clearConsole;
+        window.inspectDOM = inspectDOM;
+        
+        console.log('Ocean Label Placement Verification Test loaded');
+        console.log('Click "Generate New Map" to start testing');
+    </script>
+</body>
+</html>

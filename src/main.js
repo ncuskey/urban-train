@@ -23,7 +23,7 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction, getVisibleWorldBounds, padBounds, zoom } from "./modules/interaction.js";
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
-import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, logProbe, LABEL_DEBUG, clampToKeepRect, getZoomK, textWidthPx, labelFontFamily, placeOceanLabelInScreenSpace, renderOceanInWorld, updateOceanWorldTransform, renderNonOceanLabels, ensureLabelLayers } from "./modules/labels.js";
+import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, logProbe, LABEL_DEBUG, clampToKeepRect, getZoomK, textWidthPx, labelFontFamily, placeOceanLabelInScreenSpace, renderOceanInWorld, renderNonOceanLabels, ensureLabelLayers } from "./modules/labels.js";
 
 // === Minimal Perf HUD ==========================================
 const Perf = (() => {
@@ -789,12 +789,10 @@ async function generate(count) {
             placeOceanLabelAtSpot(oceanLabel, spot, svgSel);
             // Render ocean label in world space using the spot
             renderOceanInWorld(svgSel, oceanLabel.text);
-            updateOceanWorldTransform(svgSel); // position once using current transform
           } else {
             console.log(`[labels] Ocean "${oceanLabel.text}" using centroid: (${oceanLabel.x.toFixed(1)}, ${oceanLabel.y.toFixed(1)}) - no suitable spot found`);
             // Still render the ocean label even if no spot found
             renderOceanInWorld(svgSel, oceanLabel.text);
-            updateOceanWorldTransform(svgSel); // position once using current transform
           }
         }
       } else {
@@ -832,7 +830,6 @@ async function generate(count) {
           // Place ocean label in world space using the SAT rectangle
           if (ocean && pxRect) {
             renderOceanInWorld(svgSel, ocean.text);
-            updateOceanWorldTransform(svgSel); // position once using current transform
           }
           
           // Guard: if ocean label was placed successfully (has keepWithinRect)

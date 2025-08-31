@@ -22,8 +22,8 @@ Refactored the ocean label system to use **world coordinates as canonical values
 
 **World Layer Rendering:**
 - Ocean labels now rendered in `#labels-world` group instead of screen overlays
-- `renderOceanInWorld()`: Creates ocean labels in world space
-- `updateOceanWorldTransform()`: Positions labels with inverse scaling for constant pixel size
+- `renderOceanInWorld()`: Creates ocean labels in world space with world coordinates
+- Ocean labels move with the parent group transform - no manual positioning needed
 
 **Decoupled from SA/LOD System:**
 - Ocean labels explicitly filtered out of `placeLabelsAvoidingCollisions()`
@@ -32,8 +32,8 @@ Refactored the ocean label system to use **world coordinates as canonical values
 
 **D3 v5-Safe Zoom Integration:**
 - Zoom handler refactored to use `d3.event.transform` (D3 v5 compatible)
-- Ocean label transforms applied after world layer transforms
-- Proper order: world layers → other labels → ocean labels
+- Ocean labels use same transform path as other labels
+- Proper order: world layers → all labels (including ocean) move together
 
 ### 2. Zoom Behavior Sharing (Latest)
 
@@ -129,11 +129,39 @@ if (!state.getCellAtXY && window.currentPolygons) {
 6. **Coastline-Touch Check** - Stops at first transition from water to land to ensure coastline-bound sides
 7. **Post-SAT Optimization** - Additional SA pass after rectangle computation for fine-tuned placement
 8. **World Coordinate Consistency** - Proper screen-to-world conversion throughout SA processing
+9. **Simplified Architecture** - Ocean labels now follow same pattern as other labels (Mode A)
+10. **No Manual Transforms** - Labels move with parent group, eliminating coordinate calculation overhead
 
 ## Testing
 
 ### Test Files Created
 - `dev/test-ocean-rectangle.html` - Comprehensive test of the ocean rectangle finder functionality
+- `test-ocean-placement-verification.html` - Verification of ocean label placement and coordinate transformations
+
+### Verification Checks Added
+
+**Runtime Verification:**
+```javascript
+// Check 1: Verify parent transform (should be the same as other labels)
+const parentTransform = d3.select(gOcean.node().parentNode).attr('transform');
+console.log('[ocean] parent <g> transform =', parentTransform);
+
+// Check 2: Verify roundtrip coordinate conversion
+const t = d3.zoomTransform(svg.node());
+const r = window.state.ocean.rectWorld;
+const x0 = t.applyX(r.x), y0 = t.applyY(r.y);
+const x1 = t.applyX(r.x + r.w), y1 = t.applyY(r.y + r.h);
+
+// Check 3: Verify the ocean label is in the same group as other labels
+const oceanParent = gOcean.node().parentNode;
+const otherLabelsParent = svg.select('#labels-world').selectAll('g.label').node()?.parentNode;
+```
+
+**Expected Results:**
+- **Mode A (Recommended)**: Ocean label's parent should be the same as other labels
+- **Parent Transform**: Should match the `#labels-world` group transform
+- **Roundtrip Coordinates**: Screen coordinates should match original SAT rectPx within ~1 pixel
+- **Same Parent**: `oceanParent === otherLabelsParent` should be `true`
 
 ### Manual Testing
 1. Open `http://localhost:8000/` in browser

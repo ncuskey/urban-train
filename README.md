@@ -214,9 +214,9 @@ window.state.ocean = {
   rectPx: { w, h }            // Pixel dimensions for font fitting
 };
 
-// World layer rendering with inverse scaling
+// World layer rendering with parent group transforms
 renderOceanInWorld(svg, text);           // Creates ocean label in world space
-updateOceanWorldTransform(svg, transform); // Positions with inverse scaling for constant pixel size
+// Ocean labels move with the parent group transform - no manual positioning needed
 ```
 
 **Benefits:**

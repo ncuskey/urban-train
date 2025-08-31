@@ -1,5 +1,5 @@
 // d3 is global; do not import it.
-import { updateLabelZoom, updateLabelVisibility, updateOverlayOceanLabel, clearDebugOverlays, clearScreenLabels, updateOceanLabelScreenPosition, updateOceanWorldTransform } from './labels.js';
+import { updateLabelZoom, updateLabelVisibility, updateOverlayOceanLabel, clearDebugOverlays, clearScreenLabels, updateOceanLabelScreenPosition } from './labels.js';
 import { filterByZoom } from './labels.js';
 
 // Add a tiny accessor so other modules can safely read current zoom.
@@ -105,8 +105,7 @@ export function attachInteraction({
     // Scale non-ocean labels by k (if your function expects just k, pass t.k)
     // updateLabelZoom(t.k); // Uncomment if you want to pass just k
 
-    // Reposition OCEAN label (world-anchored, inverse-scaled)
-    updateOceanWorldTransform(svgSel, t);
+    // Ocean labels now move with the parent group - no manual positioning needed
     
     // Reposition screen-space ocean label (order matters: world labels first, then ocean)
     updateOceanLabelScreenPosition(svgSel, t);// screen-space ocean follows its world anchor

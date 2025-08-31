@@ -484,7 +484,7 @@ export function fitOceanToRectPx(label, rectPx, pad = 10) {
 
 // Normalize label data for SA labeler - compute anchors and dimensions
 export function computeLabelMetrics({ svg, labels }) {
-  // Filter out ocean labels - they're handled separately by updateOceanWorldTransform
+  // Filter out ocean labels - they're handled separately in the world layer
   const nonOceanLabels = labels.filter(d => d.kind !== 'ocean');
   
   return nonOceanLabels.map(l => {
@@ -716,7 +716,7 @@ function oceanSeparationPenalty(lbl, others, minPadWorld) {
 export function annealLabels({ labels, bounds, sweeps = 400, svg }) {
   if (!labels.length) return labels;
   
-  // Filter out ocean labels - they're handled separately by updateOceanWorldTransform
+  // Filter out ocean labels - they're handled separately in the world layer
   const nonOceanLabels = labels.filter(d => d.kind !== 'ocean');
   if (!nonOceanLabels.length) return labels;
 
@@ -1576,7 +1576,7 @@ function clampWithinRect(d) {
 }
 
 export function placeLabelsAvoidingCollisions({ svg, labels }) {
-  // Filter out ocean labels - they're handled separately by updateOceanWorldTransform
+  // Filter out ocean labels - they're handled separately in the world layer
   const nonOceanLabels = labels.filter(d => d.kind !== 'ocean');
   
   // Check feature flag for new annealer system
@@ -2365,34 +2365,63 @@ export function renderNonOceanLabels(gAll, labels) {
 
 // Put this near other render helpers
 export function renderOceanInWorld(svg, text) {
-  // ensure a single world group for ocean
-  const g = svg.select('#labels-world')
-    .selectAll('#ocean-world')
-    .data([0])
-    .join('g')
-    .attr('id', 'ocean-world')
-    .attr('class', 'label ocean')
+  // Place ocean label in the same zoomed group as other labels
+  const gLabels = svg.select('#labels-world');
+  const gOcean = gLabels.selectAll('.ocean-label')
+    .data([window.state?.ocean || {}])
+    .join(enter => enter.append('g').attr('class', 'ocean-label label ocean'))
     .style('pointer-events', 'none');
-
-  const t = svg.select('#ocean-world-text').empty()
-    ? g.append('text').attr('id', 'ocean-world-text')
-    : g.select('#ocean-world-text');
-
-  t.attr('text-anchor', 'middle')
-   .attr('dominant-baseline', 'middle')
-   .text(text);
-
-  // set an initial font size in **pixels** that fits rectPx.w
+  
+  // Position the ocean label group in world coordinates
+  gOcean.attr('transform', d => {
+    if (d && d.rectWorld) {
+      return `translate(${d.rectWorld.x + d.rectWorld.w / 2}, ${d.rectWorld.y + d.rectWorld.h / 2})`;
+    }
+    return 'translate(0,0)'; // fallback
+  });
+  
+  // Create or update the text element
+  const t = gOcean.selectAll('text').data([0]).join('text')
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'middle')
+    .text(text);
+  
+  // Set font size based on available space
   if (window.state && window.state.ocean && window.state.ocean.rectPx) {
     const { rectPx } = window.state.ocean;
-    const px = fitFontPx(text, rectPx.w * 0.9); // your existing fitter
+    const px = fitFontPx(text, rectPx.w * 0.9);
     t.style('font-size', px + 'px');
   } else {
-    // fallback to default font size if state.ocean not available
     t.style('font-size', '28px');
   }
-
-  // position happens in updateOceanWorldTransform()
+  
+  // VERIFICATION CHECKS - Log parent transform and verify roundtrip coordinates
+  if (window.state && window.state.ocean && window.state.ocean.rectWorld) {
+    // Check 1: Verify parent transform (should be the same as other labels)
+    const parentTransform = d3.select(gOcean.node().parentNode).attr('transform');
+    console.log('[ocean] parent <g> transform =', parentTransform);
+    
+    // Check 2: Verify roundtrip coordinate conversion
+    const t = d3.zoomTransform(svg.node());
+    const r = window.state.ocean.rectWorld;
+    const x0 = t.applyX(r.x), y0 = t.applyY(r.y);
+    const x1 = t.applyX(r.x + r.w), y1 = t.applyY(r.y + r.h);
+    
+    console.log('[ocean] Roundtrip verification:', {
+      worldRect: r,
+      screenRect: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 },
+      zoomTransform: { k: t.k, x: t.x, y: t.y }
+    });
+    
+    // Check 3: Verify the ocean label is in the same group as other labels
+    const oceanParent = gOcean.node().parentNode;
+    const otherLabelsParent = svg.select('#labels-world').selectAll('g.label').node()?.parentNode;
+    console.log('[ocean] Parent group check:', {
+      oceanParent: oceanParent?.id || oceanParent?.className || 'unknown',
+      otherLabelsParent: otherLabelsParent?.id || otherLabelsParent?.className || 'unknown',
+      sameParent: oceanParent === otherLabelsParent
+    });
+  }
 }
 
 // Render all labels once with keyed join (hidden by default)
@@ -2684,7 +2713,7 @@ export function updateLabelZoom({ svg, groupId = 'labels-world' }) {
   const k = d3.zoomTransform(worldNode).k;
   const g = d3.select('#labels-world');
 
-  // Ocean labels are handled separately by updateOceanWorldTransform - skip them here
+  // Ocean labels are handled separately in the world layer - skip them here
   // From here on, operate only on non-ocean labels.
   const sel = g.selectAll('.label').filter(d => d && d.kind !== 'ocean');
 
@@ -2720,20 +2749,7 @@ export function updateLabelZoom({ svg, groupId = 'labels-world' }) {
   }
 }
 
-// Keep ocean label glued to world on zoom (inverse scale)
-export function updateOceanWorldTransform(svgSel, transform) {
-  if (!window.state || !window.state.ocean) return;
-  const svg = svgSel && svgSel.node ? svgSel : d3.select('svg');
-  const t = transform || d3.zoomTransform(svg.node()); // v5-safe fallback
 
-  const { anchor } = window.state.ocean;
-  const sx = t.applyX(anchor.x);
-  const sy = t.applyY(anchor.y);
-
-  // Move the parent <g> and inverse-scale to keep font pixel-constant
-  svg.select('#ocean-world')
-     .attr('transform', `translate(${sx},${sy}) scale(${1 / t.k})`);
-}
 
 // Real LOD: compute the visible set and toggle class
 export function updateLabelVisibility({ svg, groupId, placed, k, filterByZoom }) {
@@ -3238,8 +3254,9 @@ export function findOceanLabelRectAfterAutofit(
     y1: worldViewport.y1 - padWorld
   };
   
-  // convert to world units now and mark units
-  const rWorld = screenRectToWorldRect({x: bestPx.x, y: bestPx.y, w: bestPx.w, h: bestPx.h});
+  // Convert pixel rect to world coordinates using current zoom transform
+  const t = d3.zoomTransform(svg.node());
+  const rWorld = pxToWorldRect(bestPx, t);
   bestPx._debugRectScreen = bestPx; // for dashed red box
   bestPx.keepWithinRect = {...rWorld, units: 'world'}; // use this for placement
   
@@ -3253,6 +3270,21 @@ export function findOceanLabelRectAfterAutofit(
   if (window.state) {
     window.state.ocean = { anchor, rectWorld: rWorld, rectPx: { w: bestPx.w, h: bestPx.h } };
     console.debug('[ocean] anchor stored in state', { anchor, rectWorld: rWorld, rectPx });
+    
+    // VERIFICATION: Log the coordinate conversion for debugging
+    console.log('[ocean] Coordinate conversion verification:', {
+      originalPx: bestPx,
+      worldRect: rWorld,
+      zoomTransform: { k: t.k, x: t.x, y: t.y },
+      roundtripCheck: {
+        pxFromWorld: {
+          x: t.applyX(rWorld.x),
+          y: t.applyY(rWorld.y),
+          w: t.applyX(rWorld.x + rWorld.w) - t.applyX(rWorld.x),
+          h: t.applyY(rWorld.y + rWorld.h) - t.applyY(rWorld.y)
+        }
+      }
+    });
   }
   
   // Save on the SVG (fallback) and screen-labels (fallback)
@@ -3271,6 +3303,13 @@ export function findOceanLabelRectAfterAutofit(
   });
   
   return bestPx;
+}
+
+// Convert pixel rectangle to world coordinates using zoom transform
+function pxToWorldRect(px, t) {
+  const x0 = t.invertX(px.x),          y0 = t.invertY(px.y);
+  const x1 = t.invertX(px.x + px.w),   y1 = t.invertY(px.y + px.h);
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
 // Simple pixel-based font fitter for ocean labels

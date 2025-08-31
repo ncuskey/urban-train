@@ -86,7 +86,7 @@ text.place-label.ocean {
 **Architectural Improvements:**
 - **World-coordinate canonical storage**: Ocean label data stored in `window.state.ocean` with world coordinates as primary values
 - **World layer rendering**: Ocean labels now rendered in `#labels-world` group instead of screen overlays
-- **Inverse scaling**: Labels maintain constant pixel size during zoom using `scale(1/k)` transforms
+- **Parent group transforms**: Labels move with the parent group transform - no manual positioning needed
 - **Decoupled from SA/LOD**: Ocean labels explicitly excluded from collision resolution and zoom filtering
 
 **Key Functions:**
@@ -98,16 +98,17 @@ window.state.ocean = {
   rectPx: { w, h }            // Pixel dimensions for font fitting
 };
 
-// World layer rendering
+// World layer rendering with parent group transforms
 renderOceanInWorld(svg, text);           // Creates ocean label in world space
-updateOceanWorldTransform(svg, transform); // Positions with inverse scaling
+// Ocean labels move with the parent group transform - no manual positioning needed
 ```
 
 **Benefits:**
 - **Consistent positioning**: Labels stay anchored to world coordinates during zoom/pan
 - **No double-handling**: Eliminates conflicts with SA collision resolution
-- **Better performance**: Single render path, no overlay management
-- **Zoom consistency**: Labels scale properly with the map
+- **Better performance**: Single render path, no overlay management, no manual transforms
+- **Zoom consistency**: Labels scale naturally with the map using parent group transforms
+- **Simplified architecture**: Ocean labels follow same pattern as other labels
 
 ### Label BBox Estimation Optimization
 The system uses a pragmatic approach for label width estimation:
