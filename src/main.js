@@ -1,6 +1,15 @@
 // Global debug toggle - flip to true when tuning
 window.DEBUG = false;
 
+// Performance timing function
+function timeit(tag, fn) {
+  const t0 = performance.now();
+  const out = fn();
+  const t1 = performance.now();
+  console.log(`[cost] ${tag}: ${(t1-t0).toFixed(1)} ms`);
+  return out;
+}
+
 import { RNG } from "./core/rng.js";
 import { Timers } from "./core/timers.js";
 import { ensureLayers, ensureLabelSubgroups } from "./render/layers.js";
@@ -14,7 +23,7 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction, getVisibleWorldBounds, padBounds } from "./modules/interaction.js";
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
-import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, logProbe, LABEL_DEBUG } from "./modules/labels.js";
+import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, logProbe, LABEL_DEBUG, clampToKeepRect, getZoomK, textWidthPx, labelFontFamily } from "./modules/labels.js";
 
 // === Minimal Perf HUD ==========================================
 const Perf = (() => {
@@ -362,6 +371,14 @@ async function generate(count) {
   const layers = ensureLayers(svg);
   ensureLabelSubgroups(svg);
   
+  // One-time, non-zoomed container only for text measurement
+  let gMeasure = svg.select("g.__measure");
+  if (gMeasure.empty()) {
+    gMeasure = svg.append("g")
+      .attr("class", "__measure")
+      .style("pointer-events", "none");
+  }
+  
   // Use the world container for map elements
   const world = layers.world;
   const islandBack = world.append("g").attr("class", "islandBack");
@@ -546,7 +563,7 @@ async function generate(count) {
     
     // Initial placement excludes ocean labels (they'll be placed after autofit)
     const nonOceanLabels = featureLabels.filter(l => l.kind !== 'ocean');
-    const placedFeatures = placeLabelsAvoidingCollisions({ svg: svgSel, labels: nonOceanLabels });
+    const placedFeatures = timeit('SA collision avoidance (initial)', () => placeLabelsAvoidingCollisions({ svg: svgSel, labels: nonOceanLabels }));
     
     if (window.DEBUG) {
       console.log('[labels] DEBUG: After collision avoidance:', {
@@ -557,18 +574,10 @@ async function generate(count) {
 
     renderLabels({ svg: svgSel, placed: placedFeatures, groupId: 'labels-features', k: 1 });
 
-    // stash for zoom visibility updates
+    // stash for zoom visibility updates (will be updated after autofit + ocean placement)
     window.__labelsPlaced = { features: placedFeatures };
 
-    // Apply initial visibility filter
-    const k0 = (d3.zoomTransform(svgSel.node()).k || 1);
-    updateLabelVisibility({
-      svg: svgSel,
-      groupId: 'labels-features',
-      placed: window.__labelsPlaced.features,
-      k: k0,
-      filterByZoom
-    });
+    // LOD filtering moved to after autofit + ocean placement
 
     if (window.DEBUG) {
       console.log('[labels] after build:', {
@@ -654,6 +663,9 @@ async function generate(count) {
       // Set flag to prevent re-fitting after autofit
       state.didAutofitToLand = true;
       
+      // Mark zoom as locked to enable LOD filtering
+      d3.select("svg").attr("data-zoom-locked", "1");
+      
       // Lock zoom to prevent zooming out beyond autofit level
       lockZoomToAutofitLevel();
       
@@ -677,6 +689,9 @@ async function generate(count) {
         // Start the autofit
         await window.fitLand();
         
+        // Mark zoom as locked to enable LOD filtering
+        d3.select("svg").attr("data-zoom-locked", "1");
+        
         // Lock zoom to prevent zooming out beyond autofit level
         lockZoomToAutofitLevel();
         
@@ -686,6 +701,9 @@ async function generate(count) {
         // Method 3: Direct call with afterLayout safety
         console.log('[autofit] 🔄 Method 3: Using afterLayout fallback...');
         await window.fitLand();
+        
+        // Mark zoom as locked to enable LOD filtering
+        d3.select("svg").attr("data-zoom-locked", "1");
         
         // Lock zoom to prevent zooming out beyond autofit level
         lockZoomToAutofitLevel();
@@ -782,44 +800,61 @@ async function generate(count) {
           const ocean = featureLabels.find(l => l.kind === 'ocean');
           if (ocean && pxRect?.keepWithinRect) {
             ocean.keepWithinRect = pxRect.keepWithinRect;  // WORLD rect
-            // reasonable seed: center of the world rect
-            ocean.x = (ocean.keepWithinRect.x0 + ocean.keepWithinRect.x1) / 2;
-            ocean.y = (ocean.keepWithinRect.y0 + ocean.keepWithinRect.y1) / 2;
+            // center seed stays the center of the chosen world rect
+            ocean.x = ocean.keepWithinRect.x + ocean.keepWithinRect.w / 2;
+            ocean.y = ocean.keepWithinRect.y + ocean.keepWithinRect.h / 2;
+            
+            // Ocean text fitting now handled in renderLabels via fitTextToRect
+            // Just ensure the label stays within bounds
+            clampToKeepRect(ocean);
+            
+            // Ocean text fitting now handled in renderLabels via fitTextToRect
+            // No need for post-fit nudge since fitTextToRect handles positioning
           }
 
           // Draw debug rectangle
           drawDebugOceanRect(pxRect);
           
-          // Now run the normal label system to place all labels including oceans
-          console.log('[ocean] 🎯 Running normal label system with ocean constraints...');
-          
-          // Ensure metrics are computed for the updated ocean labels
-          ensureMetrics(featureLabels, svgSel);
-          
-          // Run collision avoidance (now includes oceans with keepWithinRect)
-          const placedFeatures = placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels });
-          
-          // Render all labels including oceans
-          renderLabels({ svg: svgSel, placed: placedFeatures, groupId: 'labels-features' });
-          
-          // Debug logging after SA placement render
-          if (LABEL_DEBUG) {
-            const g = svgSel.select('#labels-features').selectAll('g.label');
-            logProbe('post-SA-render', g);
+          // Guard: if ocean label was placed successfully (has keepWithinRect)
+          // skip re-running global culls to avoid nuking island/lake labels.
+          const okOcean = ocean && ocean.keepWithinRect;
+          if (!okOcean) {
+            // Now run the normal label system to place all labels including oceans
+            console.log('[ocean] 🎯 Running normal label system with ocean constraints...');
+            
+            // Ensure metrics are computed for the updated ocean labels
+            ensureMetrics(featureLabels, svgSel);
+            
+                      // Run collision avoidance (now includes oceans with keepWithinRect)
+          const placedFeatures = timeit('SA collision avoidance', () => placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels }));
+            
+            // Apply LOD filtering after autofit + ocean placement (single pass)
+            const t = d3.zoomTransform(svgSel.node());
+            const selected = filterByZoom(placedFeatures, t.k);
+            
+            // Render all labels including oceans (with LOD filtering applied)
+            renderLabels({ svg: svgSel, placed: selected, groupId: 'labels-features' });
+            
+            // Debug logging after SA placement render
+            if (LABEL_DEBUG) {
+              const g = svgSel.select('#labels-features').selectAll('g.label');
+              logProbe('post-SA-render', g);
+            }
+            
+            // Store updated labels (with LOD filtering applied)
+            window.__labelsPlaced = { features: selected };
+          } else {
+            console.log('[labels] Skipping global LOD/budget re-cull after ocean fit (ok==true)');
+            
+            // Still need to render the ocean label with its new keepWithinRect property
+            // to trigger the assertions and show the fitted text
+            const t = d3.zoomTransform(svgSel.node());
+            const selected = filterByZoom(featureLabels, t.k);
+            renderLabels({ svg: svgSel, placed: selected, groupId: 'labels-features' });
+            
+            // Store updated labels
+            window.__labelsPlaced = { features: selected };
           }
-          
-          // Update visibility and zoom
-          const k0 = (d3.zoomTransform(svgSel.node()).k || 1);
-          updateLabelVisibility({
-            svg: svgSel,
-            groupId: 'labels-features',
-            placed: placedFeatures,
-            k: k0,
-            filterByZoom
-          });
-          
-          // Store updated labels
-          window.__labelsPlaced = { features: placedFeatures };
           
         } else {
           console.warn('[ocean] ❌ No suitable SAT rectangle found; ocean labels will use default placement.');
@@ -831,10 +866,14 @@ async function generate(count) {
           ensureMetrics(featureLabels, svgSel);
           
           // Run collision avoidance
-          const placedFeatures = placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels });
+          const placedFeatures = timeit('SA collision avoidance', () => placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels }));
           
-          // Render all labels
-          renderLabels({ svg: svgSel, placed: placedFeatures, groupId: 'labels-features' });
+          // Apply LOD filtering after autofit + ocean placement (single pass)
+          const t = d3.zoomTransform(svgSel.node());
+          const selected = filterByZoom(placedFeatures, t.k);
+          
+          // Render all labels (with LOD filtering applied)
+          renderLabels({ svg: svgSel, placed: selected, groupId: 'labels-features' });
           
           // Debug logging after SA placement render
           if (LABEL_DEBUG) {
@@ -842,18 +881,8 @@ async function generate(count) {
             logProbe('post-SA-render', g);
           }
           
-          // Update visibility and zoom
-          const k0 = (d3.zoomTransform(svgSel.node()).k || 1);
-          updateLabelVisibility({
-            svg: svgSel,
-            groupId: 'labels-features',
-            k: k0,
-            placed: placedFeatures,
-            filterByZoom
-          });
-          
-          // Store updated labels
-          window.__labelsPlaced = { features: placedFeatures };
+          // Store updated labels (with LOD filtering applied)
+          window.__labelsPlaced = { features: selected };
         }
       }
     }

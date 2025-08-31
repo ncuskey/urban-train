@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fantasy Fonts Test - Urban Train</title>
+  <style>
+    body { 
+      font-family: Arial, sans-serif; 
+      margin: 20px; 
+      background: #f5f5f5;
+    }
+    
+    .font-demo {
+      background: white;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .font-name {
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 10px;
+      color: #333;
+    }
+    
+    .font-description {
+      color: #666;
+      margin-bottom: 15px;
+    }
+    
+    .font-sample {
+      font-size: 18px;
+      line-height: 1.4;
+      margin: 10px 0;
+      padding: 15px;
+      background: #f8f9fa;
+      border-left: 4px solid #007bff;
+    }
+    
+    .controls {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      margin: 5px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    
+    button:hover {
+      background: #0056b3;
+    }
+    
+    .current-font {
+      background: #e7f3ff;
+      padding: 10px;
+      border-radius: 4px;
+      margin: 10px 0;
+      font-weight: bold;
+    }
+    
+    .map-preview {
+      background: #5E4FA2;
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin: 20px 0;
+      min-height: 200px;
+    }
+    
+    .map-label {
+      font-size: 24px;
+      font-weight: 700;
+      text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Fantasy Fonts for Urban Train Map Generator</h1>
+  
+  <div class="controls">
+    <h2>Font Controls</h2>
+    <button onclick="switchFont('cinzel')">Cinzel (Medieval)</button>
+    <button onclick="switchFont('unifraktur')">Unifraktur (Gothic)</button>
+    <button onclick="switchFont('medieval')">MedievalSharp (Hand-drawn)</button>
+    <button onclick="switchFont('alegreya')">Alegreya SC (Classical)</button>
+    <button onclick="switchFont('crimson')">Crimson Text (Elegant)</button>
+    <button onclick="switchFont('lora')">Lora (Readable)</button>
+    <button onclick="switchFont('merriweather')">Merriweather (Robust)</button>
+    <button onclick="switchFont('georgia')">Georgia (Original)</button>
+    <br><br>
+    <button onclick="cycleFont()">Cycle Through All Fonts</button>
+    <button onclick="listFonts()">List All Fonts</button>
+    
+    <div class="current-font" id="currentFont">
+      Current Font: Loading...
+    </div>
+  </div>
+  
+  <div class="map-preview">
+    <h3>Map Label Preview</h3>
+    <div class="map-label" id="mapLabel">The Great Sea of Mystara</div>
+    <div class="map-label" id="mapLabel2">Lake of the Ancients</div>
+    <div class="map-label" id="mapLabel3">Isle of the Dragon Lords</div>
+  </div>
+  
+  <div class="font-demo">
+    <div class="font-name">Cinzel</div>
+    <div class="font-description">Elegant serif with medieval feel - great for fantasy maps</div>
+    <div class="font-sample" style="font-family: 'Cinzel', serif;">
+      The ancient kingdom of Eldoria stretched across the misty mountains, where dragons once ruled the skies and wizards practiced their arcane arts in hidden towers.
+    </div>
+  </div>
+  
+  <div class="font-demo">
+    <div class="font-name">UnifrakturMaguntia</div>
+    <div class="font-description">Gothic blackletter style - very medieval</div>
+    <div class="font-sample" style="font-family: 'UnifrakturMaguntia', cursive;">
+      The ancient kingdom of Eldoria stretched across the misty mountains, where dragons once ruled the skies and wizards practiced their arcane arts in hidden towers.
+    </div>
+  </div>
+  
+  <div class="font-demo">
+    <div class="font-name">MedievalSharp</div>
+    <div class="font-description">Hand-drawn medieval look - rustic and authentic</div>
+    <div class="font-sample" style="font-family: 'MedievalSharp', cursive;">
+      The ancient kingdom of Eldoria stretched across the misty mountains, where dragons once ruled the skies and wizards practiced their arcane arts in hidden towers.
+    </div>
+  </div>
+  
+  <div class="font-demo">
+    <div class="font-name">Alegreya SC</div>
+    <div class="font-description">Small caps serif with classical feel</div>
+    <div class="font-sample" style="font-family: 'Alegreya SC', serif;">
+      THE ANCIENT KINGDOM OF ELDORIA STRETCHED ACROSS THE MISTY MOUNTAINS, WHERE DRAGONS ONCE RULED THE SKIES AND WIZARDS PRACTICED THEIR ARCANE ARTS IN HIDDEN TOWERS.
+    </div>
+  </div>
+  
+  <div class="font-demo">
+    <div class="font-name">Crimson Text</div>
+    <div class="font-description">Elegant serif with fantasy feel - very readable</div>
+    <div class="font-sample" style="font-family: 'Crimson Text', serif;">
+      The ancient kingdom of Eldoria stretched across the misty mountains, where dragons once ruled the skies and wizards practiced their arcane arts in hidden towers.
+    </div>
+  </div>
+  
+  <div class="font-demo">
+    <div class="font-name">Lora</div>
+    <div class="font-description">Beautiful serif with good readability</div>
+    <div class="font-sample" style="font-family: 'Lora', serif;">
+      The ancient kingdom of Eldoria stretched across the misty mountains, where dragons once ruled the skies and wizards practiced their arcane arts in hidden towers.
+    </div>
+  </div>
+  
+  <div class="font-demo">
+    <div class="font-name">Merriweather</div>
+    <div class="font-description">Robust serif with fantasy feel - excellent readability</div>
+    <div class="font-sample" style="font-family: 'Merriweather', serif;">
+      The ancient kingdom of Eldoria stretched across the misty mountains, where dragons once ruled the skies and wizards practiced their arcane arts in hidden towers.
+    </div>
+  </div>
+
+  <script type="module">
+    import { switchFont, getCurrentFont, listFonts, cycleFont } from './src/modules/fonts.js';
+    
+    // Make functions available globally for button clicks
+    window.switchFont = switchFont;
+    window.listFonts = listFonts;
+    window.cycleFont = cycleFont;
+    
+    // Update current font display
+    function updateCurrentFont() {
+      const current = getCurrentFont();
+      document.getElementById('currentFont').textContent = `Current Font: ${current.name} - ${current.description}`;
+      
+      // Update map preview labels
+      const labels = document.querySelectorAll('.map-label');
+      labels.forEach(label => {
+        label.style.fontFamily = current.family;
+      });
+    }
+    
+    // Initialize
+    updateCurrentFont();
+    
+    // Override console.log to show font info
+    const originalLog = console.log;
+    console.log = function(...args) {
+      originalLog.apply(console, args);
+      if (args[0] && args[0].includes('Switched to')) {
+        setTimeout(updateCurrentFont, 100);
+      }
+    };
+  </script>
+</body>
+</html>

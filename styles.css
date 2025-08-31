@@ -1,10 +1,35 @@
+/* Import fantasy fonts from Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=UnifrakturMaguntia&family=MedievalSharp&family=Alegreya+SC:wght@400;700&family=Crimson+Text:wght@400;600;700&family=Lora:wght@400;500;600;700&family=Merriweather:wght@300;400;700;900&display=swap');
+
 input {
   width: 100px;
   height: 14px;
 }
 
 :root {
-  --label-font: Georgia, "Times New Roman", serif;
+  /* Fantasy font options - change this to switch themes */
+  --label-font: 'Cinzel', serif;
+  --label-font-family: 'Cinzel', serif;
+  
+  /* Alternative fantasy fonts (uncomment to use):
+  --label-font: 'UnifrakturMaguntia', cursive;
+  --label-font-family: 'UnifrakturMaguntia', cursive;
+  
+  --label-font: 'MedievalSharp', cursive;
+  --label-font-family: 'MedievalSharp', cursive;
+  
+  --label-font: 'Alegreya SC', serif;
+  --label-font-family: 'Alegreya SC', serif;
+  
+  --label-font: 'Crimson Text', serif;
+  --label-font-family: 'Crimson Text', serif;
+  
+  --label-font: 'Lora', serif;
+  --label-font-family: 'Lora', serif;
+  
+  --label-font: 'Merriweather', serif;
+  --label-font-family: 'Merriweather', serif;
+  */
 }
 
 svg {

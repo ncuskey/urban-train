@@ -1,5 +1,56 @@
 // d3 is global
 
+/**
+ * Invariants (enforced by asserts/logs):
+ * 1) Ocean SAT rect is stored on datum in WORLD units: d.keepWithinRect.units === 'world'
+ * 2) Fitter computes fontPx in SCREEN pixels; we always set font-size = fontPx / k.
+ * 3) Ocean text x/y are WORLD coords (middle anchored), so the label stays glued to the world on zoom.
+ * 4) After second pass, if ocean fit succeeds, do NOT re-run LOD/budget culls.
+ * 5) assertOceanWithinRect must log true on first render.
+ */
+
+// Helpers to convert between screen pixels and world coords
+import {getZoomState} from './interaction.js';
+
+function assertOceanWithinRect(textSel, rectPx, pad=2) {
+  const n = textSel.node();
+  if (!n) return;
+  const {k, x, y} = getZoomState();
+  // Convert text bbox (world) → screen pixels to compare with rectPx
+  const bb = n.getBBox(); // world units
+  const tlx = bb.x * k + x, tly = bb.y * k + y;
+  const brx = (bb.x + bb.width) * k + x, bry = (bb.y + bb.height) * k + y;
+  const ok = (tlx >= rectPx.x + pad) && (tly >= rectPx.y + pad) &&
+             (brx <= rectPx.x + rectPx.w - pad) &&
+             (bry <= rectPx.y + rectPx.h - pad);
+  console.log('[assert] ocean in rect?', ok, {bboxPx:{x:tlx,y:tly,w:brx-tlx,h:bry-tly}, rectPx});
+  return ok;
+}
+
+function screenToWorldXY(pxX, pxY) {
+  const {k, x, y} = getZoomState();
+  return {x: (pxX - x) / k, y: (pxY - y) / k};
+}
+
+function screenRectToWorldRect(rpx) {
+  // rpx: {x, y, w, h} in screen pixels (top-left)
+  const tl = screenToWorldXY(rpx.x, rpx.y);
+  const br = screenToWorldXY(rpx.x + rpx.w, rpx.y + rpx.h);
+  return {x: tl.x, y: tl.y, w: br.x - tl.x, h: br.y - tl.y};
+}
+
+function pxToWorldFont(px) {
+  const {k} = getZoomState();        // critical: divide by k
+  return px / Math.max(k, 1e-6);
+}
+
+// Accept either a DOM node or a D3 selection and return a D3 selection
+function asSel(svgOrSel) {
+  return svgOrSel && typeof svgOrSel.node === "function"
+    ? svgOrSel
+    : d3.select(svgOrSel);
+}
+
 // Safety toggles for easy rollback
 export const USE_SA_LABELER = true;       // master switch
 // Ocean labels now always participate in SA collision avoidance
@@ -9,6 +60,16 @@ export const DEBUG_LABEL_BOXES = false;   // show rects behind text
 export const LABEL_DEBUG = true;  // flip to false to silence logs
 let __labelProbeId = null; // chosen once per run
 let __lastProbe = null; // cache for last probe state
+
+const DBG = {labels:true, ocean:true, cost:true};
+function timeit(tag, fn) {
+  if (!DBG.cost) return fn();
+  const t0 = performance.now();
+  const out = fn();
+  const t1 = performance.now();
+  console.log(`[cost] ${tag}: ${(t1-t0).toFixed(1)} ms`);
+  return out;
+}
 
 // Dynamic label budgets based on zoom level
 function labelBudgetByZoom(k) {
@@ -32,6 +93,49 @@ function tooCloseToAny(l, kept, minSepWorld) {
   return false;
 }
 
+// --- pixel text measurement (cached canvas) ---
+const __measureCtx = (() => {
+  const c = document.createElement('canvas');
+  return c.getContext('2d');
+})();
+
+export function labelFontFamily() {
+  // keep in sync with CSS var/family used elsewhere
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--label-font-family');
+  return (v && v.trim()) || 'Lora, serif';
+}
+
+export function textWidthPx(str, sizePx, family = labelFontFamily()) {
+  const ctx = __measureCtx;
+  ctx.font = `${Math.max(1, Math.round(sizePx))}px ${family}`;
+  const m = ctx.measureText(str || '');
+  return (m && m.width) ? m.width : 0;
+}
+
+export function getZoomK() {
+  const world = d3.select('#world').node() || d3.select('svg').node();
+  return d3.zoomTransform(world).k || 1;
+}
+
+// Keep ocean labels away from edges by this many screen pixels
+const OCEAN_EDGE_PAD_PX = 24; // tweak 20–32 to taste
+
+function insetPxRect(rect, pad) {
+  return {
+    x0: rect.x0 + pad,
+    y0: rect.y0 + pad,
+    x1: rect.x1 - pad,
+    y1: rect.y1 - pad,
+    w: (rect.x1 - rect.x0) - 2 * pad,
+    h: (rect.y1 - rect.y0) - 2 * pad
+  };
+}
+
+function worldPadFromPx(padPx) {
+  const k = getZoomK(); // you already have this helper
+  return padPx / Math.max(1e-6, k);
+}
+
 function getK() {
   const worldNode = d3.select('#world').node() || d3.select('svg').node();
   return d3.zoomTransform(worldNode).k || 1;
@@ -41,8 +145,28 @@ function pickProbeLabel(selection) {
   if (!LABEL_DEBUG || __labelProbeId) return;
   // Prefer an island, fall back to any feature label
   let d = null;
-  selection.each(function(dd) { if (!d && (dd.kind === 'island' || dd.kind === 'lake')) d = dd; });
-  if (!d) selection.each(function(dd){ if (!d) d = dd; });
+  selection.each(function(dd, i, nodes) { 
+    // Use normal function to get a real node-bound `this`
+    const node = this;
+    if (!node) return;
+    const textSel = d3.select(node);
+    if (textSel.empty()) return;
+    // store for later debugging
+    textSel.attr('data-label-id', dd.id || `lbl-${i}`);
+    
+    if (!d && (dd.kind === 'island' || dd.kind === 'lake')) d = dd; 
+  });
+  if (!d) selection.each(function(dd, i, nodes){ 
+    // Use normal function to get a real node-bound `this`
+    const node = this;
+    if (!node) return;
+    const textSel = d3.select(node);
+    if (textSel.empty()) return;
+    // store for later debugging
+    textSel.attr('data-label-id', dd.id || `lbl-${i}`);
+    
+    if (!d) d = dd; 
+  });
   if (d) {
     if (d.uid == null) d.uid = `lbl_${d.kind}_${Math.random().toString(36).slice(2,7)}`;
     __labelProbeId = d.uid;
@@ -62,11 +186,99 @@ function hasChanged(msg) {
   return true;
 }
 
+// ==== ocean text fit helpers (screen-space) ====
+function __clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function __measureTextWidth(containerSel, cls, text, fontPx) {
+  const ghost = containerSel.append("text")
+    .attr("class", cls)
+    .style("opacity", 0)
+    .style("font-size", fontPx + "px")
+    .text(text);
+  const w = ghost.node().getComputedTextLength();
+  ghost.remove();
+  return w;
+}
+
+// Single or two-line fit with shrink-to-fit
+export function fitTextToRect({ svg, textSel, text, rect, pad=8, maxPx=200, minPx=14, lineH=1.1 }) {
+  if (!textSel || textSel.empty()) return {ok:false, reason:'empty-selection'};
+  const node = textSel.node();
+  if (!node) return {ok:false, reason:'no-node'};
+  // ensure tspans container
+  if (!textSel.select('tspan').node()) {
+    textSel.html(''); // reset
+    textSel.append('tspan');
+  }
+  
+  const svgSel = asSel(svg);
+  const measure = svgSel.select("g.__measure");
+
+  const innerW = Math.max(1, rect.w - 2 * pad);
+  const innerH = Math.max(1, rect.h - 2 * pad);
+  const words  = text.split(/\s+/);
+
+  let fontPx = __clamp(Math.floor(innerH / (words.length >= 3 ? 2.4 : 1.4)), minPx, maxPx);
+  let lines = [text];
+
+  const tryLayout = (fontPx) => {
+    // 1) single line
+    const w1 = __measureTextWidth(measure, "label ocean", text, fontPx);
+    if (w1 <= innerW && fontPx <= innerH) {
+      textSel.text(text)
+        .style("font-size", fontPx + "px");
+      lines = [text];
+      return true;
+    }
+    // 2) balanced two-line
+    let best = null;
+    for (let i = 1; i < words.length; i++) {
+      const L = words.slice(0, i).join(" ");
+      const R = words.slice(i).join(" ");
+      const wL = __measureTextWidth(measure, "label ocean", L, fontPx);
+      const wR = __measureTextWidth(measure, "label ocean", R, fontPx);
+      const wMax = Math.max(wL, wR);
+      if (!best || wMax < best.wMax) best = { L, R, wMax };
+    }
+    if (best) {
+      const h2 = fontPx * lineH * 2;
+      if (best.wMax <= innerW && h2 <= innerH) {
+        textSel.text(null)
+          .style("font-size", fontPx + "px");
+        textSel.append("tspan").attr("x", 0).attr("dy", -fontPx * 0.6).text(best.L);
+        textSel.append("tspan").attr("x", 0).attr("dy", fontPx * lineH).text(best.R);
+        lines = [best.L, best.R];
+        return true;
+      }
+    }
+    return false;
+  };
+
+  for (let guard = 0; guard < 30; guard++) {
+    if (tryLayout(fontPx)) {
+      return {ok:true, fontPx: fontPx, anchorPx: {x: rect.x + rect.w/2, y: rect.y + rect.h/2}};
+    }
+    fontPx = Math.max(minPx, Math.floor(fontPx * 0.92));
+  }
+  // worst case
+  textSel.text(text)
+    .style("font-size", minPx + "px");
+  
+  return {ok:true, fontPx: minPx, anchorPx: {x: rect.x + rect.w/2, y: rect.y + rect.h/2}};
+}
+
 export function logProbe(tag, selection) {
   if (!LABEL_DEBUG || !__labelProbeId) return;
   let node = null, data = null;
-  selection.each(function(d){
-    if (d?.uid === __labelProbeId && !node) { node = this; data = d; }
+  selection.each(function(d, i, nodes){
+    // Use normal function to get a real node-bound `this`
+    const currentNode = this;
+    if (!currentNode) return;
+    const textSel = d3.select(currentNode);
+    if (textSel.empty()) return;
+    // store for later debugging
+    textSel.attr('data-label-id', d.id || `lbl-${i}`);
+    
+    if (d?.uid === __labelProbeId && !node) { node = currentNode; data = d; }
   });
   if (!node) return;
   const g = d3.select(node);
@@ -100,21 +312,83 @@ export function logProbe(tag, selection) {
   console.groupEnd();
 }
 
-// Get the label font family from CSS variable
-function labelFontFamily() {
-  return getComputedStyle(document.documentElement)
-    .getPropertyValue('--label-font').trim() || 'serif';
-}
+// (labelFontFamily function already defined above)
 
 // Accurate text measurement using ghost element
 export function measureTextWidth(svg, text, { fontSize = 28, family = labelFontFamily(), weight = 700 } = {}) {
-  const ghost = svg.append('text')
+  const svgSel = asSel(svg);
+  const measure = svgSel.select("g.__measure");
+  const ghost = measure.append('text')
     .attr('x', -99999).attr('y', -99999)
     .attr('font-size', fontSize).attr('font-family', family).attr('font-weight', weight)
     .text(text);
   const w = ghost.node().getComputedTextLength();
   ghost.remove();
   return Math.max(8, w);
+}
+
+// Text measurement and two-line wrapping helpers
+// (measurePx replaced by textWidthPx for better performance)
+
+// Try all single-break positions and pick the split that minimizes the max line width
+function bestTwoLineSplit(words) {
+  let best = { a: words.join(' '), b: '' };
+  for (let i = 1; i < words.length; i++) {
+    const a = words.slice(0, i).join(' ');
+    const b = words.slice(i).join(' ');
+    if (!b) break;
+    // choose the split that balances line lengths
+    if (Math.abs(a.length - b.length) < Math.abs(best.a.length - best.b.length)) best = { a, b };
+  }
+  return best;
+}
+
+export function fitOceanToRectPx(label, rectPx, pad = 10) {
+  const k = getZoomK();
+  const fam = labelFontFamily();
+  const text = (label.label || label.name || '').trim();
+  const words = text.split(/\s+/).filter(Boolean);
+  const maxW = Math.max(0, rectPx.w - 2 * pad);
+  const maxH = Math.max(0, rectPx.h - 2 * pad);
+
+  const MAX_OCEAN_PX = 42; // hard cap so we never explode
+  const lineH = f => f * 1.2;
+
+  // try one line
+  const fitsOne = f => textWidthPx(text, f, fam) <= maxW && lineH(f) <= maxH;
+  let lo = 8, hi = MAX_OCEAN_PX, best = lo;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (fitsOne(mid)) { best = mid; lo = mid + 1; } else { hi = mid - 1; } }
+
+  let lines = [text];
+  let fontPx = best;
+  let wpx = textWidthPx(text, fontPx, fam);
+  let hpx = lineH(fontPx);
+
+  // if one line doesn't fit, go to two
+  if (wpx > maxW || hpx > maxH) {
+    const sp = bestTwoLineSplit(words);
+    const fitsTwo = f => {
+      const w1 = textWidthPx(sp.a, f, fam);
+      const w2 = textWidthPx(sp.b, f, fam);
+      const H = lineH(f) * 2;
+      return Math.max(w1, w2) <= maxW && H <= maxH;
+    };
+    lo = 8; hi = MAX_OCEAN_PX; best = lo;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (fitsTwo(mid)) { best = mid; lo = mid + 1; } else { hi = mid - 1; } }
+    fontPx = best;
+    lines = [sp.a, sp.b];
+    const w1 = textWidthPx(lines[0], fontPx, fam);
+    const w2 = textWidthPx(lines[1], fontPx, fam);
+    wpx = Math.max(w1, w2);
+    hpx = lineH(fontPx) * 2;
+  }
+
+  // store pixel and world boxes + fonts
+  label.lines = lines;
+  label.font_px = fontPx;        // screen px (for logs)
+  label.font_world_px = fontPx / k; // what we actually write to SVG
+  label._box_px = { w: wpx, h: hpx };
+  label._box = { w: wpx / k, h: hpx / k }; // keep SA/collision in world units
 }
 
 // Normalize label data for SA labeler - compute anchors and dimensions
@@ -141,8 +415,8 @@ export function computeLabelMetrics({ svg, labels }) {
     // Seed ocean labels inside their chosen rectangle
     if (l.kind === 'ocean' && l.keepWithinRect) {
       const r = l.keepWithinRect;
-      const startX = r.x0 + Math.max(0, (r.x1 - r.x0 - width) / 2);
-      const startY = r.y0 + Math.max(0, (r.y1 - r.y0 - height) / 2);
+      const startX = r.x + Math.max(0, (r.w - width) / 2);
+      const startY = r.y + Math.max(0, (r.h - height) / 2);
 
       const result = {
         ...l,
@@ -154,20 +428,15 @@ export function computeLabelMetrics({ svg, labels }) {
         width,
         height,
         // anchor at rect center so "distance to anchor" doesn't yank back to original centroid
-        anchor: { x: (r.x0 + r.x1) / 2, y: (r.y0 + r.y1) / 2, r: 4 }
+        anchor: { x: r.x + r.w / 2, y: r.y + r.h / 2, r: 4 }
       };
       
       // Ensure the label stays within its keepWithinRect
       if (result.keepWithinRect) {
         result._box = { w: width, h: height };
+        result._box_px = { w: width, h: height }; // Store in pixels for zoom-aware clamping
         
         // 🔒 Post-measure clamp: ensures center stays inside the keep rect
-        const r = result.keepWithinRect;
-        const halfW = result._box.w / 2;
-        const halfH = result._box.h / 2;
-        result.x = Math.min(Math.max(result.x, r.x0 + halfW), r.x1 - halfW);
-        result.y = Math.min(Math.max(result.y, r.y0 + halfH), r.y1 - halfH);
-        
         clampToKeepRect(result);
       }
       
@@ -208,119 +477,21 @@ function clampBoxToBounds(lbl, bounds) {
 function fitOceanLabelToRect(oceanLabel, rect, svg) {
   if (!oceanLabel.keepWithinRect || !oceanLabel.text) return oceanLabel;
   
-  const r = oceanLabel.keepWithinRect;
-  const text = oceanLabel.text;
-  const maxWidth = r.x1 - r.x0;
-  const maxHeight = r.y1 - r.y0;
-  const minFontSize = 18; // floor font size
-  const maxFontSize = 28; // starting font size
+  // Convert world rect to pixel rect for fitting
+  const z = d3.zoomTransform(svg.node());
+  const rectPx = {
+    w: rect.w * z.k,
+    h: rect.h * z.k
+  };
   
-  // Try single line first
-  let fontSize = maxFontSize;
-  let textWidth = 0;
-  let textHeight = 0;
+  // Use the new pixel-based fitting function
+  fitOceanToRectPx(oceanLabel, rectPx, 10);
   
-  // Create temporary text element for measurement
-  const tempText = svg.append('text')
-    .attr('x', -99999).attr('y', -99999)
-    .attr('font-family', labelFontFamily())
-    .attr('font-weight', 700)
-    .attr('text-anchor', 'middle')
-    .attr('dominant-baseline', 'middle');
-  
-  // Try single line with font scaling
-  while (fontSize >= minFontSize) {
-    tempText.attr('font-size', fontSize).text(text);
-    textWidth = tempText.node().getComputedTextLength();
-    textHeight = fontSize * 1.2; // approximate line height
-    
-    if (textWidth <= maxWidth * 0.9 && textHeight <= maxHeight * 0.9) {
-      break; // fits
-    }
-    fontSize -= 2;
-  }
-  
-  // If single line doesn't fit even at minimum font size, try two-line break
-  if (fontSize < minFontSize) {
-    fontSize = maxFontSize;
-    
-    // Find the best break point (prefer breaking at spaces)
-    const words = text.split(' ');
-    let bestBreak = Math.floor(words.length / 2);
-    let bestFit = false;
-    
-    for (let i = 1; i < words.length; i++) {
-      const line1 = words.slice(0, i).join(' ');
-      const line2 = words.slice(i).join(' ');
-      
-      while (fontSize >= minFontSize) {
-        tempText.attr('font-size', fontSize);
-        
-        // Measure both lines
-        tempText.text(line1);
-        const width1 = tempText.node().getComputedTextLength();
-        tempText.text(line2);
-        const width2 = tempText.node().getComputedTextLength();
-        
-        const maxLineWidth = Math.max(width1, width2);
-        const totalHeight = fontSize * 2.4; // two lines with spacing
-        
-        if (maxLineWidth <= maxWidth * 0.9 && totalHeight <= maxHeight * 0.9) {
-          bestBreak = i;
-          bestFit = true;
-          break;
-        }
-        fontSize -= 2;
-      }
-      
-      if (bestFit) break;
-      fontSize = maxFontSize; // reset for next attempt
-    }
-    
-    if (bestFit) {
-      // Update the ocean label with two-line text
-      const line1 = words.slice(0, bestBreak).join(' ');
-      const line2 = words.slice(bestBreak).join(' ');
-      oceanLabel.text = line1 + '\n' + line2;
-      oceanLabel.baseFontPx = fontSize;
-      oceanLabel.multiline = true;
-    } else {
-      // Fallback: use minimum font size with single line
-      oceanLabel.baseFontPx = minFontSize;
-      oceanLabel.multiline = false;
-    }
-  } else {
-    // Single line fits
-    oceanLabel.baseFontPx = fontSize;
-    oceanLabel.multiline = false;
-  }
-  
-  // Clean up temp element
-  tempText.remove();
-  
-  // Recalculate label dimensions with new font size
-  const finalWidth = measureTextWidth(svg, oceanLabel.multiline ? oceanLabel.text.split('\n')[0] : oceanLabel.text, { 
-    fontSize: oceanLabel.baseFontPx, 
-    family: labelFontFamily(), 
-    weight: 700 
-  });
-  const finalHeight = oceanLabel.multiline ? oceanLabel.baseFontPx * 2.4 : oceanLabel.baseFontPx * 1.2;
-  
-  oceanLabel.width = finalWidth;
-  oceanLabel.height = finalHeight;
-  
-  // Set _box for clamping and ensure the label stays within bounds
-  oceanLabel._box = { w: finalWidth, h: finalHeight };
+  // Set width/height from the computed world box
+  oceanLabel.width = oceanLabel._box.w;
+  oceanLabel.height = oceanLabel._box.h;
   
   // 🔒 Post-measure clamp: ensures center stays inside the keep rect
-  if (oceanLabel.keepWithinRect && oceanLabel._box) {
-    const r = oceanLabel.keepWithinRect;
-    const halfW = oceanLabel._box.w / 2;
-    const halfH = oceanLabel._box.h / 2;
-    oceanLabel.x = Math.min(Math.max(oceanLabel.x, r.x0 + halfW), r.x1 - halfW);
-    oceanLabel.y = Math.min(Math.max(oceanLabel.y, r.y0 + halfH), r.y1 - halfH);
-  }
-  
   clampToKeepRect(oceanLabel);
   
   // Debug logging after ocean fit-to-rect finalizes size
@@ -334,12 +505,15 @@ function fitOceanLabelToRect(oceanLabel, rect, svg) {
 }
 
 // Clamp label to its keepWithinRect constraint
-function clampToKeepRect(lbl) {
-  if (!lbl || !lbl.keepWithinRect || !lbl._box) return;
-  const {x0, y0, x1, y1} = lbl.keepWithinRect;
-  const halfW = lbl._box.w / 2, halfH = lbl._box.h / 2;
-  lbl.x = Math.min(Math.max(lbl.x, x0 + halfW), x1 - halfW);
-  lbl.y = Math.min(Math.max(lbl.y, y0 + halfH), y1 - halfH);
+export function clampToKeepRect(lbl) {
+  if (!lbl || !lbl.keepWithinRect) return;
+  const k = getZoomK();
+  const px = lbl._box_px || { w: 0, h: 0 };
+  const halfW = (px.w / k) / 2;
+  const halfH = (px.h / k) / 2;
+  const { x, y, w, h } = lbl.keepWithinRect;
+  lbl.x = Math.min(Math.max(lbl.x, x + halfW), x + w - halfW);
+  lbl.y = Math.min(Math.max(lbl.y, y + halfH), y + h - halfH);
 }
 
 // Custom energy function that gives ocean labels higher mass/penalty
@@ -543,17 +717,12 @@ export function annealLabels({ labels, bounds, sweeps = 400, svg }) {
     if (l.keepWithinRect) {
       // Set _box property for clamping
       l._box = { w: l.width, h: l.height };
+      l._box_px = { w: l.width, h: l.height }; // Store in pixels for zoom-aware clamping
       // Set x,y to the center of the placed position for clamping
       l.x = l.placed.x + l.width / 2;
       l.y = l.placed.y + l.height / 2;
       
       // 🔒 Post-measure clamp: ensures center stays inside the keep rect
-      const r = l.keepWithinRect;
-      const halfW = l._box.w / 2;
-      const halfH = l._box.h / 2;
-      l.x = Math.min(Math.max(l.x, r.x0 + halfW), r.x1 - halfW);
-      l.y = Math.min(Math.max(l.y, r.y0 + halfH), r.y1 - halfH);
-      
       clampToKeepRect(l);
       // Update placed position to match clamped position
       l.placed.x = l.x - l.width / 2;
@@ -575,8 +744,8 @@ export function annealLabels({ labels, bounds, sweeps = 400, svg }) {
 function tryPanToFit(rect, labelPxWidth, viewport, t, nudge = 40) {
   // If rect is cramped near a landmass, pan away within current world bounds.
   const [minX, minY, maxX, maxY] = viewport;
-  const rectW = rect.x1 - rect.x0;
-  const rectH = rect.y1 - rect.y0;
+  const rectW = rect.w;
+  const rectH = rect.h;
   
   // Calculate how much more space we need
   const neededWidth = labelPxWidth + 20; // Add some padding
@@ -605,8 +774,8 @@ function tryPanToFit(rect, labelPxWidth, viewport, t, nudge = 40) {
     const newMaxY = maxY + dy;
     
     // Calculate new rectangle bounds after pan
-    const newRectX0 = Math.max(rect.x0 + dx, newMinX);
-    const newRectX1 = Math.min(rect.x1 + dx, newMaxX);
+    const newRectX0 = Math.max(rect.x + dx, newMinX);
+    const newRectX1 = Math.min(rect.x + rect.w + dx, newMaxX);
     const newRectW = newRectX1 - newRectX0;
     
     if (newRectW > rectW) {
@@ -705,13 +874,13 @@ export function placeOceanLabelInRect(oceanLabel, rect, svg, opts = {}) {
   oceanLabel.baseFontPx = fs;
   oceanLabel.fixed = true;
   oceanLabel.keepWithinRect = { 
-    x0: rect.x0 + pad, 
-    y0: rect.y0 + pad, 
-    x1: rect.x1 - pad, 
-    y1: rect.y1 - pad 
+    x: rect.x + pad, 
+    y: rect.y + pad, 
+    w: rect.w - 2 * pad, 
+    h: rect.h - 2 * pad 
   };
   
-  console.log(`[labels] Ocean "${oceanLabel.text}" placed in rectangle: (${cx.toFixed(1)}, ${cy.toFixed(1)}) fontSize: ${fs}, rect: ${(rect.x1 - rect.x0).toFixed(0)}x${(rect.y1 - rect.y0).toFixed(0)}`);
+  console.log(`[labels] Ocean "${oceanLabel.text}" placed in rectangle: (${cx.toFixed(1)}, ${cy.toFixed(1)}) fontSize: ${fs}, rect: ${rect.w.toFixed(0)}x${rect.h.toFixed(0)}`);
   
   return panned; // Return whether panning occurred
 }
@@ -1394,7 +1563,7 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
         console.log(`[labels] SA cluster: ${members.length} labels, ${sweeps} sweeps`);
       }
       
-      const annealed = annealLabels({ labels: members, bounds, sweeps });
+      const annealed = timeit(`SA anneal ${members.length} labels`, () => annealLabels({ labels: members, bounds, sweeps }));
       placed.push(...annealed);
       
       // Mark as processed
@@ -1460,7 +1629,7 @@ export function placeLabelsAvoidingCollisions({ svg, labels }) {
         
         // Run fallback annealing with moderate sweeps
         const sweeps = Math.min(600, Math.max(400, 400 + nonOceanLabels.length * 5));
-        const fallbackAnnealed = annealLabels({ labels: nonOceanLabels, bounds, sweeps });
+        const fallbackAnnealed = timeit(`SA fallback anneal ${nonOceanLabels.length} labels`, () => annealLabels({ labels: nonOceanLabels, bounds, sweeps }));
         
         // Update placed labels with fallback results
         for (const fallbackLabel of fallbackAnnealed) {
@@ -1859,6 +2028,11 @@ function checkPartialClear(qt, x, y, w, h, area = 0) {
 
 // ---- Zoom filtering with progressive reveal ----
 export function filterByZoom(placed, k) {
+  // Don't run LOD before autofit has finished
+  const svgSel = asSel(d3.select("svg"));
+  const zoomLocked = svgSel.attr("data-zoom-locked") === "1";
+  if (!zoomLocked) return placed; // Return all labels if zoom not locked yet
+  
   // Safety check: ensure placed is valid
   if (!Array.isArray(placed) || placed.length === 0) {
     console.warn('[labels] filterByZoom: no labels to filter');
@@ -2065,15 +2239,15 @@ export function seedOceanIntoWorldRect(l) {
   const wWorld = l.width  / k;
   const hWorld = l.height / k;
 
-  const cx = r.x0 + Math.max(0, (r.x1 - r.x0 - wWorld)) / 2;
-  const cy = r.y0 + Math.max(0, (r.y1 - r.y0 - hWorld)) / 2;
+  const cx = r.x + Math.max(0, (r.w - wWorld)) / 2;
+  const cy = r.y + Math.max(0, (r.h - hWorld)) / 2;
 
   // SA uses top-left box; store world-space box
   l.x = cx;
   l.y = cy;
 
   // anchor = rect center in world coords so energy doesn't pull to old centroid
-  l.anchor = { x: (r.x0 + r.x1) / 2, y: (r.y0 + r.y1) / 2, r: 4 };
+  l.anchor = { x: r.x + r.w / 2, y: r.y + r.h / 2, r: 4 };
 }
 
 // Helper function to get label position, preferring SA output when present
@@ -2121,7 +2295,14 @@ export function renderLabels({ svg, placed, groupId }) {
   const merged = enter.merge(sel);
   
   // Set baseline font sizes (persist on datum)
-  merged.each(function(d) {
+  merged.each(function(d, i, nodes) {
+    // Use normal function to get a real node-bound `this`
+    const node = this;
+    if (!node) return;
+    const textSel = d3.select(node);
+    if (textSel.empty()) return;
+    // store for later debugging
+    textSel.attr('data-label-id', d.id || `lbl-${i}`);
     // baseline font (persist on datum). For oceans, this may come from fit-to-rect.
     if (d.baseFontPx == null) d.baseFontPx = d.fontPx || d.font || 28; // pick your default
     if (d.baseStrokePx == null) d.baseStrokePx = 2;          // default outline
@@ -2129,7 +2310,14 @@ export function renderLabels({ svg, placed, groupId }) {
   
   // Tag labels with stable uid and pick a probe once
   const labels = g.selectAll('g.label');
-  labels.each(function(d){
+  labels.each(function(d, i, nodes){
+    // Use normal function to get a real node-bound `this`
+    const node = this;
+    if (!node) return;
+    const textSel = d3.select(node);
+    if (textSel.empty()) return;
+    // store for later debugging
+    textSel.attr('data-label-id', d.id || `lbl-${i}`);
     // stable uid for debugging & joins
     if (d.uid == null) d.uid = `lbl_${d.kind}_${Math.random().toString(36).slice(2,7)}`;
     // establish baselines once (Prompt 7 set these; keep here to be safe)
@@ -2152,21 +2340,76 @@ export function renderLabels({ svg, placed, groupId }) {
   
   // Update stroke text
   merged.select('text.stroke')
-    .each(function(d) {
-      if (!d || !d.text) return;
+    .each(function(d, i, nodes) {
+      // Use normal function to get a real node-bound `this`
+      const node = this;
+      if (!node) return;
+      const textElement = d3.select(node);
+      if (textElement.empty()) return;
+      // store for later debugging
+      textElement.attr('data-label-id', d.id || `lbl-${i}`);
       
-      const textElement = d3.select(this);
+      if (!d || !d.text) return;
       textElement
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'central')
-        .style('font-size', d => `${d.baseFontPx}px`)
-        .classed('is-visible', false)
+        .style('font-size', d => {
+          const k = getZoomK();
+          return (d.font_world_px ?? (d.baseFontPx || 24) / k) + 'px';
+        })
+        .classed('is-visible', true)
         .classed('ocean', d.kind === 'ocean')
         .classed('lake', d.kind === 'lake')
         .classed('island', d.kind === 'island');
       
-      // Handle multiline text for ocean labels
-      if (d.multiline && d.text.includes('\n')) {
+      // Handle ocean labels with keepWithinRect using fitTextToRect
+      if (d.kind === 'ocean' && d.keepWithinRect) {
+        // 1) Build a **pixel** rect for fitting (what the fitter expects)
+        //    We have world rect stored → convert back to px for fitting only.
+        const {k, x, y} = getZoomState();
+        const rw = d.keepWithinRect; // world units
+        const rectPx = { x: rw.x * k + x, y: rw.y * k + y, w: rw.w * k, h: rw.h * k };
+
+        // 2) Run fitter in pixels (unchanged API)
+        const res = fitTextToRect({
+          svg,
+          textSel: textElement,
+          text: d.text,
+          rect: rectPx,
+          pad: 8,
+          maxPx: 200,
+          minPx: 14,
+          lineH: 1.1
+        });
+
+        // 3) APPLY as **world** values:
+        //    font-size must be scaled down by k; position x/y must be world.
+        if (res && res.ok) {
+          const fsWorld = pxToWorldFont(res.fontPx);
+          textElement.attr('font-size', fsWorld);
+          // place anchor at res.anchorPx (center or top-left per fitter); assume center here:
+          const axPx = res.anchorPx?.x ?? (rectPx.x + rectPx.w / 2);
+          const ayPx = res.anchorPx?.y ?? (rectPx.y + rectPx.h / 2);
+          const aw = screenToWorldXY(axPx, ayPx);
+          textElement.attr('x', aw.x).attr('y', aw.y);
+          textElement.attr('text-anchor', 'middle').attr('dominant-baseline', 'middle');
+          textElement.attr('data-fit', JSON.stringify({fontPx: res.fontPx, k}));
+          assertOceanWithinRect(textElement, rectPx, 2);
+        } else {
+          console.warn('[ocean] fit failed; falling back to min size world units');
+          textElement.attr('font-size', pxToWorldFont(14));
+        }
+      } else if (d.lines && d.lines.length === 2) {
+        // Use the lines array from fitOceanToRectPx
+        textElement.selectAll('tspan').remove(); // Clear existing tspans
+        d.lines.forEach((line, i) => {
+          textElement.append('tspan')
+            .attr('x', 0)
+            .attr('dy', i === 0 ? 0 : '1.2em')
+            .text(line);
+        });
+      } else if (d.multiline && d.text.includes('\n')) {
+        // Fallback for legacy multiline text
         const lines = d.text.split('\n');
         textElement.selectAll('tspan').remove(); // Clear existing tspans
         lines.forEach((line, i) => {
@@ -2182,21 +2425,76 @@ export function renderLabels({ svg, placed, groupId }) {
   
   // Update fill text
   merged.select('text.fill')
-    .each(function(d) {
-      if (!d || !d.text) return;
+    .each(function(d, i, nodes) {
+      // Use normal function to get a real node-bound `this`
+      const node = this;
+      if (!node) return;
+      const textElement = d3.select(node);
+      if (textElement.empty()) return;
+      // store for later debugging
+      textElement.attr('data-label-id', d.id || `lbl-${i}`);
       
-      const textElement = d3.select(this);
+      if (!d || !d.text) return;
       textElement
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'central')
-        .style('font-size', d => `${d.baseFontPx}px`)
-        .classed('is-visible', false)
+        .style('font-size', d => {
+          const k = getZoomK();
+          return (d.font_world_px ?? (d.baseFontPx || 24) / k) + 'px';
+        })
+        .classed('is-visible', true)
         .classed('ocean', d.kind === 'ocean')
         .classed('lake', d.kind === 'lake')
         .classed('island', d.kind === 'island');
       
-      // Handle multiline text for ocean labels
-      if (d.multiline && d.text.includes('\n')) {
+      // Handle ocean labels with keepWithinRect using fitTextToRect
+      if (d.kind === 'ocean' && d.keepWithinRect) {
+        // 1) Build a **pixel** rect for fitting (what the fitter expects)
+        //    We have world rect stored → convert back to px for fitting only.
+        const {k, x, y} = getZoomState();
+        const rw = d.keepWithinRect; // world units
+        const rectPx = { x: rw.x * k + x, y: rw.y * k + y, w: rw.w * k, h: rw.h * k };
+
+        // 2) Run fitter in pixels (unchanged API)
+        const res = fitTextToRect({
+          svg,
+          textSel: textElement,
+          text: d.text,
+          rect: rectPx,
+          pad: 8,
+          maxPx: 200,
+          minPx: 14,
+          lineH: 1.1
+        });
+
+        // 3) APPLY as **world** values:
+        //    font-size must be scaled down by k; position x/y must be world.
+        if (res && res.ok) {
+          const fsWorld = pxToWorldFont(res.fontPx);
+          textElement.attr('font-size', fsWorld);
+          // place anchor at res.anchorPx (center or top-left per fitter); assume center here:
+          const axPx = res.anchorPx?.x ?? (rectPx.x + rectPx.w / 2);
+          const ayPx = res.anchorPx?.y ?? (rectPx.y + rectPx.h / 2);
+          const aw = screenToWorldXY(axPx, ayPx);
+          textElement.attr('x', aw.x).attr('y', aw.y);
+          textElement.attr('text-anchor', 'middle').attr('dominant-baseline', 'middle');
+          textElement.attr('data-fit', JSON.stringify({fontPx: res.fontPx, k}));
+          assertOceanWithinRect(textElement, rectPx, 2);
+        } else {
+          console.warn('[ocean] fit failed; falling back to min size world units');
+          textElement.attr('font-size', pxToWorldFont(14));
+        }
+      } else if (d.lines && d.lines.length === 2) {
+        // Use the lines array from fitOceanToRectPx
+        textElement.selectAll('tspan').remove(); // Clear existing tspans
+        d.lines.forEach((line, i) => {
+          textElement.append('tspan')
+            .attr('x', 0)
+            .attr('dy', i === 0 ? 0 : '1.2em')
+            .text(line);
+        });
+      } else if (d.multiline && d.text.includes('\n')) {
+        // Fallback for legacy multiline text
         const lines = d.text.split('\n');
         textElement.selectAll('tspan').remove(); // Clear existing tspans
         lines.forEach((line, i) => {
@@ -2265,6 +2563,13 @@ export function updateLabelZoom({ svg, groupId = 'labels-features' }) {
   // Keep strokes crisp with zoom; do NOT change font-size here
   g.selectAll('text.stroke')
     .style('stroke-width', d => (d.baseStrokePx ? d.baseStrokePx / k : 2 / k));
+  
+  // Update font sizes to respect ocean's stored world font
+  g.selectAll('text.stroke, text.fill')
+    .style('font-size', d => {
+      const k = getZoomK();
+      return (d.font_world_px ?? (d.baseFontPx || 24) / k) + 'px';
+    });
   
   // Debug logging inside updateLabelZoom (after applying transform)
   if (LABEL_DEBUG) {
@@ -2691,6 +2996,16 @@ export function findOceanLabelRectAfterAutofit(
   const z = d3.zoomTransform(worldNode);
   const pxToWorld = (px, py) => ({ x: (px - z.x)/z.k, y: (py - z.y)/z.k });
 
+  // screen-space viewport
+  const svg = d3.select('svg');
+  const svgWidth = +svg.attr('width');
+  const svgHeight = +svg.attr('height');
+  const viewportPx = { x0: 0, y0: 0, x1: svgWidth, y1: svgHeight };
+  
+  // search only inside an inset box
+  const searchPx = insetPxRect(viewportPx, OCEAN_EDGE_PAD_PX);
+  console.log('[ocean] search rect (px):', searchPx);
+
   function pixelPointIsOcean(px, py) {
     const radius = 3; // ≈ 7x7 window
     for (let dy=-radius; dy<=radius; dy++) {
@@ -2706,10 +3021,12 @@ export function findOceanLabelRectAfterAutofit(
   // Get existing visible labels for hard avoidance
   const existingLabels = window.__labelsPlaced?.features || [];
   
-  const satEnv = buildWaterMaskSAT(visibleBounds, step, pixelPointIsOcean, existingLabels);
+  // Use inset search bounds instead of full viewport
+  const insetBounds = [searchPx.x0, searchPx.y0, searchPx.x1, searchPx.y1];
+  const satEnv = timeit('SAT build water mask', () => buildWaterMaskSAT(insetBounds, step, pixelPointIsOcean, existingLabels));
 
   // NEW: collect top-K horizontal rects, then re-rank by a label-friendly score
-  const candidates = largestHorizontalWaterRects(satEnv, 12);
+  const candidates = timeit('SAT search rects', () => largestHorizontalWaterRects(satEnv, 12));
   if (!candidates.length) {
     console.warn('[ocean] No horizontal water rect candidates; will fallback.');
     return null;
@@ -2721,8 +3038,27 @@ export function findOceanLabelRectAfterAutofit(
     if (rect.width < 1 || rect.height < 1) continue;
     let px = gridRectToPixels(rect, satEnv.origin, satEnv.step);
     if (px.w < px.h * minAspect) px = enforceMinAspect(px, minAspect);
-    const score = scoreOceanRect(px, visibleBounds);
-    if (score > bestScore) { bestScore = score; bestPx = px; }
+    
+    // Clamp to inset search bounds
+    const X_MIN = searchPx.x0, Y_MIN = searchPx.y0;
+    const X_MAX = searchPx.x1, Y_MAX = searchPx.y1;
+    
+    // Ensure rectangle stays within inset bounds
+    if (px.x < X_MIN || px.y < Y_MIN || px.x + px.w > X_MAX || px.y + px.h > Y_MAX) {
+      continue; // Skip rectangles that extend beyond inset bounds
+    }
+    
+    const score = scoreOceanRect(px, insetBounds);
+    
+    // Optional bias: add tiny penalty for hugging edges
+    const edgeDist = Math.min(
+      (px.x - X_MIN), (px.y - Y_MIN), (X_MAX - (px.x + px.w)), (Y_MAX - (px.y + px.h))
+    );
+    // prefer centers; 0.001 is enough to break ties without dominating ocean-area score
+    const edgePenalty = Math.max(0, (OCEAN_EDGE_PAD_PX - edgeDist)) * 0.001;
+    const finalScore = score - edgePenalty;
+    
+    if (finalScore > bestScore) { bestScore = finalScore; bestPx = px; }
   }
 
   if (!bestPx) {
@@ -2732,28 +3068,28 @@ export function findOceanLabelRectAfterAutofit(
 
   console.log(`[ocean] Final pixels (ranked): ${bestPx.w}x${bestPx.h} at (${bestPx.x},${bestPx.y})`);
   
-  // Inset the rectangle to provide edge margins
-  const edgePadPx = 20;
-  function insetPxRect(r, pad) {
-    return { x: r.x+pad, y: r.y+pad, w: Math.max(0, r.w-2*pad), h: Math.max(0, r.h-2*pad) };
-  }
-  const safePxRect = insetPxRect(bestPx, edgePadPx);
-  
+  // world-space clamp rect derived from the full viewport, but inset by EDGE_PAD
+  const worldViewport = { x0: 0, y0: 0, x1: svgWidth / z.k, y1: svgHeight / z.k };
+  const padWorld = worldPadFromPx(OCEAN_EDGE_PAD_PX);
   const worldRect = {
-    x0: (safePxRect.x         - z.x)/z.k,
-    y0: (safePxRect.y         - z.y)/z.k,
-    x1: (safePxRect.x+safePxRect.w - z.x)/z.k,
-    y1: (safePxRect.y+safePxRect.h - z.y)/z.k
+    x0: worldViewport.x0 + padWorld,
+    y0: worldViewport.y0 + padWorld,
+    x1: worldViewport.x1 - padWorld,
+    y1: worldViewport.y1 - padWorld
   };
+  
+  // convert to world units now and mark units
+  const rWorld = screenRectToWorldRect({x: bestPx.x, y: bestPx.y, w: bestPx.w, h: bestPx.h});
   bestPx._debugRectScreen = bestPx; // for dashed red box
-  bestPx.keepWithinRect   = worldRect; // use this for placement
+  bestPx.keepWithinRect = {...rWorld, units: 'world'}; // use this for placement
+  console.log('[ocean] Stored world rect:', rWorld);
   return bestPx;
 }
 
 // Optional (nice UX): only accept rects that can fit the text horizontally at (or slightly below) your base font size
 export function fitFontToRect(text, rect, basePx, family = labelFontFamily()) {
   // Use the existing measureTextWidth function for consistency
-  const svg = d3.select('svg').node() ? d3.select('svg') : d3.select('body').append('svg');
+  const svg = d3.select('svg');
   const textW = measureTextWidth(svg, text, { fontSize: basePx, family, weight: 700 });
   const textH = basePx * 1.2;
   
@@ -3083,7 +3419,7 @@ export function findOceanRectByBBoxes(
     if (h == null) return true;
     return h <= seaLevel;
   }
-  const satEnv = buildWaterMaskSAT(visibleBounds, step, localPointIsOcean);
+  const satEnv = timeit('SAT build water mask (bbox)', () => buildWaterMaskSAT(visibleBounds, step, localPointIsOcean));
   const landBoxesGrid = landBBoxesFromSAT(satEnv, Math.max(1, Math.round(landPadPx/step)));
   const obstacles = landBoxesGrid.map(b => gridBoxToPixels(b, satEnv.origin, satEnv.step));
   const best = largestEmptyHorizontalRectAmongBoxes(visibleBounds, obstacles, minAspect);
