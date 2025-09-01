@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Null Shim - Urban Train</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test Null Shim - Urban Train</h1>
+    
+    <div id="status" class="status info">
+        Testing null shim functionality...
+    </div>
+    
+    <div id="results"></div>
+    
+    <script type="module">
+        const status = document.getElementById('status');
+        const results = document.getElementById('results');
+        
+        function log(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `status ${type}`;
+            div.textContent = message;
+            results.appendChild(div);
+        }
+        
+        try {
+            // Test 1: Import the null shim
+            log('Testing null shim imports...', 'info');
+            const { 
+                ensureLabelContainers, 
+                getVisibleWorldBoundsFromLabels, 
+                measureTextWidth,
+                renderOceanInWorld,
+                findOceanLabelSpot,
+                applyLabelTransforms,
+                filterByZoom,
+                placeLabelsAvoidingCollisions,
+                renderWorldLabels,
+                renderOverlayLabels,
+                ensureMetrics,
+                clampToKeepRect,
+                drawDebugOceanRect,
+                findOceanLabelRectAfterAutofit,
+                makeIsWater,
+                applyFontCaps,
+                LABEL_DEBUG,
+                smokeLabel,
+                debugLabels,
+                placeOceanLabelsAfterAutofit
+            } = await import('./src/modules/labels-null-shim.js');
+            
+            log('✅ All null shim functions imported successfully', 'success');
+            
+            // Test 2: Verify functions are no-ops
+            log('Testing function behavior...', 'info');
+            
+            // Test ensureLabelContainers (should not throw)
+            try {
+                ensureLabelContainers(null);
+                log('✅ ensureLabelContainers(null) - no error', 'success');
+            } catch (e) {
+                log(`❌ ensureLabelContainers(null) - error: ${e.message}`, 'error');
+            }
+            
+            // Test getVisibleWorldBoundsFromLabels (should return null)
+            const bounds = getVisibleWorldBoundsFromLabels();
+            if (bounds === null) {
+                log('✅ getVisibleWorldBoundsFromLabels() returns null as expected', 'success');
+            } else {
+                log(`❌ getVisibleWorldBoundsFromLabels() returned ${bounds}, expected null`, 'error');
+            }
+            
+            // Test measureTextWidth (should return 0)
+            const width = measureTextWidth();
+            if (width === 0) {
+                log('✅ measureTextWidth() returns 0 as expected', 'success');
+            } else {
+                log(`❌ measureTextWidth() returned ${width}, expected 0`, 'error');
+            }
+            
+            // Test filterByZoom (should return empty array)
+            const filtered = filterByZoom();
+            if (Array.isArray(filtered) && filtered.length === 0) {
+                log('✅ filterByZoom() returns empty array as expected', 'success');
+            } else {
+                log(`❌ filterByZoom() returned ${filtered}, expected empty array`, 'error');
+            }
+            
+            // Test findOceanLabelSpot (should return null)
+            const spot = findOceanLabelSpot();
+            if (spot === null) {
+                log('✅ findOceanLabelSpot() returns null as expected', 'success');
+            } else {
+                log(`❌ findOceanLabelSpot() returned ${spot}, expected null`, 'error');
+            }
+            
+            // Test LABEL_DEBUG constant
+            if (LABEL_DEBUG === false) {
+                log('✅ LABEL_DEBUG is false as expected', 'success');
+            } else {
+                log(`❌ LABEL_DEBUG is ${LABEL_DEBUG}, expected false`, 'error');
+            }
+            
+            // Test 3: Verify main.js can be imported
+            log('Testing main.js import...', 'info');
+            try {
+                const mainModule = await import('./src/main.js');
+                log('✅ main.js imported successfully', 'success');
+                log(`✅ Main module has ${Object.keys(mainModule).length} exports`, 'success');
+            } catch (e) {
+                log(`❌ main.js import failed: ${e.message}`, 'error');
+            }
+            
+            status.textContent = '✅ All tests completed successfully!';
+            status.className = 'status success';
+            
+        } catch (error) {
+            log(`❌ Test failed: ${error.message}`, 'error');
+            status.textContent = '❌ Test failed - see details below';
+            status.className = 'status error';
+        }
+    </script>
+</body>
+</html>

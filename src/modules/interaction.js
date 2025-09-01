@@ -1,7 +1,34 @@
 // d3 is global; do not import it.
-import { updateLabelZoom, updateLabelVisibility, updateLabelVisibilityWithOptions, updateLabelVisibilityByTier, updateOverlayOceanLabel, clearDebugOverlays, clearScreenLabels, updateOceanLabelScreenPosition, _updateCullRaf, tierForZoom, applyTierVisibility, currentTier, setCurrentTier, applyLabelTransforms, updateLabelVisibilityLOD, updateLabelLOD } from './labels.js';
-import { filterByZoom } from './labels.js';
-import { showLODHUD } from './labelsDebug.js';
+// Old labeling system removed - no imports needed
+
+// Temporary no-op stubs to keep the app running
+// These will be replaced by the new modular labeling system
+function noopStub(...args) {
+  if (window.DEBUG) {
+    console.log('[STUB] Label function called but not implemented:', args);
+  }
+  return null;
+}
+
+// Stub all the old labeling functions that were imported
+const updateLabelZoom = noopStub;
+const updateLabelVisibility = noopStub;
+const updateLabelVisibilityWithOptions = noopStub;
+const updateLabelVisibilityByTier = noopStub;
+const updateOverlayOceanLabel = noopStub;
+const clearDebugOverlays = noopStub;
+const clearScreenLabels = noopStub;
+const updateOceanLabelScreenPosition = noopStub;
+const _updateCullRaf = noopStub;
+const tierForZoom = noopStub;
+const applyTierVisibility = noopStub;
+const currentTier = noopStub;
+const setCurrentTier = noopStub;
+const applyLabelTransforms = noopStub;
+const updateLabelVisibilityLOD = noopStub;
+const updateLabelLOD = noopStub;
+const filterByZoom = noopStub;
+const showLODHUD = noopStub;
 
 // Add a tiny accessor so other modules can safely read current zoom.
 export function getZoomState() {
@@ -82,46 +109,9 @@ export function attachInteraction({
       updateCellsLOD(t.k);
     }
 
-    // LOD: flip tiers as zoom changes
-    const next = tierForZoom(t.k);
-    if (next !== currentTier.value) {
-      setCurrentTier(next);
-      applyTierVisibility();
-    }
-
-    // NEW: recalc viewport culling every zoom (throttled)
-    if (typeof _updateCullRaf === "function") _updateCullRaf();
-
-    // Only transform #world - labels inherit this transform and counter-scale themselves
+    // Only transform #world - old labeling system removed
     d3.select('#world')
       .attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
-
-    // Labels counter-scale themselves via applyLabelTransforms
-    applyLabelTransforms(svgSel, t.k);
-    
-    // Update LOD opacity on every zoom (so things don't get "stuck" invisible)
-    updateLabelLOD(svgSel, t.k);
-    
-    // Update label visibility based on zoom level and tier (robust tier extraction)
-    updateLabelVisibility(svgSel);
-    
-    // Show live LOD debug information
-    showLODHUD(svgSel);
-
-    // Update visibility + inverse scale for feature labels
-    if (window.__labelsPlaced && window.__labelsPlaced.features) {
-      const visible = filterByZoom(window.__labelsPlaced.features, t.k);
-      updateLabelVisibilityWithOptions({ placed: window.__labelsPlaced.features, visible });
-      updateLabelZoom({ svg: svgSel, groupId: 'labels-world-areas' });
-    }
-
-    // Ocean labels now move with the parent group - no manual positioning needed
-    
-    // Reposition screen-space ocean label (order matters: world labels first, then ocean)
-    updateOceanLabelScreenPosition(svgSel, t);// screen-space ocean follows its world anchor
-    
-    // ❌ DO NOT call updateOverlayOceanLabel(...) - that rebuilds during zoom
-    // ❌ DO NOT call clearScreenLabels(svg) - that clears the saved anchor
     
     console.debug('[zoom svg identity]', {
       anchor: (window.state && window.state.ocean) ? window.state.ocean.anchor : svgSel.node().__oceanWorldAnchor,
@@ -139,7 +129,7 @@ export function attachInteraction({
     ])
     .on('zoom', zoomed)
     .on('end.cull', () => {
-      if (typeof _updateCullRaf === "function") _updateCullRaf();
+      // Old labeling system removed
     });
 
   svg.call(zoom)
@@ -178,14 +168,19 @@ export function attachInteraction({
           const cell = window.pickCellAt ? window.pickCellAt(wx, wy) : diagram.find(wx, wy);
           
           if (!cell || cell.index === lastCellId) return;
+          
+          // Guard against undefined properties before using them
+          if (!cell.index || cell.height == null) return;
+          
           lastCellId = cell.index;
           
           // vanilla DOM updates (faster than jQuery for high-frequency UI)
           cellEl.textContent = cell.index;
-          heightEl.textContent = cell.height.toFixed(2);
-                  featureEl.textContent = cell.featureType
-          ? cell.featureName
-          : "no!";
+          const h = cell.height.toFixed(2);
+          heightEl.textContent = h;
+          featureEl.textContent = (cell.featureType && cell.featureName) 
+            ? cell.featureName 
+            : "no!";
             
           // Update HUD with screen coordinates for crisp positioning
           updateHUD(cell, { screenX: mx, screenY: my, worldX: wx, worldY: wy, k: t.k });
@@ -197,18 +192,23 @@ export function attachInteraction({
         const wy = (my - t.y) / t.k;
         const cell = window.pickCellAt ? window.pickCellAt(wx, wy) : diagram.find(wx, wy);
         
-        if (!cell || cell.index === lastCellId) return;
-        lastCellId = cell.index;
-        
-        // vanilla DOM updates (faster than jQuery for high-frequency UI)
-        cellEl.textContent = cell.index;
-        heightEl.textContent = cell.height.toFixed(2);
-        featureEl.textContent = cell.featureType
-          ? cell.featureName
-          : "no!";
+          if (!cell || cell.index === lastCellId) return;
           
-        // Update HUD with screen coordinates for crisp positioning
-        updateHUD(cell, { screenX: mx, screenY: my, worldX: wx, worldY: wy, k: t.k });
+          // Guard against undefined properties before using them
+          if (!cell.index || cell.height == null) return;
+          
+          lastCellId = cell.index;
+          
+          // vanilla DOM updates (faster than jQuery for high-frequency UI)
+          cellEl.textContent = cell.index;
+          const h = cell.height.toFixed(2);
+          heightEl.textContent = h;
+          featureEl.textContent = (cell.featureType && cell.featureName) 
+            ? cell.featureName 
+            : "no!";
+          
+          // Update HUD with screen coordinates for crisp positioning
+          updateHUD(cell, { screenX: mx, screenY: my, worldX: wx, worldY: wy, k: t.k });
       }
     });
   }

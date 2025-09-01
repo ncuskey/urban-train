@@ -1,23 +1,8 @@
 // Global debug toggle - flip to true when tuning
 window.DEBUG = false;
 
-// Feature flags (all off by default; toggle via localStorage or ?flags=)
-window.labelFlags = {
-  tokensLoader: false,
-  styleTokensOnly: false,           // apply fonts/tracking/italics only
-  waterItalicEverywhere: false,     // water labels italicized
-  areaCapsTracking: false,          // ALL CAPS + tracking for area features
-  fadeBands: false,                 // opacity ramps by tier
-  classAwareSpacing: false,         // per-class spacing culls
-  prioritySuppression: false,       // suppression per priority ladder
-  archipelagoConsolidation: false,  // group mid-zoom islands (future)
-};
-// Allow ?flags=fadeBands,styleTokensOnly etc.
-(function initFlagsFromURL(){
-  const q = new URLSearchParams(location.search).get('flags');
-  if (!q) return;
-  q.split(',').forEach(k => { if (k in window.labelFlags) window.labelFlags[k] = true; });
-})();
+// Label system temporarily disabled - flags removed until new modules arrive
+window.labelFlags = {};
 
 // Performance timing function
 function timeit(tag, fn) {
@@ -50,7 +35,8 @@ function safeInsertBefore(parentSel, enterSel, tag, beforeSelector) {
 
 import { RNG } from "./core/rng.js";
 import { Timers } from "./core/timers.js";
-import { ensureLayers, ensureLabelSubgroups } from "./render/layers.js";
+import { ensureLayers } from "./render/layers.js";
+// ensureLabelSubgroups temporarily disabled until new labeling system arrives
 import { runSelfTests, renderSelfTestBadge, clamp01, ensureReciprocalNeighbors } from "./selftest.js";
 import { poissonDiscSampler, buildVoronoi, detectNeighbors } from "./modules/geometry.js";
 import { randomMap } from "./modules/heightmap.js";
@@ -61,9 +47,37 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction, getVisibleWorldBounds, padBounds, zoom } from "./modules/interaction.js";
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
-import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, updateLabelVisibilityWithOptions, updateLabelVisibilityByTier, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, logProbe, LABEL_DEBUG, clampToKeepRect, getZoomK, textWidthPx, labelFontFamily, placeOceanLabelInScreenSpace, renderOceanInWorld, renderNonOceanLabels, renderWorldLabels, renderOverlayLabels, ensureLabelContainers, smokeLabel, forceAllLabelsVisible, updateLabelLOD, applyFontCaps, applyLabelTransforms, updateLabelVisibilityLOD } from "./modules/labels.js";
-import { loadLabelTokens } from "./modules/labelTokens.js";
-import { showLODHUD } from "./modules/labelsDebug.js";
+// Null shim for old labeling functions (temporary until new modules arrive)
+import {
+  ensureLabelContainers,
+  buildFeatureLabels,
+  placeLabelsAvoidingCollisions,
+  renderWorldLabels,
+  renderOverlayLabels,
+  updateLabelVisibilityLOD,
+  updateLabelTransforms,
+  clearLabels,
+  ensureMetrics,
+  measureTextWidth,
+  renderOceanInWorld,
+  findOceanLabelSpot,
+  placeOceanLabelAtSpot,
+  labelKey,
+  // Additional functions still being called in the code
+  getVisibleWorldBoundsFromLabels,
+  updateLabelVisibility,
+  updateLabelVisibilityWithOptions,
+  filterByZoom,
+  clampToKeepRect,
+  drawDebugOceanRect,
+  findOceanLabelRectAfterAutofit,
+  makeIsWater,
+  applyFontCaps,
+  LABEL_DEBUG,
+  smokeLabel,
+  debugLabels,
+  placeOceanLabelsAfterAutofit
+} from "./modules/labels-null-shim.js";
 
 // === Minimal Perf HUD ==========================================
 const Perf = (() => {
@@ -145,35 +159,7 @@ function buildXYAccessor(cells) {
   };
 }
 
-// Create water test function using the accessor
-function makeIsWater(getCellAtXY, seaLevel) {
-  return function isWaterAt(x, y) {
-    const cell = getCellAtXY(x, y);
-    if (!cell) return false; // no cell → treat as not-water
-    
-    // Handle different cell data structures
-    let height = null;
-    let featureType = null;
-    
-    if (cell) {
-      // Try different property names for height
-      height = cell.height ?? cell.data?.height ?? null;
-      featureType = cell.featureType ?? cell.data?.featureType ?? null;
-      
-      // If still null, try accessing the polygon directly via index
-      if (height === null && cell.index !== undefined) {
-        const polygon = window.currentPolygons?.[cell.index];
-        if (polygon) {
-          height = polygon.height;
-          featureType = polygon.featureType;
-        }
-      }
-    }
-    
-    // Return true if water and not a lake (exclude lakes from ocean placement)
-    return !!cell && height !== null && height <= seaLevel && featureType !== "Lake";
-  };
-}
+// Old labeling system removed - makeIsWater function cleaned out (now imported from null shim)
 
 // Helper to get visible world bounds after current zoom/pan (with explicit width/height)
 function getVisibleWorldBoundsWithSize(svg, zoom, width, height) {
@@ -191,38 +177,7 @@ function getViewportBounds(pad = 0) {
   return [pad, pad, W - pad, H - pad]; // left, top, right, bottom — all <= svg size
 }
 
-// Place ocean label at a specific spot (circle-based placement)
-function placeOceanLabelAtSpot(oceanLabel, spot, svg) {
-  oceanLabel.x = spot.x;
-  oceanLabel.y = spot.y;
-  oceanLabel.fontSize = spot.fontSize; // Store the computed font size
-  
-  // Add fixed and keepWithin properties for collision solver
-  const halfW = measureTextWidth(svg, oceanLabel.text, { fontSize: spot.fontSize }) / 2;
-  oceanLabel.fixed = true; // ⬅ immovable
-  oceanLabel.keepWithin = {
-    cx: spot.x,
-    cy: spot.y,
-    r: Math.max(spot.radius - halfW - 6, 0) // margin inside empty circle
-  };
-  
-  console.log(`[labels] Ocean "${oceanLabel.text}" placed at widest water: (${spot.x.toFixed(1)}, ${spot.y.toFixed(1)}) radius: ${spot.radius.toFixed(1)}, fontSize: ${spot.fontSize}`);
-  
-  // Log the decision details
-  console.log('[ocean] spot', { 
-    x: spot.x.toFixed(1), 
-    y: spot.y.toFixed(1), 
-    r: spot.radius.toFixed(1), 
-    fs: spot.fontSize 
-  });
-  
-  // Temporarily draw the largest empty circle to visually validate
-  d3.select('#world').append('circle')
-    .attr('cx', spot.x).attr('cy', spot.y).attr('r', spot.radius)
-    .attr('fill', 'none').attr('stroke', '#fff')
-    .attr('stroke-dasharray', '4 4').attr('opacity', 0.5)
-    .attr('class', 'debug-circle');
-}
+// Old labeling system removed - placeOceanLabelAtSpot function cleaned out
 
 
 
@@ -408,17 +363,18 @@ async function generate(count) {
   timers.clear();
   timers.mark('generate');
 
-  // Load label tokens if enabled (safe: no behavior change if tokensLoader=false)
-  await loadLabelTokens();
+  // STEP 0: no labels — stub arrays so legacy calls don't explode
+  let featureLabels = [];
+  let oceanLabels = [];
+  window.__featureLabels = featureLabels;   // some logs check this
+  window.featureLabels   = featureLabels;   // some code inspects this too
+
+  // Old labeling system removed
 
   // make RNG deterministic for this generation
   rng.reseed(state.seed);
   
-  // Clear any existing labels from previous generation
-  const existingLabels = d3.select('#labels');
-  if (!existingLabels.empty()) {
-    existingLabels.selectAll('*').remove();
-  }
+  // Old labeling system removed
   
   // Clear any debug circles from previous generation
   const existingDebugCircles = d3.selectAll('.debug-circle');
@@ -435,11 +391,7 @@ async function generate(count) {
     
   // Ensure proper layer structure
   const layers = ensureLayers(svg);
-  ensureLabelSubgroups(svg);
-  ensureLabelContainers(svg);
-  
-  // Smoke test: draw a visible, fixed label to test basic rendering and layering
-  smokeLabel(svg);
+  // Old labeling system removed - ensureLabelContainers temporarily disabled
   
   // One-time, non-zoomed container only for text measurement
   let gMeasure = svg.select("g.__measure");
@@ -480,7 +432,15 @@ async function generate(count) {
   let samples = [];
   for (let s; (s = sampler()); ) samples.push(s);
   // Voronoi D3
-  let { diagram, polygons } = buildVoronoi(samples, mapWidth, mapHeight);
+  let diagram, polygons;
+  ({ diagram, polygons } = buildVoronoi(samples, mapWidth, mapHeight));
+  window.currentPolygons = polygons; // keep a global mirror for late callbacks
+  
+  // Guard against undefined polygons
+  if (typeof polygons === 'undefined' || !polygons) {
+    console.error('[guard] polygons unavailable; cannot continue generation');
+    return; // Exit early if polygons are not available
+  }
   
   // Store polygons globally for access by other functions
   window.currentPolygons = polygons;
@@ -606,68 +566,7 @@ async function generate(count) {
       rng
     });
     
-    // Build feature labels (without ocean placement for now)
-    const featureLabels = buildFeatureLabels({
-      polygons,
-      mapWidth,
-      mapHeight,
-      minLakeArea: 0,      // no minimum - even smallest lakes get names
-      minIslandArea: 0,    // no minimum - even smallest islands get names
-      maxLakes: 500,
-      maxIslands: 800,
-      namePickers: makeNamer(rng) // or whatever you already use
-    });
-
-    if (window.DEBUG) {
-      console.log('[labels] DEBUG: Built feature labels:', {
-        total: featureLabels.length,
-        oceans: featureLabels.filter(l=>l.kind==='ocean').length,
-        lakes: featureLabels.filter(l=>l.kind==='lake').length,
-        islands: featureLabels.filter(l=>l.kind==='island').length,
-        sample: featureLabels.slice(0, 3).map(l => ({ kind: l.kind, text: l.text, area: l.area }))
-      });
-    }
-
-    // Ensure every label has width/height before placement
-    ensureMetrics(featureLabels, svgSel);
-    
-    // Initial placement excludes ocean labels (they'll be placed after autofit)
-    const nonOceanLabels = featureLabels.filter(l => l.kind !== 'ocean');
-    const placedFeatures = timeit('SA collision avoidance (initial)', () => placeLabelsAvoidingCollisions({ svg: svgSel, labels: nonOceanLabels }));
-    
-    if (window.DEBUG) {
-      console.log('[labels] DEBUG: After collision avoidance:', {
-        placed: placedFeatures.length,
-        sample: placedFeatures.slice(0, 3).map(l => ({ kind: l.kind, text: l.text, area: l.area }))
-      });
-    }
-
-    // Render world layer (oceans + lakes + islands) and overlay layer (HUD/debug only)
-    renderWorldLabels(svgSel, featureLabels);
-    renderOverlayLabels(svgSel, featureLabels);
-    
-
-    
-    // Apply per-label transforms with zoom
-    const initialZoom = d3.zoomTransform(svgSel.node()).k || 1;
-    applyLabelTransforms(svgSel, initialZoom); // Initial generation, no zoom
-
-    // stash for zoom visibility updates (will be updated after autofit + ocean placement)
-    window.__labelsPlaced = { features: placedFeatures };
-
-    // LOD filtering moved to after autofit + ocean placement
-
-    if (window.DEBUG) {
-      console.log('[labels] after build:', {
-        built: featureLabels.length, placed: placedFeatures.length
-      });
-
-      // Quick sanity log
-      console.log(`[labels] oceans=${featureLabels.filter(l=>l.kind==='ocean').length}, lakes=${featureLabels.filter(l=>l.kind==='lake').length}, islands=${featureLabels.filter(l=>l.kind==='island').length}, placed=${placedFeatures.length}`);
-    }
-    
-    // Store featureLabels for later use in ocean placement
-    window.__featureLabels = featureLabels;
+    // Old labeling system removed
     
     // Old label system removed - using new feature labels
     drawCoastline({
@@ -875,13 +774,7 @@ async function generate(count) {
     deferOceanPlacement(placeOceanLabelsAfterAutofit, { timeout: 5000, fallbackDelay: 100 });
   };
   
-  // Ocean label placement function - called after autofit completes
-  function placeOceanLabelsAfterAutofit() {
-    console.log('[autofit] Autofit completed, now placing ocean labels...');
-    
-    // Use the stored featureLabels from earlier in the generation
-    const featureLabels = window.__featureLabels || [];
-    const oceanLabels = featureLabels.filter(l => l.kind === 'ocean');
+  // Old labeling system removed
     
     console.log('[ocean] DEBUG: After autofit, featureLabels available:', {
       stored: !!window.__featureLabels,
@@ -982,14 +875,14 @@ async function generate(count) {
             renderOceanInWorld(svgSel, oceanLabel.text);
             // Apply per-label transforms with zoom
             const oceanZoom = d3.zoomTransform(svgSel.node()).k || 1;
-            applyLabelTransforms(svgSel, oceanZoom); // After ocean placement, no zoom
+            updateLabelTransforms(svgSel, oceanZoom); // After ocean placement, no zoom
           } else {
             console.log(`[labels] Ocean "${oceanLabel.text}" using centroid: (${oceanLabel.y.toFixed(1)}, ${oceanLabel.y.toFixed(1)}) - no suitable spot found`);
             // Still render the ocean label even if no spot found
             renderOceanInWorld(svgSel, oceanLabel.text);
             // Apply per-label transforms with zoom
             const oceanZoom2 = d3.zoomTransform(svgSel.node()).k || 1;
-            applyLabelTransforms(svgSel, oceanZoom2); // After ocean placement, no zoom
+            updateLabelTransforms(svgSel, oceanZoom2); // After ocean placement, no zoom
           }
         }
       } else {
@@ -1044,7 +937,7 @@ async function generate(count) {
               
               // Apply per-label transforms with zoom
               const satZoom = d3.zoomTransform(svgSel.node()).k || 1;
-              applyLabelTransforms(svgSel, satZoom); // After ocean placement, no zoom
+              updateLabelTransforms(svgSel, satZoom); // After ocean placement, no zoom
             
             // Apply font caps after ocean label is placed (now we can read its size)
             applyFontCaps();
@@ -1076,7 +969,7 @@ async function generate(count) {
             
             // Apply per-label transforms with zoom
             const saZoom = d3.zoomTransform(svgSel.node()).k || 1;
-            applyLabelTransforms(svgSel, saZoom); // After SA placement, no zoom
+            updateLabelTransforms(svgSel, saZoom); // After SA placement, no zoom
             
             // Debug logging after SA placement render
             if (LABEL_DEBUG) {
@@ -1211,7 +1104,7 @@ async function generate(count) {
           
           // Apply per-label transforms with zoom
           const reRenderZoom = d3.zoomTransform(svgSel.node()).k || 1;
-          applyLabelTransforms(svgSel, reRenderZoom); // After re-render, no zoom
+          updateLabelTransforms(svgSel, reRenderZoom); // After re-render, no zoom
           
         } else {
           console.warn('[ocean] ❌ No suitable SAT rectangle found; ocean labels will use default placement.');
@@ -1241,7 +1134,7 @@ async function generate(count) {
           
           // Apply per-label transforms with zoom
           const saPlacementZoom = d3.zoomTransform(svgSel.node()).k || 1;
-          applyLabelTransforms(svgSel, saPlacementZoom); // After SA placement, no zoom
+          updateLabelTransforms(svgSel, saPlacementZoom); // After SA placement, no zoom
           
           // Debug logging after SA placement render
           if (LABEL_DEBUG) {
@@ -1256,38 +1149,29 @@ async function generate(count) {
     }
   }
 
-  // Clamp and normalize height values for self-tests
-  const heightArray = polygons.map(p => p.height);
-  clamp01(heightArray);
-  polygons.forEach((p, i) => { p.height = heightArray[i]; });
+  // Clamp and normalize height values for self-tests (safe at top-level)
+  {
+    const P = window.currentPolygons;
+    if (Array.isArray(P) && P.length) {
+      const heightArray = P.map(p => p.height ?? 0);
+      clamp01(heightArray);
+      P.forEach((p, i) => { p.height = heightArray[i]; });
 
-  // Add timing and self-tests at the end of generation
-  timers.lap('generate', 'Generate() – total');
-  
-  // Create cache object for self-tests
-  const cache = {
-    graph: { cells: polygons },
-    height: polygons.map(p => p.height),
-    rivers: [] // No rivers data yet
-  };
-  
-  const results = runSelfTests(cache, { svg: svg.node() });
-  renderSelfTestBadge(results);
-  
-  // Log timing summary
-  console.group('Urban Train - Generation Complete');
-  console.table(timers.summary());
-  console.groupEnd();
+      // Add timing and self-tests
+      timers.lap('generate', 'Generate() – total');
+      const cache = { graph: { cells: P }, height: P.map(p => p.height ?? 0), rivers: [] };
+      const results = runSelfTests(cache, { svg: d3.select('svg').node() });
+      renderSelfTestBadge(results);
 
-  // Update label visibility after generation completes
-  const finalZoom = d3.zoomTransform(svgSel.node()).k || 1;
-  applyLabelTransforms(svgSel, finalZoom); // After generation, no zoom
-  updateLabelVisibility(svgSel);
-  
+      console.group('Urban Train - Generation Complete');
+      console.table(timers.summary());
+      console.groupEnd();
+    } else {
+      console.warn('[guard] polygons missing; skipping self-test block');
+    }
+  }
 
-  
-  // Show initial LOD debug information
-  showLODHUD(svgSel);
+  // Old labeling system removed
 
   // redraw all polygons on SeaInput change 
   document.getElementById("seaInput").addEventListener("change", function() {
@@ -1326,30 +1210,9 @@ async function generate(count) {
 
 
 
-}
 
 
-
-
-
-// Simple ocean label placement function using post-autofit bounds
-function placeOceanLabel() {
-  const [x0, y0, x1, y1] = getVisibleWorldBoundsFromLabels(d3.select('#svgRoot'), mapWidth, mapHeight);
-  const rect = findOceanLabelRect({
-    bounds: [x0, y0, x1, y1],  // <- visible bounds after autofit
-    step: 8,
-    edgePad: 12,
-    coastPad: 6,
-    getCellAtXY: state.getCellAtXY,
-    isWaterAt: makeIsWater(state.getCellAtXY, state.seaLevel)
-  });
-  if (rect) {
-    const oceanLabels = featureLabels.filter(l => l.kind === 'ocean');
-    for (const oceanLabel of oceanLabels) {
-      placeOceanLabelInRect(oceanLabel, rect, svgSel);
-    }
-  }
-}
+// Old labeling system removed
 
 // Generate a completely new random map with a fresh seed
 function generateRandomMap(count = 5) {
