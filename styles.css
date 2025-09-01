@@ -145,6 +145,15 @@ text.place-label.ocean {
   /* keep display: block so the transition is visible */
 }
 
+/* Smooth transitions for LOD visibility changes */
+#labels-world g.label { 
+  transition: opacity 120ms linear; 
+}
+
+#labels-world g.label:not(.is-visible) { 
+  pointer-events: none; 
+}
+
 /* Different styling for different feature types */
 .place-label.island {
   fill: #2d5016;

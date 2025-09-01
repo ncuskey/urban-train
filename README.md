@@ -91,7 +91,10 @@ npm test
 
 7. **Interaction & LOD**
    D3 zoom sets transform; label system **counter‑scales** and updates visibility thresholds with zoom.
-   Source: `src/modules/interaction.js`.
+   **Tier-based LOD**: Labels classified into 4 tiers (1=ocean, 2=major, 3=standard, 4=minor) with zoom-based visibility.
+   **Real-time filtering**: Labels appear/disappear based on zoom level and tier importance.
+   **Robust placement**: Uses solver coordinates (placed/layout/anchor) with CSS class fallbacks.
+   Source: `src/modules/interaction.js`, `src/modules/labels.js`.
 
 ---
 
@@ -107,6 +110,9 @@ npm test
 * Ocean label rectangle is stored on the datum in world units; fitting uses a hybrid screen/world strategy to ensure it remains inside bounds after zoom.
 * Font measurement uses canvas/DOM width metrics and CSS variables for **accurate measurement** matching the rendered font.
 * Annealing energy discourages collisions and favors center placement; oceans get higher "mass" so small labels yield around them.
+* **Deterministic placement**: Labels use solver coordinates (placed/layout/anchor) with robust fallbacks to CSS classes.
+* **Tier-based visibility**: Each label carries tier class (tier-1 through tier-4) for CSS styling and LOD control.
+* **Zoom-responsive LOD**: Labels update visibility on every zoom change with smooth transitions.
 
 **Notable functions** (in `src/modules/labels.js`):
 
@@ -118,12 +124,18 @@ npm test
 * `ensureOceanStickyVisibility` (≈ line 197): ocean label sticky behavior.
 * `ensureLabelLayers` / `ensureScreenLabelLayer` (≈ lines 39/52): set up label layers.
 * `updateOceanLabelScreenPosition` (≈ line 3575) & `clearScreenLabels` (≈ line 3567).
+* **New LOD functions**:
+  * `worldPoint(d)`: Robust coordinate extraction with solver priority
+  * `applyLabelTransforms(svg)`: Updates label positions on every zoom
+  * `updateLabelVisibility(svg)`: Tier-based visibility with fade support
+  * `applyTierClasses(sel)`: Stamps tier classes on all labels
 
 **Zoom/Layers**
 
-* Non‑ocean labels render in `#labels-overlay` (screen overlay).
-* Ocean labels render in `#labels-world` (world space).
-* Zoom handler recalculates screen overlay positions and updates visibility thresholds.
+* Non‑ocean labels render in `#labels-world-areas` (world space with tier classes).
+* Ocean labels render in `#labels-world-ocean` (world space).
+* Zoom handler updates label transforms, visibility, and LOD on every change.
+* **LOD HUD**: Live debug overlay shows zoom level, tier bands, and computed opacity.
 
 ---
 
@@ -138,6 +150,8 @@ npm test
 
 * Self tests (`src/selftest.js`) validate graph neighbor reciprocity, height ranges, and layer setup; a small badge is rendered if checks pass.
 * A **Perf HUD** logs timings for generate/zoom/paint; toggle `window.DEBUG` in `src/main.js`.
+* **LOD Debug HUD**: Live overlay shows zoom level, tier bands, and opacity values (see `src/modules/labelsDebug.js`).
+* **Console LOD logging**: Shows filtered label counts at each zoom level.
 * Dev sandboxes live in `/dev` (e.g., `test-label-zoom.html`, `test-anneal-labels.html`, `test-sat-ocean-placement.html`, `test-viewport-culling.html`, `verify-culling.html`).
 
 ---

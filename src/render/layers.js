@@ -72,6 +72,24 @@ export function ensureLabelSubgroups(svg) {
     labels.append('g').attr('id', 'labels-features');
   }
   
+  // Work with the existing structure created by ensureLabelLayers
+  // ensureLabelLayers creates: #labels-root > #labels-world
+  let labelsRoot = svg.select('#labels-root');
+  if (labelsRoot.empty()) {
+    // If labels-root doesn't exist, create it under svg
+    labelsRoot = svg.append('g').attr('id', 'labels-root');
+  }
+  
+  let world = labelsRoot.select('#labels-world');
+  if (world.empty()) world = labelsRoot.append('g').attr('id', 'labels-world');
+  
+  // Create dedicated containers for ocean and area labels under #labels-world
+  let worldOcean = world.select('#labels-world-ocean');
+  if (worldOcean.empty()) worldOcean = world.append('g').attr('id', 'labels-world-ocean');
+  
+  let worldAreas = world.select('#labels-world-areas');
+  if (worldAreas.empty()) worldAreas = world.append('g').attr('id', 'labels-world-areas');
+  
   // TODO: Future label subgroups for different label types
   // - labels-towns: For settlement/city labels when town generation is implemented
   // - labels-geo: For geographic feature labels (mountains, rivers, etc.) when terrain features are added

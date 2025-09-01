@@ -41,8 +41,9 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction, getVisibleWorldBounds, padBounds, zoom } from "./modules/interaction.js";
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
-import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, updateLabelVisibilityByTier, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, logProbe, LABEL_DEBUG, clampToKeepRect, getZoomK, textWidthPx, labelFontFamily, placeOceanLabelInScreenSpace, renderOceanInWorld, renderNonOceanLabels, renderWorldLabels, renderOverlayLabels, ensureLabelLayers, applyFontCaps } from "./modules/labels.js";
+import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, updateLabelVisibilityWithOptions, updateLabelVisibilityByTier, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, logProbe, LABEL_DEBUG, clampToKeepRect, getZoomK, textWidthPx, labelFontFamily, placeOceanLabelInScreenSpace, renderOceanInWorld, renderNonOceanLabels, renderWorldLabels, renderOverlayLabels, ensureLabelLayers, applyFontCaps, applyLabelTransforms, updateLabelVisibilityLOD } from "./modules/labels.js";
 import { loadLabelTokens } from "./modules/labelTokens.js";
+import { showLODHUD } from "./modules/labelsDebug.js";
 
 // === Minimal Perf HUD ==========================================
 const Perf = (() => {
@@ -598,6 +599,9 @@ async function generate(count) {
     // Render world layer (oceans + lakes + islands) and overlay layer (HUD/debug only)
     renderWorldLabels(svgSel, featureLabels);
     renderOverlayLabels(svgSel, featureLabels);
+    
+    // Apply per-label transforms with zoom
+    applyLabelTransforms(svgSel);
 
     // stash for zoom visibility updates (will be updated after autofit + ocean placement)
     window.__labelsPlaced = { features: placedFeatures };
@@ -809,10 +813,14 @@ async function generate(count) {
             placeOceanLabelAtSpot(oceanLabel, spot, svgSel);
             // Render ocean label in world space using the spot
             renderOceanInWorld(svgSel, oceanLabel.text);
+            // Apply per-label transforms with zoom
+            applyLabelTransforms(svgSel);
           } else {
             console.log(`[labels] Ocean "${oceanLabel.text}" using centroid: (${oceanLabel.x.toFixed(1)}, ${oceanLabel.y.toFixed(1)}) - no suitable spot found`);
             // Still render the ocean label even if no spot found
             renderOceanInWorld(svgSel, oceanLabel.text);
+            // Apply per-label transforms with zoom
+            applyLabelTransforms(svgSel);
           }
         }
       } else {
@@ -852,18 +860,21 @@ async function generate(count) {
             const svg = d3.select('svg');
             const k = d3.zoomTransform(svg.node()).k;
             const visible = filterByZoom(featureLabels, k);
-            updateLabelVisibility({ placed: featureLabels, visible });
+            updateLabelVisibilityWithOptions({ placed: featureLabels, visible });
           }
 
           // Draw debug rectangle
           if (LABEL_DEBUG) drawDebugOceanRect(pxRect);
           
-          // Set up world layer for all labels
-          const gAll = svgSel.select('#labels-world');    // islands + lakes + ocean (world layer)
+          // Set up areas layer for non-ocean labels
+          const gAll = svgSel.select('#labels-world-areas');    // islands + lakes (areas layer)
           
           // Place ocean label in world space using the SAT rectangle
           if (ocean && pxRect) {
             renderOceanInWorld(svgSel, ocean.text);
+            
+            // Apply per-label transforms with zoom
+            applyLabelTransforms(svgSel);
             
             // Apply font caps after ocean label is placed (now we can read its size)
             applyFontCaps();
@@ -887,8 +898,12 @@ async function generate(count) {
             const selected = filterByZoom(placedFeatures, t.k);
             
             // Render world layer (oceans + lakes + islands) and overlay layer (HUD/debug only)
-            renderWorldLabels(svgSel, featureLabels);
+            console.debug('[LOD] non-ocean selected:', selected.length, 'of', placedFeatures.length);
+            renderWorldLabels(svgSel, selected);
             renderOverlayLabels(svgSel, selected);
+            
+            // Apply per-label transforms with zoom
+            applyLabelTransforms(svgSel);
             
             // Debug logging after SA placement render
             if (LABEL_DEBUG) {
@@ -906,13 +921,20 @@ async function generate(count) {
           }
 
           // NEW: unconditionally render/update lakes + islands on the world layer.
-          renderWorldLabels(svgSel, featureLabels);
+          // Apply LOD filtering for the re-render case
+          const t = d3.zoomTransform(svgSel.node());
+          const selected = filterByZoom(featureLabels, t.k);
+          console.debug('[LOD] re-render selected:', selected.length, 'of', featureLabels.length);
+          renderWorldLabels(svgSel, selected);
+          
+          // Apply per-label transforms with zoom
+          applyLabelTransforms(svgSel);
           
         } else {
           console.warn('[ocean] ❌ No suitable SAT rectangle found; ocean labels will use default placement.');
           
-          // Set up world layer for all labels
-          const gAll = svgSel.select('#labels-world');    // islands + lakes + ocean (world layer)
+          // Set up areas layer for non-ocean labels
+          const gAll = svgSel.select('#labels-world-areas');    // islands + lakes (areas layer)
           
           // Run normal label system without ocean constraints
           console.log('[ocean] 🔄 Running normal label system without ocean constraints...');
@@ -928,8 +950,12 @@ async function generate(count) {
           const selected = filterByZoom(placedFeatures, t.k);
           
           // Render world layer (oceans + lakes + islands) and overlay layer (HUD/debug only)
-          renderWorldLabels(svgSel, featureLabels);
+          console.debug('[LOD] non-ocean selected:', selected.length, 'of', placedFeatures.length);
+          renderWorldLabels(svgSel, selected);
           renderOverlayLabels(svgSel, selected);
+          
+          // Apply per-label transforms with zoom
+          applyLabelTransforms(svgSel);
           
           // Debug logging after SA placement render
           if (LABEL_DEBUG) {
@@ -968,7 +994,11 @@ async function generate(count) {
   console.groupEnd();
 
   // Update label visibility after generation completes
-  updateLabelVisibilityByTier(d3.select('svg'));
+  applyLabelTransforms(svgSel);
+  updateLabelVisibility(svgSel);
+  
+  // Show initial LOD debug information
+  showLODHUD(svgSel);
 
   // redraw all polygons on SeaInput change 
   document.getElementById("seaInput").addEventListener("change", function() {

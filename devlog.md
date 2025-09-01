@@ -19,6 +19,7 @@ This document consolidates the development history, implementation details, and 
 13. [Performance Optimizations](#performance-optimizations)
 14. [Bug Fixes and Improvements](#bug-fixes-and-improvements)
 15. [Technical Decisions](#technical-decisions)
+16. [LOD System Implementation](#lod-system-implementation)
 
 ---
 
@@ -1693,3 +1694,212 @@ Key achievements include:
 - **Clean architecture** with clear separation of concerns
 
 The project demonstrates the value of iterative development, comprehensive testing, and thoughtful architectural decisions in creating complex interactive applications.
+
+---
+
+## LOD System Implementation
+
+### Overview
+
+A comprehensive Level of Detail (LOD) system has been implemented to provide dynamic label visibility based on zoom level and feature importance. This system ensures optimal performance and user experience across all zoom levels.
+
+### Core Components
+
+#### **1. Tier-Based Classification**
+Labels are automatically classified into 4 tiers based on feature importance:
+- **Tier 1**: Oceans and major features (always visible)
+- **Tier 2**: Major secondary features (visible at medium zoom)
+- **Tier 3**: Standard features (visible at close zoom)
+- **Tier 4**: Minor features (visible at very close zoom)
+
+#### **2. Robust Coordinate System**
+```javascript
+function worldPoint(d) {
+  if (d?.placed && Number.isFinite(d.placed.x) && Number.isFinite(d.placed.y)) return d.placed;
+  if (d?.layout && Number.isFinite(d.layout.x) && Number.isFinite(d.layout.y)) return d.layout;
+  if (d?.anchor && Number.isFinite(d.anchor.x) && Number.isFinite(d.anchor.y)) {
+    const dx = (d?.offset?.dx ?? d?.dx ?? 0);
+    const dy = (d?.offset?.dy ?? d?.dy ?? 0);
+    return { x: d.anchor.x + dx, y: d.anchor.y + dy };
+  }
+  if (Number.isFinite(d?.x) && Number.isFinite(d?.y)) return { x: d.x, y: d.y };
+  if (Number.isFinite(d?.cx) && Number.isFinite(d?.cy)) return { x: d.cx, y: d.cy };
+  return { x: 0, y: 0 };
+}
+```
+
+**Priority Hierarchy**:
+1. Solver results (`d.placed`, `d.layout`)
+2. Anchor + offset combinations
+3. Simple coordinate properties
+4. Safe fallback to origin
+
+#### **3. Deterministic Label Transforms**
+```javascript
+export function applyLabelTransforms(svg){
+  const t = d3.zoomTransform(svg.node());
+  const toScreen = (p) => `translate(${t.applyX(p.x)},${t.applyY(p.y)}) scale(${1/t.k})`;
+
+  svg.selectAll('#labels-world-areas g.label')
+     .attr('transform', d => toScreen(worldPoint(d)));
+
+  svg.selectAll('#labels-world-ocean g.label--ocean')
+     .attr('transform', d => toScreen(worldPoint(d)));
+}
+```
+
+**Features**:
+- Updates on every zoom change
+- Consistent transform generation
+- Counter-scaling for constant screen size
+
+#### **4. Tier Class Stamping**
+```javascript
+function applyTierClasses(sel) {
+  sel.classed('tier-1', d => (d?.tier ?? 3) === 1)
+     .classed('tier-2', d => (d?.tier ?? 3) === 2)
+     .classed('tier-3', d => (d?.tier ?? 3) === 3)
+     .classed('tier-4', d => (d?.tier ?? 3) >= 4);
+  
+  if (window.labelFlags?.styleTokensOnly) {
+    sel.classed('label--water', d => d.kind === 'lake')
+       .classed('label--area',  d => d.kind === 'island' && (d.area ?? 0) > 15000);
+  }
+}
+```
+
+**Benefits**:
+- CSS selectors for precise styling
+- Style token integration
+- Consistent tier classification
+
+#### **5. Real-Time Visibility Updates**
+```javascript
+export function updateLabelVisibility(svg){
+  const t = d3.zoomTransform(svg.node());
+  const fade = !!window.labelFlags?.fadeBands;
+
+  svg.selectAll('#labels-world-areas g.label, #labels-world-ocean g.label--ocean')
+    .each(function(d){
+      const tier = tierFrom(this, d);
+      const o = fade ? opacityForZoom(t.k, tier) : (opacityForZoom(t.k, tier, 0) > 0 ? 1 : 0);
+      d3.select(this).classed('is-visible', o > 0).style('opacity', o);
+    });
+}
+```
+
+**Fade Bands Support**:
+- **With `?flags=fadeBands`**: Smooth opacity ramps
+- **Without flag**: Hard visibility gates (0 or 1)
+
+### Integration Points
+
+#### **1. Zoom Handler**
+```javascript
+// In interaction.js zoom handler
+applyLabelTransforms(d3.select(svg));
+updateLabelVisibility(d3.select(svg));
+showLODHUD(d3.select(svg));
+```
+
+#### **2. Initial Render**
+```javascript
+// After generation completes
+applyLabelTransforms(svgSel);
+updateLabelVisibility(svgSel);
+showLODHUD(svgSel);
+```
+
+#### **3. LOD Filtering**
+```javascript
+// Apply LOD filtering before rendering
+const selected = filterByZoom(placedFeatures, t.k);
+console.debug('[LOD] selected:', selected.length, 'of', placedFeatures.length);
+renderWorldLabels(svgSel, selected);
+```
+
+### Debug and Monitoring
+
+#### **1. LOD HUD**
+Live overlay showing:
+- Current zoom level (`k`)
+- Fade width parameter
+- Tier band ranges
+- Computed opacity values
+
+#### **2. Console Logging**
+Real-time LOD filtering information:
+```
+[LOD] selected: 1 of 7
+[LOD] re-render selected: 3 of 7
+```
+
+#### **3. Self-Check Commands**
+```javascript
+// Check tier distribution
+[...document.querySelectorAll('#labels-world-areas g.label')]
+  .reduce((m,n)=>{const c=[...n.classList].find(k=>k.startsWith('tier-')); m[c]=(m[c]||0)+1; return m;}, {})
+
+// Sample opacity safely
+(() => {
+  const el = document.querySelector('#labels-world-areas g.label.tier-3 text');
+  return el ? getComputedStyle(el).opacity : 'no t3 present';
+})()
+```
+
+### Performance Benefits
+
+#### **1. Dynamic Rendering**
+- Only visible labels are rendered
+- Automatic culling at low zoom levels
+- Smooth transitions between zoom states
+
+#### **2. Efficient Updates**
+- Single DOM traversal per zoom
+- Optimized transform generation
+- Minimal reflow/repaint operations
+
+#### **3. Memory Management**
+- Labels automatically hidden when off-screen
+- Tier-based visibility reduces DOM complexity
+- Efficient label lifecycle management
+
+### CSS Integration
+
+#### **1. Tier-Based Styling**
+```css
+/* Smooth transitions for LOD visibility changes */
+#labels-world g.label { 
+  transition: opacity 120ms linear; 
+}
+
+#labels-world g.label:not(.is-visible) { 
+  pointer-events: none; 
+}
+```
+
+#### **2. Style Token Support**
+```css
+/* Water and area label styling */
+.label--water { font-style: italic; }
+.label--area { text-transform: uppercase; letter-spacing: 0.1em; }
+```
+
+### Future Enhancements
+
+#### **1. Adaptive LOD**
+- Dynamic tier thresholds based on performance
+- User preference settings
+- Context-aware visibility rules
+
+#### **2. Advanced Filtering**
+- Spatial clustering for dense areas
+- Priority-based culling
+- Smooth LOD transitions
+
+#### **3. Performance Monitoring**
+- Real-time performance metrics
+- Adaptive quality settings
+- User experience optimization
+
+The LOD system represents a significant advancement in the Urban Train project, providing professional-grade label management with excellent performance characteristics and comprehensive debugging capabilities.

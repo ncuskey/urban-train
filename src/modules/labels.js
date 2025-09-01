@@ -4,6 +4,41 @@
 const labelKey = d => d.label_id || d.id || `${d.kind}:${(d.name||'').toUpperCase()}`;
 export { labelKey };
 
+// Helper functions for label positioning with zoom
+function worldPoint(d) {
+  if (d?.placed && Number.isFinite(d.placed.x) && Number.isFinite(d.placed.y)) return d.placed;
+  if (d?.layout && Number.isFinite(d.layout.x) && Number.isFinite(d.layout.y)) return d.layout;
+  if (d?.anchor && Number.isFinite(d.anchor.x) && Number.isFinite(d.anchor.y)) {
+    const dx = (d?.offset?.dx ?? d?.dx ?? 0);
+    const dy = (d?.offset?.dy ?? d?.dy ?? 0);
+    return { x: d.anchor.x + dx, y: d.anchor.y + dy };
+  }
+  if (Number.isFinite(d?.x) && Number.isFinite(d?.y)) return { x: d.x, y: d.y };
+  if (Number.isFinite(d?.cx) && Number.isFinite(d?.cy)) return { x: d.cx, y: d.cy };
+  return { x: 0, y: 0 };
+}
+
+// Legacy helper functions - kept for backward compatibility
+function labelScreenX(d, t){
+  const x = (d.placed?.x ?? d.anchor?.x ?? d.x ?? d.cx);
+  return t.applyX(x);
+}
+function labelScreenY(d, t){
+  const y = (d.placed?.y ?? d.anchor?.y ?? d.y ?? d.cy);
+  return t.applyY(y);
+}
+
+export function applyLabelTransforms(svg){
+  const t = d3.zoomTransform(svg.node());
+  const toScreen = (p) => `translate(${t.applyX(p.x)},${t.applyY(p.y)}) scale(${1/t.k})`;
+
+  svg.selectAll('#labels-world-areas g.label')
+     .attr('transform', d => toScreen(worldPoint(d)));
+
+  svg.selectAll('#labels-world-ocean g.label--ocean')
+     .attr('transform', d => toScreen(worldPoint(d)));
+}
+
 // Choose a world-space anchor for a label.
 // Tries existing fields first, then falls back to polygon centroid.
 export function labelAnchorWorld(d) {
@@ -52,6 +87,43 @@ export function labelAnchorWorld(d) {
 import {getZoomState} from './interaction.js';
 import { fontPxFor, getLabelTokens, opacityForZoom } from './labelTokens.js';
 
+// Robust tier extraction - datum first, then CSS class fallback
+function tierFrom(selNode, d){
+  if (d?.tier != null) return d.tier;
+  const cls = selNode.classList;
+  const m = [...cls].find(k => /^tier-\d$/.test(k));
+  if (m) return +m.split('-')[1];
+  return 3;
+}
+
+// Robust visibility updater - recompute on every zoom with tier fallback
+export function updateLabelVisibility(svg){
+  const t = d3.zoomTransform(svg.node());
+  const fade = !!window.labelFlags?.fadeBands;
+
+  svg.selectAll('#labels-world-areas g.label, #labels-world-ocean g.label--ocean')
+    .each(function(d){
+      const tier = tierFrom(this, d);
+      const o = fade ? opacityForZoom(t.k, tier) : (opacityForZoom(t.k, tier, 0) > 0 ? 1 : 0);
+      d3.select(this).classed('is-visible', o > 0).style('opacity', o);
+    });
+}
+
+// Legacy LOD visibility updater - kept for backward compatibility
+export function updateLabelVisibilityLOD(svg){
+  const t = d3.zoomTransform(svg.node());
+  const fade = !!window.labelFlags?.fadeBands;
+
+  const all = svg.selectAll('#labels-world-areas g.label, #labels-world-ocean g.label--ocean');
+  all.each(function(d){
+    const tier = d?.tier ?? 3;
+    const o = fade ? opacityForZoom(t.k, tier) : (opacityForZoom(t.k, tier, 0) > 0 ? 1 : 0);
+    d3.select(this).classed('is-visible', o > 0).style('opacity', o);
+  });
+}
+
+
+
 // --- Tiering helper functions ---
 
 // helper (add at top-level in labels.js)
@@ -63,10 +135,10 @@ export function quantilesOf(arr, qs=[0.5, 0.7, 0.85]) {
 }
 
 export function baseFontPxForTier(tier) {
-  return tier === 1 ? 40
-       : tier === 2 ? 24
-       : tier === 3 ? 18
-       :               14; // tier 4
+  return tier === 1 ? 26
+       : tier === 2 ? 18
+       : tier === 3 ? 14
+       :               12;
 }
 
 export function rankTier(label, q) {
@@ -2776,55 +2848,67 @@ const worldData = features.filter(d => d && WORLD_KINDS.has(d.kind));
   }
 
   // Keyed join prevents duplicates even if render runs twice
-  const worldSel = svg.select('#labels-world')
-    .selectAll('text.label--world')
+  const worldSel = svg.select('#labels-world-areas')
+    .selectAll('g.label')
     .data(worldData, labelKey);
 
   worldSel.exit().remove();
 
   const worldEnter = worldSel.enter()
-    .append('text')
-    .attr('class', 'label label--world');
+    .append('g')
+    .attr('class', 'label');
 
   const worldMerged = worldEnter.merge(worldSel);
 
-  // Cosmetic classes only when flag is on
-  if (window.labelFlags?.styleTokensOnly) {
-    worldMerged
-      .classed('label--water', d => d.kind === 'ocean' || d.kind === 'lake')
-      .classed('label--area',  d => d.kind === 'ocean' || (d.kind === 'island' && (d.area ?? 0) > 15000));
-  } else {
-    worldMerged
-      .classed('label--water', false)
-      .classed('label--area', false);
-  }
+  // Apply tier classes to every label
+  applyTierClasses(worldMerged);
 
   // Apply positioning and text content
-  worldMerged
-    .style('font-size', d => `${fontPxFor(d)}px`)  // screen-space sizing
-    .text(d => d.text)
-    // Only assign x/y for features that rely on a point anchor (lakes/islands).
-    .attr('x', d => {
-      if (d.kind === 'lake' || d.kind === 'island') return labelAnchorWorld(d).x;
-      // oceans typically set their own rect/anchor elsewhere; keep as-is
-      return d.getAttribute?.('x') ?? null;
-    })
-    .attr('y', d => {
-      if (d.kind === 'lake' || d.kind === 'island') return labelAnchorWorld(d).y;
-      return d.getAttribute?.('y') ?? null;
-    })
-    // Optional, improves centering for area names:
-    .attr('text-anchor', d => (d.kind === 'lake' || d.kind === 'island') ? 'middle' : null)
-    .attr('dominant-baseline', d => (d.kind === 'lake' || d.kind === 'island') ? 'middle' : null)
-    .classed('is-visible', true)
-    .classed('ocean', d => d.kind === 'ocean')
-    .classed('lake', d => d.kind === 'lake')
-    .classed('island', d => d.kind === 'island')
-    .classed('label', true)
-    .classed('tier-1', d => d.tier === 1)
-    .classed('tier-2', d => d.tier === 2)
-    .classed('tier-3', d => d.tier === 3)
-    .classed('tier-4', d => d.tier === 4 || !d.tier);
+  const sizeFor = d => {
+    const base = baseFontPxForTier(d.tier ?? 3);
+    if (d.kind === 'lake')   return Math.max(Math.min(base, 18), 11);
+    if (d.kind === 'island') {
+      const big = (d.area ?? 0) > 15000;
+      return big ? Math.min(base + 2, 24) : base;
+    }
+    return base;
+  };
+  
+  // Create/update text elements inside the g.label groups
+  worldMerged.each(function(d) {
+    const g = d3.select(this);
+    let text = g.select('text');
+    
+    if (text.empty()) {
+      text = g.append('text');
+    }
+    
+    text
+      .style('font-size', `${sizeFor(d)}px`)  // screen-space sizing
+      .text(d.text)
+      // Only assign x/y for features that rely on a point anchor (lakes/islands).
+      .attr('x', d => {
+        if (d.kind === 'lake' || d.kind === 'island') return labelAnchorWorld(d).x;
+        // oceans typically set their own rect/anchor elsewhere; keep as-is
+        return d.getAttribute?.('x') ?? null;
+      })
+      .attr('y', d => {
+        if (d.kind === 'lake' || d.kind === 'island') return labelAnchorWorld(d).y;
+        return d.getAttribute?.('y') ?? null;
+      })
+      // Optional, improves centering for area names:
+      .attr('text-anchor', d => (d.kind === 'lake' || d.kind === 'island') ? 'middle' : null)
+      .attr('dominant-baseline', d => (d.kind === 'lake' || d.kind === 'island') ? 'middle' : null)
+      .classed('is-visible', true)
+      .classed('ocean', d.kind === 'ocean')
+      .classed('lake', d.kind === 'lake')
+      .classed('island', d.kind === 'island')
+      .classed('label', true)
+      .classed('tier-1', d.tier === 1)
+      .classed('tier-2', d.tier === 2)
+      .classed('tier-3', d.tier === 3)
+      .classed('tier-4', d.tier === 4 || !d.tier);
+  });
 
   // DEBUG assertions
   if (window.DEBUG) {
@@ -2862,24 +2946,54 @@ export function renderOverlayLabels(svg, features) {
   // no .enter() for labels here yet
 }
 
+// Ensure every label has one tier class
+function applyTierClasses(sel) {
+  sel.classed('tier-1', d => (d?.tier ?? 3) === 1)
+     .classed('tier-2', d => (d?.tier ?? 3) === 2)
+     .classed('tier-3', d => (d?.tier ?? 3) === 3)
+     .classed('tier-4', d => (d?.tier ?? 3) >= 4);
+  // Optional style hooks (behind your flags)
+  if (window.labelFlags?.styleTokensOnly) {
+    sel.classed('label--water', d => d.kind === 'lake')
+       .classed('label--area',  d => d.kind === 'island' && (d.area ?? 0) > 15000);
+  } else {
+    sel.classed('label--water', false).classed('label--area', false);
+  }
+}
+
 // Legacy function for backward compatibility
 export function renderNonOceanLabels(gAll, labels) {
   // Filter out ocean labels
   const nonOceanLabels = labels.filter(d => d.kind !== 'ocean');
   
   if (nonOceanLabels.length === 0) {
-    // Clear layer if no non-ocean labels
-    gAll.selectAll('*').remove();
+    // Clear layer if no non-ocean labels, but preserve ocean labels
+    const gAreas = d3.select('svg').select('#labels-world-areas');
+    gAreas.selectAll('*').remove();
     return;
   }
 
-  // Ensure labels-world layer exists
-  if (gAll.empty()) {
-    gAll = d3.select('#labels-world');
-  }
+  // Operate only in #labels-world-areas
+  const gAreas = d3.select('svg').select('#labels-world-areas');
+  
+  // Keyed join for lakes/islands; never touch the ocean group
+  const sel = gAreas.selectAll('g.label')
+    .data(nonOceanLabels, d => d.label_id || d.id || `${d.kind}:${(d.name||'').toUpperCase()}`);
 
-  // Render non-ocean labels using existing renderLabels logic
-  renderLabels({ svg: d3.select('svg'), placed: nonOceanLabels, groupId: 'labels-world' });
+  sel.exit().remove();
+
+  const enter = sel.enter().append('g').attr('class', 'label');
+  const merged = enter.merge(sel);
+  
+  // Apply tier classes to every label
+  applyTierClasses(merged);
+  
+  // IMPORTANT: never select/remove all g.label at '#labels-world' scope anymore.
+  // Keep all subsequent selects scoped to gAreas only.
+  // If you had generic cleanup, change:
+  //   svg.select('#labels-world').selectAll('g.label').remove()
+  // to:
+  //   gAreas.selectAll('g.label').remove()
   
   // Initialize LOD after labels are rendered
   initLabelLOD();
@@ -2897,29 +3011,58 @@ export function renderNonOceanLabels(gAll, labels) {
 
 // Put this near other render helpers
 export function renderOceanInWorld(svg, text) {
-  // Place ocean label in the same zoomed group as other labels
-  const gLabels = svg.select('#labels-world');
-  const gOcean = gLabels.selectAll('.ocean-label')
-    .data([window.state?.ocean || {}])
-    .join(enter => enter.append('g').attr('class', 'ocean-label label ocean'))
-    .style('pointer-events', 'none');
+  // Use dedicated ocean container
+  const gOcean = svg.select('#labels-world-ocean');
+  
+  // Move any existing ocean groups living elsewhere into the right container
+  svg.selectAll('#labels-world .label--ocean, #labels .label--ocean').filter(function(){
+    return this.parentNode && this.parentNode.id !== 'labels-world-ocean';
+  }).each(function(){
+    gOcean.node().appendChild(this); // reparent
+  });
+  
+  // One and only one ocean datum
+  const oceanDatum = window.state?.ocean || {};
+  // Ensure ocean has tier 1
+  if (oceanDatum && typeof oceanDatum === 'object') {
+    oceanDatum.tier = 1;
+  }
+  const oceanSel = gOcean
+    .selectAll('g.label--ocean')
+    .data([oceanDatum], d => d?.id || 'OCEAN');
+
+  oceanSel.exit().remove();
+
+  const ocean = oceanSel.enter()
+    .append('g')
+    .attr('class', 'ocean-label label label--ocean ocean tier-1')
+    .merge(oceanSel);
+  
+  // Apply tier classes to ocean label
+  applyTierClasses(ocean);
   
   // Position the ocean label group in world coordinates
-  gOcean.attr('transform', d => {
+  ocean.attr('transform', d => {
     if (d && d.rectWorld) {
       return `translate(${d.rectWorld.x + d.rectWorld.w / 2}, ${d.rectWorld.y + d.rectWorld.h / 2})`;
     }
     return 'translate(0,0)'; // fallback
   });
   
-  // Create or update the text element
-  const t = gOcean.selectAll('text').data([0]).join('text')
+  // Build/update the text inside
+  let txt = ocean.selectAll('text').data([oceanDatum]);
+  txt = txt.enter().append('text').merge(txt);
+  txt
     .attr('class', 'label label--ocean tier-1' + (window.labelFlags?.styleTokensOnly ? ' label--water label--area' : ''))
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'middle')
     .attr('vector-effect', 'non-scaling-stroke')
     .style('paint-order', 'stroke')
     .text(text);
+  
+  // Normalize ocean text size right after you update its <text> in renderOceanInWorld
+  const OCEAN_PX = 22; // calm but leading
+  ocean.select('text').style('font-size', `${OCEAN_PX}px`);
   
   // Apply text wrapping if we have a rectangle
   if (window.state && window.state.ocean && window.state.ocean.rectWorld) {
@@ -2931,7 +3074,7 @@ export function renderOceanInWorld(svg, text) {
       h: rectWorld.h * z.k
     };
     // Wrap text to 85% of rectangle width
-    window.wrapText(t, rectPx.w * 0.85);
+    window.wrapText(txt, rectPx.w * 0.85);
   }
   
   // VERIFICATION CHECKS - Log parent transform and verify roundtrip coordinates
@@ -2952,20 +3095,27 @@ export function renderOceanInWorld(svg, text) {
       zoomTransform: { k: t.k, x: t.x, y: t.y }
     });
     
-    // Check 3: Verify the ocean label is in the same group as other labels
+    // Check 3: Verify the ocean label is in the dedicated container
     const oceanParent = gOcean.node().parentNode;
-    const otherLabelsParent = svg.select('#labels-world').selectAll('g.label').node()?.parentNode;
-    console.log('[ocean] Parent group check:', {
+    const areasParent = svg.select('#labels-world-areas').node()?.parentNode;
+    console.log('[ocean] Container check:', {
       oceanParent: oceanParent?.id || oceanParent?.className || 'unknown',
-      otherLabelsParent: otherLabelsParent?.id || otherLabelsParent?.className || 'unknown',
-      sameParent: oceanParent === otherLabelsParent
+      areasParent: areasParent?.id || areasParent?.className || 'unknown',
+      sameParent: oceanParent === areasParent
     });
+  }
+  
+  // (Dev) sanity log at the end of ocean render
+  if (window.DEBUG) {
+    const oceanNode = svg.select('#labels-world .label--ocean').node();
+    console.log('[labels] ocean parent id:', oceanNode?.parentNode?.id);
   }
 }
 
 // Render all labels once with keyed join (hidden by default)
 export function renderLabels({ svg, placed, groupId }) {
-  const g = svg.select(`#${groupId}`);
+  // Route non-ocean joins to their own container
+  const g = groupId === 'labels-world' ? svg.select('#labels-world-areas') : svg.select(`#${groupId}`);
   
   if (window.DEBUG) {
     console.log('[labels] DEBUG: renderLabels called with', placed.length, 'labels, groupId:', groupId);
@@ -2979,7 +3129,7 @@ export function renderLabels({ svg, placed, groupId }) {
   
   // Keyed join on stable IDs - filter out null/undefined elements
   const validPlaced = placed.filter(Boolean);
-  const sel = g.selectAll('g.label').data(validPlaced, keyWorld);
+  const sel = g.selectAll('g.label:not(.label--ocean)').data(validPlaced, keyWorld);
   
   // Remove old labels
   sel.exit().remove();
@@ -2997,6 +3147,9 @@ export function renderLabels({ svg, placed, groupId }) {
   // Update all labels (enter + update)
   const merged = enter.merge(sel);
   
+  // Apply tier classes to every label
+  applyTierClasses(merged);
+  
   // Set baseline font sizes (persist on datum)
   merged.each(function(d, i, nodes) {
     // Use normal function to get a real node-bound `this`
@@ -3012,7 +3165,7 @@ export function renderLabels({ svg, placed, groupId }) {
   });
   
   // Tag labels with stable uid and pick a probe once
-  const labels = g.selectAll('g.label');
+  const labels = g.selectAll('g.label:not(.label--ocean)');
   labels.each(function(d, i, nodes){
     // Use normal function to get a real node-bound `this`
     const node = this;
@@ -3282,7 +3435,7 @@ export function updateLabelZoom({ svg, groupId = 'labels-world' }) {
 
 
 // Real LOD: compute the visible set and toggle class
-export function updateLabelVisibility(opts = {}) {
+export function updateLabelVisibilityWithOptions(opts = {}) {
   const placed = Array.isArray(opts.placed) ? opts.placed : [];
 
   // Back-compat: compute 'visible' if not provided
@@ -4464,12 +4617,15 @@ export function getSALabelerStatus() {
 
 // DEBUG: count world vs overlay label nodes
 export function __debugCountLabels() {
-  const world = d3.select('#labels-world').selectAll('g.feature-label');
+  const areas = d3.select('#labels-world-areas').selectAll('g.feature-label');
+  const ocean = d3.select('#labels-world-ocean').selectAll('g.ocean-label');
   const overlay = d3.select('#labels-overlay').selectAll('g.ocean-label');
   const on = s => s.filter(function(){ return this.style.display !== 'none' }).size();
   console.table({
-    world_nodes: world.size(),
-    world_visible: on(world),
+    areas_nodes: areas.size(),
+    areas_visible: on(areas),
+    ocean_nodes: ocean.size(),
+    ocean_visible: on(ocean),
     overlay_nodes: overlay.size(),
     overlay_visible: on(overlay)
   });
@@ -4482,14 +4638,14 @@ export function __debugCountLabels() {
 export function updateLabelVisibilityByTier(svg) {
   if (!window.labelFlags?.fadeBands) {
     // fallback: show all by class
-    svg.selectAll('#labels-world text.label, #labels-world text.label--ocean')
+    svg.selectAll('#labels-world-areas text.label, #labels-world-ocean text.label--ocean')
        .classed('is-visible', true)
        .style('opacity', null);
     return;
   }
   const k = getZoomState().k;
 
-  const sel = svg.selectAll('#labels-world text.label, #labels-world text.label--ocean');
+  const sel = svg.selectAll('#labels-world-areas text.label, #labels-world-ocean text.label--ocean');
   sel.each(function(d) {
     const tier = d?.tier ?? 3;
     const o = opacityForZoom(k, tier);

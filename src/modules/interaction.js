@@ -1,6 +1,7 @@
 // d3 is global; do not import it.
-import { updateLabelZoom, updateLabelVisibility, updateLabelVisibilityByTier, updateOverlayOceanLabel, clearDebugOverlays, clearScreenLabels, updateOceanLabelScreenPosition, _updateCullRaf, tierForZoom, applyTierVisibility, currentTier, setCurrentTier } from './labels.js';
+import { updateLabelZoom, updateLabelVisibility, updateLabelVisibilityWithOptions, updateLabelVisibilityByTier, updateOverlayOceanLabel, clearDebugOverlays, clearScreenLabels, updateOceanLabelScreenPosition, _updateCullRaf, tierForZoom, applyTierVisibility, currentTier, setCurrentTier, applyLabelTransforms, updateLabelVisibilityLOD } from './labels.js';
 import { filterByZoom } from './labels.js';
+import { showLODHUD } from './labelsDebug.js';
 
 // Add a tiny accessor so other modules can safely read current zoom.
 export function getZoomState() {
@@ -91,52 +92,26 @@ export function attachInteraction({
     // NEW: recalc viewport culling every zoom (throttled)
     if (typeof _updateCullRaf === "function") _updateCullRaf();
 
-    // Apply world transforms (both world + labels-world usually follow the same transform)
+    // Apply world transforms (both world + labels containers follow the same transform)
     d3.select('#world')
       .attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
-    d3.select('#labels-world')
+    d3.select('#labels')
       .attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
 
-    // Update label visibility based on zoom level and tier
-    updateLabelVisibilityByTier(svgSel);
-
-    // NEW: counter-scale label groups so their screen size stays constant
-    // Guard against extreme zoom levels to prevent extreme inverse scale values
-    const inv = 1 / Math.max(0.5, Math.min(32, t.k));
-    const gLabels = d3.select('#labels-world');
-    if (!gLabels.empty()) {
-      const labelCount = gLabels.selectAll('g.label').size();
-      if (labelCount > 0) {
-        gLabels.selectAll('g.label')
-          .each(function(d) {
-            if (!d) return;
-            // Get the current transform to extract the original position
-            const currentTransform = d3.select(this).attr('transform') || '';
-            const match = currentTransform.match(/translate\(([^,]+),([^)]+)\)/);
-            
-            if (match) {
-              const origX = parseFloat(match[1]);
-              const origY = parseFloat(match[2]);
-              const a = d.angle || 0;            // preserve rotation if used
-              
-              // Apply counter-scaling while preserving original position
-              const transform = `translate(${origX},${origY}) scale(${inv}) rotate(${a})`;
-              d3.select(this).attr('transform', transform);
-            }
-          });
-        
-        // Debug logging for counter-scaling
-        if (window.DBG?.labels) {
-          console.debug(`[zoom] Applied counter-scaling (1/${t.k.toFixed(2)} = ${inv.toFixed(3)}) to ${labelCount} labels`);
-        }
-      }
-    }
+    // Apply per-label transforms with zoom (positions each label at right screen position, keeps font size constant)
+    applyLabelTransforms(svgSel);
+    
+    // Update label visibility based on zoom level and tier (robust tier extraction)
+    updateLabelVisibility(svgSel);
+    
+    // Show live LOD debug information
+    showLODHUD(svgSel);
 
     // Update visibility + inverse scale for feature labels
     if (window.__labelsPlaced && window.__labelsPlaced.features) {
       const visible = filterByZoom(window.__labelsPlaced.features, t.k);
-      updateLabelVisibility({ placed: window.__labelsPlaced.features, visible });
-      updateLabelZoom({ svg: svgSel, groupId: 'labels-world' });
+      updateLabelVisibilityWithOptions({ placed: window.__labelsPlaced.features, visible });
+      updateLabelZoom({ svg: svgSel, groupId: 'labels-world-areas' });
     }
 
     // Ocean labels now move with the parent group - no manual positioning needed
