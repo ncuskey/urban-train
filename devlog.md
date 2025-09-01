@@ -82,6 +82,39 @@ urban-train/
 
 The label system has evolved significantly to provide advanced collision avoidance, size-based zoom filtering, and comprehensive debugging tools.
 
+### Feature Flags and Token System (Latest)
+
+A new feature flag system has been implemented to enable experimental label styling and configuration without affecting the core functionality.
+
+#### **Feature Flags Implementation**
+- **Global flag object**: `window.labelFlags` with all flags off by default
+- **URL parameter support**: `?flags=styleTokensOnly,waterItalicEverywhere,areaCapsTracking`
+- **Safe fallbacks**: All flags default to false, ensuring no breaking changes
+
+#### **Label Tokens Configuration**
+- **Centralized configuration**: `src/modules/labelTokens.js` with sensible defaults
+- **External loading**: Supports loading from `/label-tokens.json` when `tokensLoader` flag is enabled
+- **Safe defaults**: Falls back to built-in defaults if external file is missing
+
+#### **CSS Hooks for Future Styling**
+- **`.label--water`**: Applies italic styling for water features (oceans, lakes)
+- **`.label--area`**: Applies uppercase text transform and wide letter spacing for area features
+- **`.label--tracked-tight`**: Applies medium letter spacing for tighter tracking
+- **Inactive by default**: CSS classes are applied only when corresponding flags are enabled
+
+#### **World Layer Deduplication and Keyed Joins**
+- **Stable key function**: `labelKey` provides consistent identification for labels
+- **Keyed joins**: Prevents duplicate labels on repeated renders
+- **Layer separation**: World layer (oceans + lakes + islands) vs overlay layer (HUD/debug)
+- **Unconditional rendering**: Ensures lakes/islands are always rendered after ocean placement
+
+#### **World-Space Anchors for Lakes and Islands**
+- **Smart anchor detection**: `labelAnchorWorld` function with multiple fallback strategies
+- **Polygon centroid support**: Uses D3's `polygonCentroid` for polygon data
+- **GeoJSON support**: Handles GeoJSON-like geometry structures
+- **Conditional positioning**: Only applies x/y coordinates to lakes and islands
+- **Ocean preservation**: Keeps existing ocean positioning logic intact
+
 ---
 
 ## Labeling Specification

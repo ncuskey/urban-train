@@ -57,6 +57,10 @@ export function ensureLayers(svg) {
   let debug = world.select('#debug');
   if (debug.empty()) debug = world.append('g').attr('id', 'debug');
 
+  // Ensure HUD layer exists
+  let hud = svgSel.select('#hud');
+  if (hud.empty()) hud = svgSel.append('g').attr('id','hud');
+
   return { viewport, world, map, labels, debug };
 }
 

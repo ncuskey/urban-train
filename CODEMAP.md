@@ -80,19 +80,24 @@ urban-train/
 
 * **World vs screen**: Oceans in world space; other labels in screen overlay.
 * **Counter‑scaling**: fontSizePx is divided by zoom `k` so screen size stays constant.
+* **Viewport culling**: Off-screen labels are hidden for performance with ocean sticky visibility.
 * **Key exports**:
 
   * `computeLabelMetrics` (≈ 486): DOM/canvas text metrics w/ CSS variables.
   * `fitOceanToRectPx` (≈ 437): Rectangle fitting in screen px.
   * `fitFontToRect` (≈ 3314): Max font that fits rect; 2‑line support.
   * `annealLabels` (≈ 716): Collision‑free placement (non‑ocean).
+  * `updateViewportCull` (≈ 181): Viewport culling with RAF throttling.
+  * `ensureOceanStickyVisibility` (≈ 197): Ocean label sticky behavior.
+  * `initLabelCulling` (≈ 212): Initialize culling system.
   * `ensureLabelLayers` / `ensureScreenLabelLayer` (≈ 39/52)
   * `updateOceanLabelScreenPosition` (≈ 3575), `clearScreenLabels` (≈ 3567).
 
 ### `src/modules/interaction.js`
 
 * `getZoomState` (≈ 6) / `getVisibleWorldBounds` (≈ 17) / `padBounds` (≈ 25)
-* `attachInteraction` (≈ 33): D3 zoom; on zoom → update overlay positions and visibility thresholds.
+* `attachInteraction` (≈ 33): D3 zoom; on zoom → update overlay positions, visibility thresholds, and viewport culling.
+* `getCurrentTransform` (≈ 305): Get current zoom transform state.
 
 ### `src/modules/autofit.js`
 
@@ -146,7 +151,7 @@ urban-train/
 
 ## Dev sandboxes (`/dev`)
 
-* `test-label-zoom.html`, `test-anneal-labels.html`, `test-sat-ocean-placement.html`, `test-names.html`, etc., each mount a reduced harness to exercise a specific subsystem.
+* `test-label-zoom.html`, `test-anneal-labels.html`, `test-sat-ocean-placement.html`, `test-names.html`, `test-viewport-culling.html`, `verify-culling.html`, etc., each mount a reduced harness to exercise a specific subsystem.
 
 ---
 

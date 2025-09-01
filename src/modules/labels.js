@@ -1,5 +1,45 @@
 // d3 is global
 
+// Stable label key: prefer a unique id; fallback to kind+name
+const labelKey = d => d.label_id || d.id || `${d.kind}:${(d.name||'').toUpperCase()}`;
+export { labelKey };
+
+// Choose a world-space anchor for a label.
+// Tries existing fields first, then falls back to polygon centroid.
+export function labelAnchorWorld(d) {
+  // 1) Existing anchor objects you might already have:
+  if (d?.anchor && Number.isFinite(d.anchor.x) && Number.isFinite(d.anchor.y)) {
+    return { x: d.anchor.x, y: d.anchor.y };
+  }
+  if (Number.isFinite(d?.x) && Number.isFinite(d?.y)) {
+    return { x: d.x, y: d.y };
+  }
+  if (Number.isFinite(d?.cx) && Number.isFinite(d?.cy)) {
+    return { x: d.cx, y: d.cy };
+  }
+
+  // 2) Polygon centroid fallbacks (common field names):
+  const poly = d?.polygon || d?.ring || d?.points || d?.outline;
+  if (Array.isArray(poly) && poly.length >= 3 && Array.isArray(poly[0])) {
+    // poly is [[x,y], [x,y], ...]
+    const [cx, cy] = d3.polygonCentroid(poly);
+    if (Number.isFinite(cx) && Number.isFinite(cy)) return { x: cx, y: cy };
+  }
+  if (Array.isArray(d?.geometry?.coordinates)) {
+    // support GeoJSON-like { type: "Polygon", coordinates: [ [ [x,y], ... ] ] }
+    const coords = d.geometry.coordinates;
+    const ring = Array.isArray(coords[0]) ? coords[0] : coords;
+    if (Array.isArray(ring) && ring.length >= 3) {
+      const [cx, cy] = d3.polygonCentroid(ring);
+      if (Number.isFinite(cx) && Number.isFinite(cy)) return { x: cx, y: cy };
+    }
+  }
+
+  // 3) Last resort: 0,0 (but log it in DEBUG so we can fix data)
+  if (window.DEBUG) console.warn('[labels] no anchor for', d?.name, d);
+  return { x: 0, y: 0 };
+}
+
 /**
  * Invariants:
  * 1) Ocean SAT rect is stored on datum in WORLD units: d.keepWithinRect.units === 'world'
@@ -2717,7 +2757,111 @@ function labelDrawXY(d) {
   return { x: d.x || 0, y: d.y || 0 };
 }
 
-// Render non-ocean labels only (islands and lakes)
+// Render world layer: oceans + lakes + islands (single source of truth)
+export function renderWorldLabels(svg, features) {
+  // DIAG: count features by kind making it to this function
+  if (window.DEBUG) {
+    const counts = (arr) => arr.reduce((m,d)=> (m[d.kind]=(m[d.kind]||0)+1, m), {});
+    console.debug('[labels] input feature counts:', counts(features));
+  }
+
+  // Build world dataset explicitly
+  const WORLD_KINDS = new Set(['ocean','lake','island']);
+  const worldData = features.filter(d => d && WORLD_KINDS.has(d.kind));
+
+  if (window.DEBUG) {
+    const wc = worldData.reduce((m,d)=> (m[d.kind]=(m[d.kind]||0)+1, m), {});
+    console.debug('[labels] worldData counts:', wc);
+  }
+
+  // Keyed join prevents duplicates even if render runs twice
+  const worldSel = svg.select('#labels-world')
+    .selectAll('text.label--world')
+    .data(worldData, labelKey);
+
+  worldSel.exit().remove();
+
+  const worldEnter = worldSel.enter()
+    .append('text')
+    .attr('class', 'label label--world');
+
+  const worldMerged = worldEnter.merge(worldSel);
+
+  // Cosmetic classes only when flag is on
+  if (window.labelFlags?.styleTokensOnly) {
+    worldMerged
+      .classed('label--water', d => d.kind === 'ocean' || d.kind === 'lake')
+      .classed('label--area',  d => d.kind === 'ocean' || (d.kind === 'island' && (d.area ?? 0) > 15000));
+  } else {
+    worldMerged
+      .classed('label--water', false)
+      .classed('label--area', false);
+  }
+
+  // Apply positioning and text content
+  worldMerged
+    .text(d => d.text)
+    // Only assign x/y for features that rely on a point anchor (lakes/islands).
+    .attr('x', d => {
+      if (d.kind === 'lake' || d.kind === 'island') return labelAnchorWorld(d).x;
+      // oceans typically set their own rect/anchor elsewhere; keep as-is
+      return d.getAttribute?.('x') ?? null;
+    })
+    .attr('y', d => {
+      if (d.kind === 'lake' || d.kind === 'island') return labelAnchorWorld(d).y;
+      return d.getAttribute?.('y') ?? null;
+    })
+    // Optional, improves centering for area names:
+    .attr('text-anchor', d => (d.kind === 'lake' || d.kind === 'island') ? 'middle' : null)
+    .attr('dominant-baseline', d => (d.kind === 'lake' || d.kind === 'island') ? 'middle' : null)
+    .style('font-size', d => (d.font_world_px ?? (d.baseFontPx || 24)) + 'px')
+    .classed('is-visible', true)
+    .classed('ocean', d => d.kind === 'ocean')
+    .classed('lake', d => d.kind === 'lake')
+    .classed('island', d => d.kind === 'island')
+    .classed('label', true)
+    .classed('tier-1', d => d.tier === 1)
+    .classed('tier-2', d => d.tier === 2)
+    .classed('tier-3', d => d.tier === 3)
+    .classed('tier-4', d => d.tier === 4 || !d.tier);
+
+  // DEBUG assertions
+  if (window.DEBUG) {
+    const seen = new Set();
+    worldData.forEach(d => {
+      const k = labelKey(d);
+      if (seen.has(k)) console.warn('[dup world]', k);
+      seen.add(k);
+    });
+    
+    // Sanity check for non-finite coordinates
+    const bad = worldData.filter(d => !isFinite(d.x) || !isFinite(d.y));
+    if (bad.length) console.warn('[labels] non-finite coords in worldData:', bad.map(b=>b.name));
+  }
+
+  // Sanity log after the merge so we can verify anchors are numbers
+  if (window.DEBUG) {
+    const sample = worldMerged.filter(d => d.kind === 'lake' || d.kind === 'island')
+      .nodes().slice(0, 5)
+      .map(n => ({ txt: n.textContent.trim(), x: n.getAttribute('x'), y: n.getAttribute('y') }));
+    console.debug('[labels] lake/island anchors (first 5):', sample);
+  }
+}
+
+// Render overlay layer: no lakes/islands right now (HUD/debug only)
+export function renderOverlayLabels(svg, features) {
+  // Overlay labels are disabled for area features for now to avoid world→screen mismatch
+  const overlayData = []; // or keep your HUD only, but do not bind lakes/islands here.
+
+  const overlaySel = svg.select('#labels-overlay')
+    .selectAll('text.label--overlay')
+    .data(overlayData, labelKey);
+
+  overlaySel.exit().remove();
+  // no .enter() for labels here yet
+}
+
+// Legacy function for backward compatibility
 export function renderNonOceanLabels(gAll, labels) {
   // Filter out ocean labels
   const nonOceanLabels = labels.filter(d => d.kind !== 'ocean');
@@ -2769,7 +2913,7 @@ export function renderOceanInWorld(svg, text) {
   
   // Create or update the text element
   const t = gOcean.selectAll('text').data([0]).join('text')
-    .attr('class', 'label label--ocean tier-1')
+    .attr('class', 'label label--ocean tier-1' + (window.labelFlags?.styleTokensOnly ? ' label--water label--area' : ''))
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'middle')
     .attr('vector-effect', 'non-scaling-stroke')
@@ -3006,7 +3150,13 @@ export function renderLabels({ svg, placed, groupId }) {
         .classed('lake', d.kind === 'lake')
         .classed('island', d.kind === 'island')
         .classed('label', true)
-        .classed(`tier-${d.tier || 4}`, true);
+        .classed(`tier-${d.tier || 4}`, true)
+        // Style token classes when enabled
+        .classed('label--water', window.labelFlags?.styleTokensOnly && (d.kind === 'ocean' || d.kind === 'lake'))
+        .classed('label--area', window.labelFlags?.styleTokensOnly && (
+          d.kind === 'ocean' || 
+          (d.kind === 'island' && (d.area ?? 0) > 15000)
+        ));
       
       // Handle ocean labels with keepWithinRect using fitTextToRect
       if (d.kind === 'ocean' && d.keepWithinRect) {

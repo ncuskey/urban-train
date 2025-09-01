@@ -273,6 +273,11 @@ text.place-label.ocean {
   font-weight: 900;
 }
 
+/* Hooks – inactive until flags are set in JS */
+.label--water { font-style: italic; }
+.label--area  { text-transform: uppercase; letter-spacing: 0.08em; }
+.label--tracked-tight { letter-spacing: 0.05em; }
+
 /* CSS safety: prevent stale display:none inheritance */
 #labels-world .feature-label { display: unset; }
 #labels-overlay .feature-label { display: unset; }
