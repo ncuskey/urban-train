@@ -1,0 +1,77 @@
+# Centralized tokens for type, spacing, LOD budgets, and ramps.
+area_medium: 0.05
+normal: 0
+
+colors:
+  land_label: "#201A14"
+  water_label: "#1A2330"
+  halo: "#000000"
+
+halos:
+  enabled: true
+  width_px: 1.5
+  opacity: 0.6
+
+curvature_limits:
+  area_total_deg: 5
+  river_deg_per_10px: 10
+
+lod:
+  fade_width_zoom: 0.25
+  tiers:
+    t0: { min_zoom: 0.0, max_zoom: 2.0 }
+    t1: { min_zoom: 0.8, max_zoom: 3.2 }
+    t2: { min_zoom: 1.8, max_zoom: 4.4 }
+    t3: { min_zoom: 3.0, max_zoom: 6.0 }
+    t4: { min_zoom: 4.0, max_zoom: 7.0 }
+
+budgets:
+  t0: { areas: 2, oceans: 1 }
+  t1: { areas: 6, water: 4, settlements: 6, linear: 3 }
+  t2: { settlements: 10, linear: 6, water: 4 }
+  t3: { settlements: 14, linear: 8 }
+
+priority_ladder:
+  - OCEAN
+  - CONTINENT
+  - CAPITAL
+  - SEA
+  - RANGE
+  - MAJOR_CITY
+  - LAKE
+  - PRINCIPAL_RIVER
+  - TOWN
+  - STRAIT
+  - ROAD
+  - VILLAGE
+
+spacing_px:
+  # Minimum center-to-center or bbox padding by class
+  OCEAN: 48
+  CONTINENT: 44
+  CAPITAL: 36
+  SEA: 32
+  RANGE: 28
+  MAJOR_CITY: 28
+  LAKE: 24
+  PRINCIPAL_RIVER: 24
+  TOWN: 20
+  STRAIT: 18
+  ROAD: 16
+  VILLAGE: 14
+
+settlement_sizes_px:
+  capital: 18
+  major_city: 16
+  town: 13
+  village: 10
+
+line_repeat_rules:
+  river_min_segment_px: 240  # label each ~N px of visible path
+  road_min_segment_px: 320
+  strait_repeat_px: 400
+
+archipelago:
+  group_min_island_count: 4
+  group_label_zoom_min: 1.2
+  individual_islands_zoom_min: 3.2

@@ -7,16 +7,18 @@ This document consolidates the development history, implementation details, and 
 1. [Project Overview](#project-overview)
 2. [Core Architecture](#core-architecture)
 3. [Label System Evolution](#label-system-evolution)
-4. [Tiering System Implementation](#tiering-system-implementation)
-5. [Ocean Label Implementation](#ocean-label-implementation)
-6. [Counter-Scaling Implementation](#counter-scaling-implementation)
-7. [Viewport Culling System](#viewport-culling-system)
-8. [Autofit System](#autofit-system)
-9. [Font System](#font-system)
-10. [Names System](#names-system)
-11. [Performance Optimizations](#performance-optimizations)
-12. [Bug Fixes and Improvements](#bug-fixes-and-improvements)
-13. [Technical Decisions](#technical-decisions)
+4. [Labeling Specification](#labeling-specification)
+5. [Label Tokens Configuration](#label-tokens-configuration)
+6. [Tiering System Implementation](#tiering-system-implementation)
+7. [Ocean Label Implementation](#ocean-label-implementation)
+8. [Counter-Scaling Implementation](#counter-scaling-implementation)
+9. [Viewport Culling System](#viewport-culling-system)
+10. [Autofit System](#autofit-system)
+11. [Font System](#font-system)
+12. [Names System](#names-system)
+13. [Performance Optimizations](#performance-optimizations)
+14. [Bug Fixes and Improvements](#bug-fixes-and-improvements)
+15. [Technical Decisions](#technical-decisions)
 
 ---
 
@@ -79,6 +81,216 @@ urban-train/
 ### Labels v2.1 Implementation
 
 The label system has evolved significantly to provide advanced collision avoidance, size-based zoom filtering, and comprehensive debugging tools.
+
+---
+
+## Labeling Specification
+
+### Overview
+
+A comprehensive labeling specification has been established to ensure consistent visual hierarchy and user experience across all fantasy map labeling. The specification is documented in `LABELING_SPEC.md` and provides detailed guidelines for typography, feature classes, LOD tiers, collision rules, and interaction behavior.
+
+### Key Specification Areas
+
+**1. Typographic System**
+- **Font families**: Serif upright for land features, serif italic for water features
+- **Case rules**: ALL CAPS + tracking for area features, Title Case for settlements
+- **Legibility floor**: Minimum 9-10px on screen with thin halos
+- **Color scheme**: Water labels slightly cooler, land labels slightly warmer
+
+**2. Feature Classes**
+- **Areas**: Continents, realms, seas, lakes with center placement and gentle curvature
+- **Linear features**: Rivers, roads, ranges with on-path placement and segmentation
+- **Point features**: Settlements with quadrant preference placement
+- **Water features**: Consistent italic styling across all water types
+
+**3. LOD Tiers**
+- **5-tier system**: T0 (World) to T4 (Close) with progressive disclosure
+- **Fade bands**: 0.20-0.30 zoom-width opacity ramps for smooth transitions
+- **Budget management**: Per-tier limits to prevent overcrowding
+
+**4. Collision & Priority**
+- **Priority ladder**: OCEAN ≥ CONTINENT ≥ CAPITAL ≥ SEA ≥ RANGE ≥ MAJOR_CITY ≥ LAKE ≥ PRINCIPAL_RIVER ≥ TOWN ≥ STRAIT ≥ ROAD ≥ VILLAGE
+- **Viewport budgets**: Tier-specific limits for areas, water, settlements, and linear features
+- **Suppression rules**: Lower tiers suppressed before higher ones
+
+**5. Interaction & UX**
+- **Hover focus**: Brighten hovered labels, gently dim neighbors
+- **Tooltips**: For tiny/optional features instead of always-on text
+- **Toggles**: User switches for small feature classes
+- **Screen uprightness**: Labels remain upright during map rotation
+
+### Data Schema
+
+Each label carries comprehensive metadata:
+```javascript
+{
+  feature_id, feature_class, name,
+  geometry (point/line/polygon; centroid or path reference),
+  tier, priority_weight, min_zoom, max_zoom, fade_width_zoom,
+  style_token_ref (e.g., water.italic.medium),
+  anchoring (quadrants / on-path),
+  // Optional: group_id (archipelagos), segment_id (long lines), is_capital
+}
+```
+
+### Module Responsibilities
+
+- **labels.js**: Style assignment, placement logic, curvature enforcement
+- **main.js/LOD manager**: Visibility computation, fade bands, budget enforcement
+- **collision.js**: Class-aware spacing, stable anchors, jitter minimization
+- **interaction.js**: Hover, tooltips, toggles, label uprightness
+
+### QA Checklist
+
+- [ ] No upside-down/vertical-hard-to-read labels; 0 collisions at rest
+- [ ] Oceans & capitals always visible at appropriate tiers
+- [ ] Smallest label ≥ 9-10px; fade transitions feel silky (no pops)
+- [ ] Rivers/roads labeled in segments; archipelagos consolidate at mid zooms
+- [ ] Water is consistently italic; area names are ALL CAPS + tracking
+
+---
+
+## Label Tokens Configuration
+
+### Overview
+
+A centralized configuration system has been implemented using `label-tokens.yaml` to manage all labeling parameters, spacing rules, LOD budgets, and visual tokens. This provides a single source of truth for all labeling behavior and enables easy tuning without code changes.
+
+### Configuration Structure
+
+**1. Visual Tokens**
+```yaml
+area_medium: 0.05
+normal: 0
+
+colors:
+  land_label: "#201A14"
+  water_label: "#1A2330"
+  halo: "#000000"
+
+halos:
+  enabled: true
+  width_px: 1.5
+  opacity: 0.6
+```
+
+**2. Curvature Limits**
+```yaml
+curvature_limits:
+  area_total_deg: 5
+  river_deg_per_10px: 10
+```
+
+**3. LOD System**
+```yaml
+lod:
+  fade_width_zoom: 0.25
+  tiers:
+    t0: { min_zoom: 0.0, max_zoom: 2.0 }
+    t1: { min_zoom: 0.8, max_zoom: 3.2 }
+    t2: { min_zoom: 1.8, max_zoom: 4.4 }
+    t3: { min_zoom: 3.0, max_zoom: 6.0 }
+    t4: { min_zoom: 4.0, max_zoom: 7.0 }
+```
+
+**4. Density Budgets**
+```yaml
+budgets:
+  t0: { areas: 2, oceans: 1 }
+  t1: { areas: 6, water: 4, settlements: 6, linear: 3 }
+  t2: { settlements: 10, linear: 6, water: 4 }
+  t3: { settlements: 14, linear: 8 }
+```
+
+**5. Priority Hierarchy**
+```yaml
+priority_ladder:
+  - OCEAN
+  - CONTINENT
+  - CAPITAL
+  - SEA
+  - RANGE
+  - MAJOR_CITY
+  - LAKE
+  - PRINCIPAL_RIVER
+  - TOWN
+  - STRAIT
+  - ROAD
+  - VILLAGE
+```
+
+**6. Spacing Rules**
+```yaml
+spacing_px:
+  OCEAN: 48
+  CONTINENT: 44
+  CAPITAL: 36
+  SEA: 32
+  RANGE: 28
+  MAJOR_CITY: 28
+  LAKE: 24
+  PRINCIPAL_RIVER: 24
+  TOWN: 20
+  STRAIT: 18
+  ROAD: 16
+  VILLAGE: 14
+```
+
+**7. Settlement Sizing**
+```yaml
+settlement_sizes_px:
+  capital: 18
+  major_city: 16
+  town: 13
+  village: 10
+```
+
+**8. Line Feature Rules**
+```yaml
+line_repeat_rules:
+  river_min_segment_px: 240  # label each ~N px of visible path
+  road_min_segment_px: 320
+  strait_repeat_px: 400
+```
+
+**9. Archipelago Handling**
+```yaml
+archipelago:
+  group_min_island_count: 4
+  group_label_zoom_min: 1.2
+  individual_islands_zoom_min: 3.2
+```
+
+### Benefits
+
+**1. Centralized Configuration**
+- Single source of truth for all labeling parameters
+- Easy tuning without code changes
+- Version-controlled configuration
+
+**2. Maintainable Code**
+- Clear separation of configuration and logic
+- Consistent parameter naming
+- Well-documented structure
+
+**3. Flexible Tuning**
+- Adjust spacing, budgets, and thresholds independently
+- Test different configurations easily
+- A/B testing capabilities
+
+**4. Team Collaboration**
+- Clear documentation of all parameters
+- Easy to understand and modify
+- Consistent across development environments
+
+### Integration Points
+
+The configuration system integrates with existing labeling modules:
+- **labels.js**: Reads spacing, curvature, and sizing parameters
+- **LOD system**: Uses tier definitions and budget limits
+- **Collision system**: Applies spacing rules and priority hierarchy
+- **Rendering system**: Uses color and halo configurations
 
 #### Key Features
 
