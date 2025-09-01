@@ -43,6 +43,103 @@ export function rankTier(label, q) {
   return 4;
 }
 
+// LOD state
+let _currentTier = 1;
+
+// Getter and setter for currentTier to allow external updates
+export function getCurrentTier() {
+  return _currentTier;
+}
+
+export function setCurrentTier(tier) {
+  _currentTier = tier;
+}
+
+// For backward compatibility, export a getter that returns the current value
+export const currentTier = {
+  get value() { return _currentTier; },
+  set value(tier) { _currentTier = tier; }
+};
+
+// Map zoom k → max visible tier (tweak to taste)
+export function tierForZoom(k) {
+  if (k < 1.4) return 1;   // far out: only the biggest names
+  if (k < 2.5) return 2;   // mid: add key secondary labels
+  if (k < 5.0) return 3;   // close: most labels
+  return 4;                // very close: everything
+}
+
+// Apply visibility by tier
+export function applyTierVisibility() {
+  d3.selectAll("text.label")
+    .classed("hidden", d => (d?.tier ?? 4) > _currentTier);
+}
+
+  // Call once after (re)building labels
+  export function initLabelLOD() {
+    applyTierVisibility();
+  }
+
+  // ---------- Font cap helpers (ocean must be largest) ----------
+
+  // Read the actual computed pixel font-size of the ocean label
+  function getOceanFontPx(fallback = 22) {
+    const node = d3.select("text.label--ocean").node();
+    if (!node) return fallback;
+    const fs = getComputedStyle(node).fontSize || "";
+    const n = parseFloat(fs);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  // Compute per-tier ceilings strictly below the ocean size
+  function computeTierCaps(oceanPx) {
+    // Tunable multipliers; keep all < 1.0 so ocean is always largest
+    return {
+      1: Math.floor(oceanPx * 0.86), // top non-ocean (e.g., biggest island)
+      2: Math.floor(oceanPx * 0.74),
+      3: Math.floor(oceanPx * 0.64),
+      4: Math.floor(oceanPx * 0.56),
+    };
+  }
+
+  // Clamp a size by its tier (with a reasonable minimum for legibility)
+  const MIN_LABEL_PX = 11;
+  function clampByTierPx(px, tier, caps) {
+    const cap = caps[tier] ?? caps[4];
+    return Math.max(MIN_LABEL_PX, Math.min(px, cap));
+  }
+
+  // Apply caps to all non-ocean labels AFTER they exist in the DOM.
+  // This preserves whatever base size you computed (area/importance/etc.),
+  // but hard-limits it below the ocean size.
+  export function applyFontCaps() {
+    const oceanPx = getOceanFontPx();
+    const caps = computeTierCaps(oceanPx);
+
+    d3.selectAll("text.label:not(.label--ocean)")
+      .each(function(d) {
+        const sel = d3.select(this);
+
+        // try inline style first, then computed style
+        const inline = parseFloat(sel.style("font-size"));
+        const computed = parseFloat(getComputedStyle(this).fontSize);
+        const basePx = Number.isFinite(inline) ? inline :
+                       (Number.isFinite(computed) ? computed : MIN_LABEL_PX);
+
+        const tier = d?.tier ?? 4;
+        const finalPx = clampByTierPx(basePx, tier, caps);
+
+        // write inline so it wins over CSS class rules
+        sel.style("font-size", finalPx + "px");
+      });
+
+    console.log("[labels] font caps applied", {
+      oceanPx,
+      caps,
+      sample: d3.selectAll("text.label").size()
+    });
+  }
+
 const worldRectToScreenRect = ({x,y,w,h}) => {
   const t = d3.zoomTransform(d3.select('svg').node()); 
   return { x:x*t.k + t.x, y:y*t.k + t.y, w:w*t.k, h:h*t.k };
@@ -55,6 +152,68 @@ const keyOcean = d => `ocean:${d.id || 0}`;
 // --- LOD helpers (tier-aware) ---
 function lerp(a,b,t){ return a + (b-a)*t; }
 function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+
+// ---- RAF throttle ----
+function rafThrottle(fn) {
+  let scheduled = false, lastArgs;
+  return function throttled(...args) {
+    lastArgs = args;
+    if (!scheduled) {
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        fn(...lastArgs);
+      });
+    }
+  };
+}
+
+// Keep an exported reference if you modularize; otherwise plain globals are fine
+let _updateCullRaf = null;
+
+// Export for use in interaction.js
+export { _updateCullRaf };
+
+/**
+ * Recompute which labels are inside the viewport and toggle .culled.
+ * Because labels are inverse-scaled in a single labelsLayer, getBoundingClientRect()
+ * returns correct screen-space boxes for text.
+ */
+export function updateViewportCull(svgNode, pad = 24) {
+  const svgRect = svgNode.getBoundingClientRect();
+  const left = svgRect.left - pad, right = svgRect.right + pad;
+  const top  = svgRect.top  - pad, bottom = svgRect.bottom + pad;
+
+  d3.selectAll("text.label").each(function () {
+    const r = this.getBoundingClientRect();
+    const off = (r.right < left) || (r.left > right) || (r.bottom < top) || (r.top > bottom);
+    d3.select(this).classed("culled", off);
+  });
+
+  // Ocean label is sticky: if Tier 1 is allowed, never leave it culled/hidden.
+  ensureOceanStickyVisibility();
+}
+
+/** Force the ocean label back to visible when Tier 1 is active */
+export function ensureOceanStickyVisibility() {
+  const ocean = d3.select("text.label--ocean");
+  if (ocean.empty()) return;
+
+  // Ocean is Tier 1; whenever currentTier >= 1 it must be visible.
+  if (_currentTier >= 1) {
+    ocean.classed("culled", false)
+         .classed("hidden", false)
+         .style("display", null)
+         .attr("visibility", null)
+         .attr("opacity", null);
+  }
+}
+
+// Initialize throttled updater once (call from init time)
+export function initLabelCulling(svgSelection) {
+  const svgNode = svgSelection.node();
+  _updateCullRaf = rafThrottle(() => updateViewportCull(svgNode));
+}
 // Smoothstep from edge0..edge1
 function smooth01(x0, x1, k){ return clamp01((k - x0) / Math.max(1e-6, (x1 - x0))); }
 
@@ -1664,13 +1823,80 @@ export function buildFeatureLabels({
   // Assemble all labels
   const labels = [...oceans, ...lakes, ...islands];
 
-  // Compute per-kind quantiles and assign tiers
-  const islandAreas = labels.filter(l => l.kind==='island').map(l => l.area||0);
-  const lakeAreas   = labels.filter(l => l.kind==='lake').map(l => l.area||0);
-  const q = { islands: quantilesOf(islandAreas), lakes: quantilesOf(lakeAreas) };
+  // ------------------------------
+  // Tier assignment (rank-based)
+  // ------------------------------
+  function assignTiersByRank(featureLabels, opts = {}) {
+    const {
+      // minimum number of Tier-1 labels (besides ocean)
+      t1Min = 2,
+      // use sqrt of total as Tier-1 budget (feels good at many densities)
+      t1UseSqrt = true,
+      // Tier-2 / Tier-3 cumulative fractions
+      t2Frac = 0.35,
+      t3Frac = 0.70,
+    } = opts;
 
+    if (!Array.isArray(featureLabels) || !featureLabels.length) return;
+
+    // Partition ocean vs. other features
+    const oceans = featureLabels.filter(f => f.isOcean || /ocean|sea|expanse|gulf/i.test(f.kind || f.type || f.name || ""));
+    const rest   = featureLabels.filter(f => !oceans.includes(f));
+
+    // Score: area/radius/weight with a type boost so landmasses outrank tiny pools
+    function typeBoost(f) {
+      const k = (f.kind || f.type || "").toLowerCase();
+      if (/island|isle|holm|atoll/.test(k)) return 1.00;
+      if (/lake|mere|mirror|reservoir|pool/.test(k)) return 0.80;
+      return 0.70;
+    }
+    rest.forEach(f => {
+      const base = +f.score || +f.area || +f.radius || +f.weight || 1;
+      f.__tierScore = base * typeBoost(f);
+    });
+
+    // Sort by score (desc)
+    rest.sort((a, b) => (b.__tierScore || 0) - (a.__tierScore || 0));
+
+    // Budgets
+    const n  = rest.length;
+    let t1N  = t1UseSqrt ? Math.max(t1Min, Math.round(Math.sqrt(n))) : t1Min;
+    const t2N = Math.max(t1N, Math.round(n * t2Frac));
+    const t3N = Math.max(t2N, Math.round(n * t3Frac));
+
+    // Assign tiers by bucket
+    rest.forEach((f, i) => {
+      f.tier = (i < t1N) ? 1 : (i < t2N) ? 2 : (i < t3N) ? 3 : 4;
+    });
+
+    // Ensure the largest island is Tier-1 (safety pin)
+    const largestIsland = rest
+      .filter(f => /island|isle|holm|atoll/i.test((f.kind || f.type || "")))
+      .sort((a, b) => (+b.area || 0) - (+a.area || 0))[0];
+    if (largestIsland) largestIsland.tier = 1;
+
+    // Oceans are always Tier-1
+    oceans.forEach(f => { f.tier = 1; });
+
+    // Final visibility sanity fallback
+    featureLabels.forEach(f => { if (f.tier == null) f.tier = 4; });
+
+    // Debug counts (now includes t1)
+    const counts = { t1: 0, t2: 0, t3: 0, t4: 0 };
+    featureLabels.forEach(f => counts[`t${f.tier}`]++);
+    console.log("[tiers] counts (ranked):", counts);
+  }
+
+  // After you build featureLabels[] and BEFORE you append any <text> labels:
+  assignTiersByRank(labels, {
+    t1Min: 2,     // ensure at least two non-ocean Tier-1 labels
+    t1UseSqrt: true,
+    t2Frac: 0.40, // feel free to tweak
+    t3Frac: 0.75
+  });
+
+  // Set font sizes based on assigned tiers
   for (const l of labels) {
-    l.tier = rankTier(l, q);
     if (l.kind === 'ocean') {
       l.baseFontPx = 40; // preferred; fitter may shrink
     } else {
@@ -1680,8 +1906,6 @@ export function buildFeatureLabels({
 
   // DEBUG once per run
   if (!window.__loggedTierStats) {
-    const c = (k) => labels.filter(x => x.kind !== 'ocean' && x.tier === k).length;
-    console.log('[tiers] counts:', { t2: c(2), t3: c(3), t4: c(4) });
     window.__loggedTierStats = true;
   }
 
@@ -2511,6 +2735,19 @@ export function renderNonOceanLabels(gAll, labels) {
 
   // Render non-ocean labels using existing renderLabels logic
   renderLabels({ svg: d3.select('svg'), placed: nonOceanLabels, groupId: 'labels-world' });
+  
+  // Initialize LOD after labels are rendered
+  initLabelLOD();
+  
+  // Initialize viewport culling
+  initLabelCulling(d3.select('svg'));
+  
+  // Apply font caps after labels are rendered (but ocean label may not exist yet)
+  // We'll call this again after ocean label is placed
+  applyFontCaps();
+  
+  // Ensure initial culling state is correct
+  updateViewportCull(d3.select('svg').node());
 }
 
 // Put this near other render helpers
@@ -2532,7 +2769,7 @@ export function renderOceanInWorld(svg, text) {
   
   // Create or update the text element
   const t = gOcean.selectAll('text').data([0]).join('text')
-    .attr('class', 'label--ocean')
+    .attr('class', 'label label--ocean tier-1')
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'middle')
     .attr('vector-effect', 'non-scaling-stroke')
@@ -2606,10 +2843,10 @@ export function renderLabels({ svg, placed, groupId }) {
   const enter = sel.enter().append('g').attr('class', d => `label ${d.kind} tier-${d.tier || 4}`);
   
   // Add stroke and fill text elements
-  enter.append('text').attr('class', 'stroke')
+  enter.append('text').attr('class', d => `label stroke tier-${d.tier || 4}`)
     .attr('vector-effect', 'non-scaling-stroke')
     .style('paint-order', 'stroke');
-  enter.append('text').attr('class', 'fill')
+  enter.append('text').attr('class', d => `label fill tier-${d.tier || 4}`)
     .attr('vector-effect', 'non-scaling-stroke');
   
   // Update all labels (enter + update)
@@ -2682,7 +2919,9 @@ export function renderLabels({ svg, placed, groupId }) {
         .classed('is-visible', true)
         .classed('ocean', d.kind === 'ocean')
         .classed('lake', d.kind === 'lake')
-        .classed('island', d.kind === 'island');
+        .classed('island', d.kind === 'island')
+        .classed('label', true)
+        .classed(`tier-${d.tier || 4}`, true);
       
       // Handle ocean labels with keepWithinRect using fitTextToRect
       if (d.kind === 'ocean' && d.keepWithinRect) {
@@ -2765,7 +3004,9 @@ export function renderLabels({ svg, placed, groupId }) {
         .classed('is-visible', true)
         .classed('ocean', d.kind === 'ocean')
         .classed('lake', d.kind === 'lake')
-        .classed('island', d.kind === 'island');
+        .classed('island', d.kind === 'island')
+        .classed('label', true)
+        .classed(`tier-${d.tier || 4}`, true);
       
       // Handle ocean labels with keepWithinRect using fitTextToRect
       if (d.kind === 'ocean' && d.keepWithinRect) {

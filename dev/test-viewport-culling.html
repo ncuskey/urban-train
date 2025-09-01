@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Viewport Culling Test</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .error { color: red; }
+        .success { color: green; }
+        .info { color: blue; }
+        .warning { color: orange; }
+        
+        /* Test styles */
+        .culled { display: none; }
+        .hidden { display: none; }
+        
+        #test-svg {
+            border: 2px solid #333;
+            background: #f0f0f0;
+        }
+        
+        .test-label {
+            font-size: 16px;
+            fill: #333;
+            text-anchor: middle;
+        }
+        
+        .test-label--ocean {
+            fill: #0066cc;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Viewport Culling Test</h1>
+    
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test SVG</h2>
+        <p>Zoom and pan to test viewport culling. Ocean label should always be visible when Tier 1 is active.</p>
+        <svg id="test-svg" width="600" height="400">
+            <g id="labels-world">
+                <!-- Test labels will be added here -->
+            </g>
+        </svg>
+    </div>
+
+    <script type="module">
+        import { initLabelCulling, updateViewportCull, ensureOceanStickyVisibility, currentTier, tierForZoom, applyTierVisibility } from '../src/modules/labels.js';
+        
+        const results = [];
+        
+        function log(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = type;
+            div.textContent = message;
+            document.getElementById('results').appendChild(div);
+            results.push({ message, type });
+        }
+        
+        // Test 1: Check if functions are exported correctly
+        function testExports() {
+            log('Testing exports...', 'info');
+            
+            if (typeof initLabelCulling === 'function') {
+                log('✓ initLabelCulling is exported', 'success');
+            } else {
+                log('✗ initLabelCulling is not exported', 'error');
+            }
+            
+            if (typeof updateViewportCull === 'function') {
+                log('✓ updateViewportCull is exported', 'success');
+            } else {
+                log('✗ updateViewportCull is not exported', 'error');
+            }
+            
+            if (typeof ensureOceanStickyVisibility === 'function') {
+                log('✓ ensureOceanStickyVisibility is exported', 'success');
+            } else {
+                log('✗ ensureOceanStickyVisibility is not exported', 'error');
+            }
+            
+            if (typeof currentTier !== 'undefined') {
+                log(`✓ currentTier is exported: ${currentTier.value}`, 'success');
+            } else {
+                log('✗ currentTier is not exported', 'error');
+            }
+        }
+        
+        // Test 2: Create test labels and test culling
+        function testCulling() {
+            log('Testing viewport culling...', 'info');
+            
+            const svg = d3.select('#test-svg');
+            const gLabels = svg.select('#labels-world');
+            
+            // Clear existing labels
+            gLabels.selectAll('*').remove();
+            
+            // Create test labels at different positions
+            const testLabels = [
+                { x: 100, y: 100, text: 'Ocean', kind: 'ocean', tier: 1 },
+                { x: 200, y: 100, text: 'Lake 1', kind: 'lake', tier: 3 },
+                { x: 300, y: 100, text: 'Lake 2', kind: 'lake', tier: 4 },
+                { x: 400, y: 100, text: 'Island 1', kind: 'island', tier: 2 },
+                { x: 500, y: 100, text: 'Island 2', kind: 'island', tier: 3 },
+                { x: 100, y: 200, text: 'Lake 3', kind: 'lake', tier: 4 },
+                { x: 200, y: 200, text: 'Island 3', kind: 'island', tier: 4 },
+                { x: 300, y: 200, text: 'Lake 4', kind: 'lake', tier: 3 },
+                { x: 400, y: 200, text: 'Island 4', kind: 'island', tier: 2 },
+                { x: 500, y: 200, text: 'Lake 5', kind: 'lake', tier: 4 }
+            ];
+            
+            // Create label elements
+            gLabels.selectAll('text.test-label')
+                .data(testLabels)
+                .enter()
+                .append('text')
+                .attr('class', d => `test-label label ${d.kind === 'ocean' ? 'label--ocean' : ''}`)
+                .attr('x', d => d.x)
+                .attr('y', d => d.y)
+                .attr('text-anchor', 'middle')
+                .attr('dominant-baseline', 'middle')
+                .text(d => d.text)
+                .each(function(d) {
+                    // Add tier data
+                    d3.select(this).datum(d);
+                });
+            
+            log(`Created ${testLabels.length} test labels`, 'info');
+            
+            // Initialize culling
+            initLabelCulling(svg);
+            
+            // Test initial culling
+            updateViewportCull(svg.node());
+            
+            const visibleLabels = svg.selectAll('text.label:not(.culled)').size();
+            const totalLabels = svg.selectAll('text.label').size();
+            
+            log(`Initial culling: ${visibleLabels}/${totalLabels} labels visible`, 'info');
+            
+            // Test ocean sticky visibility
+            ensureOceanStickyVisibility();
+            
+            const oceanLabel = svg.select('text.label--ocean');
+            if (!oceanLabel.empty()) {
+                const isCulled = oceanLabel.classed('culled');
+                const isHidden = oceanLabel.classed('hidden');
+                
+                if (currentTier.value >= 1 && (isCulled || isHidden)) {
+                    log('✗ Ocean label should be visible but is culled/hidden', 'error');
+                } else {
+                    log('✓ Ocean label visibility is correct', 'success');
+                }
+            } else {
+                log('✗ Ocean label not found', 'error');
+            }
+        }
+        
+        // Test 3: Test tier functions
+        function testTierFunctions() {
+            log('Testing tier functions...', 'info');
+            
+            // Test tierForZoom
+            const testCases = [
+                { k: 1.0, expected: 1 },
+                { k: 1.5, expected: 2 },
+                { k: 3.0, expected: 3 },
+                { k: 6.0, expected: 4 }
+            ];
+            
+            testCases.forEach(({ k, expected }) => {
+                const result = tierForZoom(k);
+                if (result === expected) {
+                    log(`✓ tierForZoom(${k}) = ${result}`, 'success');
+                } else {
+                    log(`✗ tierForZoom(${k}) = ${result}, expected ${expected}`, 'error');
+                }
+            });
+            
+            // Test applyTierVisibility
+            applyTierVisibility();
+            log('✓ applyTierVisibility executed without error', 'success');
+        }
+        
+        // Test 4: Test zoom simulation
+        function testZoomSimulation() {
+            log('Testing zoom simulation...', 'info');
+            
+            const svg = d3.select('#test-svg');
+            
+            // Simulate different zoom levels
+            const zoomLevels = [0.8, 1.2, 2.0, 3.0];
+            
+            zoomLevels.forEach(k => {
+                // Update currentTier (this would normally happen in the zoom handler)
+                const newTier = tierForZoom(k);
+                if (newTier !== currentTier.value) {
+                                    // Note: We can't directly modify currentTier here since it's imported
+                // In the real app, this would be handled by the zoom handler
+                log(`Zoom k=${k} would change tier from ${currentTier.value} to ${newTier}`, 'info');
+                }
+                
+                // Test culling at this zoom level
+                updateViewportCull(svg.node());
+                const visibleLabels = svg.selectAll('text.label:not(.culled)').size();
+                log(`At zoom k=${k}: ${visibleLabels} labels visible`, 'info');
+            });
+        }
+        
+        // Run all tests
+        function runTests() {
+            log('Starting viewport culling tests...', 'info');
+            
+            testExports();
+            testCulling();
+            testTierFunctions();
+            testZoomSimulation();
+            
+            log('Tests completed!', 'info');
+            
+            // Summary
+            const errors = results.filter(r => r.type === 'error').length;
+            const successes = results.filter(r => r.type === 'success').length;
+            
+            log(`Summary: ${successes} passed, ${errors} failed`, errors > 0 ? 'error' : 'success');
+        }
+        
+        // Run tests when page loads
+        window.addEventListener('load', runTests);
+        
+        // Expose functions for manual testing
+        window.testCulling = testCulling;
+        window.updateViewportCull = () => updateViewportCull(d3.select('#test-svg').node());
+        window.ensureOceanStickyVisibility = ensureOceanStickyVisibility;
+    </script>
+    
+    <!-- Load D3 v5 -->
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+</body>
+</html>

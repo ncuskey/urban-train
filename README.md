@@ -13,6 +13,7 @@ A web‑based fantasy map generator that builds Voronoi‑based worlds with real
   * Simulated‑annealing placement with collision avoidance for non‑ocean labels.
   * Ocean labels placed in **world space** and fitted into the largest valid rectangle; supports **two‑line** breaks and **counter‑scales** with zoom to keep readable on screen.
   * Zoom‑level LOD: small features fade in as you zoom.
+  * **Viewport culling**: Off-screen labels are hidden for performance, with ocean label sticky visibility.
 * **Interaction**: Smooth pan/zoom (D3 v5), HUD readouts, and a lightweight performance HUD.
 * **Safety**: Defensive checks against NaN/Infinity, clamped zoom, and self‑tests.
 

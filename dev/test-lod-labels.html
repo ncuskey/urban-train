@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Label LOD Test - Rank-Based Tiers</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .error { color: red; }
+        .success { color: green; }
+        .info { color: blue; }
+        .warning { color: orange; }
+        
+        #test-svg {
+            border: 1px solid #ccc;
+            background: #f0f0f0;
+        }
+        
+        .controls {
+            margin: 20px 0;
+            padding: 10px;
+            background: #f9f9f9;
+        }
+        
+        .zoom-info {
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        
+        .label-info {
+            font-size: 12px;
+            margin: 5px 0;
+        }
+    </style>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <h1>Label LOD Test - Rank-Based Tier Assignment</h1>
+    
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="results"></div>
+    </div>
+    
+    <div class="controls">
+        <h3>Zoom Controls</h3>
+        <button onclick="setZoom(0.5)">Zoom Out (0.5x)</button>
+        <button onclick="setZoom(1.0)">Normal (1.0x)</button>
+        <button onclick="setZoom(1.5)">Zoom In (1.5x)</button>
+        <button onclick="setZoom(2.0)">More Zoom (2.0x)</button>
+        <button onclick="setZoom(3.0)">Close (3.0x)</button>
+        <button onclick="setZoom(5.0)">Very Close (5.0x)</button>
+        <div class="zoom-info" id="zoom-info">Current Zoom: 1.0x | Visible Tiers: 1</div>
+    </div>
+    
+    <div class="test-section">
+        <h2>SVG Test Area</h2>
+        <svg id="test-svg" width="800" height="600">
+            <g id="viewport">
+                <g id="world">
+                    <g id="map"></g>
+                    <g id="labels-world"></g>
+                </g>
+            </g>
+        </svg>
+    </div>
+
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script type="module">
+        // Import the functions we need to test
+        import { renderNonOceanLabels, initLabelLOD } from '../src/modules/labels.js';
+        
+        // Mock data with different sizes to test rank-based assignment
+        const mockLabels = [
+            // Oceans (should always be Tier 1)
+            { id: 'ocean-1', kind: 'ocean', text: 'Great Ocean', x: 400, y: 300, area: 1000 },
+            
+            // Islands with varying sizes (should be ranked by size + type boost)
+            { id: 'island-1', kind: 'island', text: 'Major Island', x: 200, y: 200, area: 800 },
+            { id: 'island-2', kind: 'island', text: 'Large Island', x: 600, y: 200, area: 600 },
+            { id: 'island-3', kind: 'island', text: 'Medium Island', x: 300, y: 400, area: 400 },
+            { id: 'island-4', kind: 'island', text: 'Small Island', x: 500, y: 400, area: 200 },
+            { id: 'island-5', kind: 'island', text: 'Tiny Island', x: 100, y: 500, area: 50 },
+            
+            // Lakes with varying sizes
+            { id: 'lake-1', kind: 'lake', text: 'Large Lake', x: 700, y: 300, area: 500 },
+            { id: 'lake-2', kind: 'lake', text: 'Medium Lake', x: 150, y: 300, area: 300 },
+            { id: 'lake-3', kind: 'lake', text: 'Small Lake', x: 650, y: 500, area: 100 },
+        ];
+        
+        // Test function
+        function testLOD() {
+            const svg = d3.select('#test-svg');
+            const results = d3.select('#results');
+            
+            // Render labels
+            const gAll = svg.select('#labels-world');
+            renderNonOceanLabels(gAll, mockLabels);
+            
+            // Check if labels were created with proper classes
+            const labels = svg.selectAll('text.label');
+            if (labels.size() > 0) {
+                results.html('<div class="success">✅ Labels created with proper classes</div>');
+                
+                // Check tier distribution
+                const tier1 = svg.selectAll('text.tier-1').size();
+                const tier2 = svg.selectAll('text.tier-2').size();
+                const tier3 = svg.selectAll('text.tier-3').size();
+                const tier4 = svg.selectAll('text.tier-4').size();
+                
+                results.html(results.html() + 
+                    `<div class="info">📊 Tier distribution: T1=${tier1}, T2=${tier2}, T3=${tier3}, T4=${tier4}</div>`);
+                
+                // Check initial visibility (should only show tier 1)
+                const visible = svg.selectAll('text.label:not(.hidden)').size();
+                const hidden = svg.selectAll('text.label.hidden').size();
+                
+                results.html(results.html() + 
+                    `<div class="info">👁️ Initial visibility: ${visible} visible, ${hidden} hidden</div>`);
+                
+                // Show which labels are in which tiers
+                results.html(results.html() + '<div class="info"><strong>Label Tier Assignment:</strong></div>');
+                labels.each(function(d, i) {
+                    const tier = d3.select(this).classed('tier-1') ? 1 : 
+                                d3.select(this).classed('tier-2') ? 2 : 
+                                d3.select(this).classed('tier-3') ? 3 : 4;
+                    const text = d3.select(this).text();
+                    const kind = d.kind || 'unknown';
+                    const area = d.area || 0;
+                    results.html(results.html() + 
+                        `<div class="label-info">T${tier}: ${text} (${kind}, area: ${area})</div>`);
+                });
+                
+            } else {
+                results.html('<div class="error">❌ No labels found</div>');
+            }
+        }
+        
+        // Zoom control function
+        window.setZoom = function(k) {
+            const svg = d3.select('#test-svg');
+            
+            // Simulate zoom transform
+            const transform = d3.zoomIdentity.scale(k);
+            
+            // Apply transform to world
+            svg.select('#world').attr('transform', `translate(${transform.x},${transform.y}) scale(${transform.k})`);
+            
+            // Update zoom info
+            const zoomInfo = d3.select('#zoom-info');
+            let visibleTiers = 1;
+            if (k >= 5.0) visibleTiers = 4;
+            else if (k >= 3.0) visibleTiers = 3;
+            else if (k >= 1.5) visibleTiers = 2;
+            else visibleTiers = 1;
+            
+            zoomInfo.text(`Current Zoom: ${k.toFixed(1)}x | Visible Tiers: ${visibleTiers}`);
+            
+            // Manually trigger LOD update (simulating the zoom handler)
+            const next = tierForZoom(k);
+            if (next !== window.currentTier) {
+                window.currentTier = next;
+                applyTierVisibility();
+                
+                // Update results
+                const results = d3.select('#results');
+                const visible = svg.selectAll('text.label:not(.hidden)').size();
+                const hidden = svg.selectAll('text.label.hidden').size();
+                
+                results.html(results.html() + 
+                    `<div class="info">🔄 Zoom ${k.toFixed(1)}x: ${visible} visible, ${hidden} hidden (Tier ${next})</div>`);
+            }
+        };
+        
+        // LOD functions (copied from labels.js)
+        let currentTier = 1;
+        
+        function tierForZoom(k) {
+            if (k < 1.4) return 1;   // far out: only the biggest names
+            if (k < 2.5) return 2;   // mid: add key secondary labels
+            if (k < 5.0) return 3;   // close: most labels
+            return 4;                // very close: everything
+        }
+        
+        function applyTierVisibility() {
+            d3.selectAll("text.label")
+                .classed("hidden", d => (d?.tier ?? 4) > currentTier);
+        }
+        
+        // Make functions globally available
+        window.currentTier = currentTier;
+        window.tierForZoom = tierForZoom;
+        window.applyTierVisibility = applyTierVisibility;
+        
+        // Run the test when the page loads
+        window.addEventListener('load', testLOD);
+    </script>
+</body>
+</html>

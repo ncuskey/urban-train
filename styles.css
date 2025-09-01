@@ -311,3 +311,6 @@ text.place-label.ocean {
   pointer-events: none !important;
 }
 .hidden { display: none; }
+
+/* off-screen virtualization */
+.culled { display: none; }

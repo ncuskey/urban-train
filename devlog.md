@@ -10,12 +10,13 @@ This document consolidates the development history, implementation details, and 
 4. [Tiering System Implementation](#tiering-system-implementation)
 5. [Ocean Label Implementation](#ocean-label-implementation)
 6. [Counter-Scaling Implementation](#counter-scaling-implementation)
-7. [Autofit System](#autofit-system)
-8. [Font System](#font-system)
-9. [Names System](#names-system)
-10. [Performance Optimizations](#performance-optimizations)
-11. [Bug Fixes and Improvements](#bug-fixes-and-improvements)
-12. [Technical Decisions](#technical-decisions)
+7. [Viewport Culling System](#viewport-culling-system)
+8. [Autofit System](#autofit-system)
+9. [Font System](#font-system)
+10. [Names System](#names-system)
+11. [Performance Optimizations](#performance-optimizations)
+12. [Bug Fixes and Improvements](#bug-fixes-and-improvements)
+13. [Technical Decisions](#technical-decisions)
 
 ---
 
@@ -576,6 +577,156 @@ export function updateLabelZoom({ svg, groupId = 'labels-world' }) {
   
   // Labels are now counter-scaled by the zoom handler to maintain constant screen size
   // No font-size changes needed - the counter-scaling handles this automatically
+
+---
+
+## Viewport Culling System
+
+### Overview
+
+The viewport culling system optimizes performance by hiding labels that are outside the visible viewport. This prevents unnecessary rendering of off-screen labels while ensuring the ocean label remains visible when appropriate.
+
+### Key Features
+
+#### 1. **Viewport-Based Culling**
+- **Automatic detection**: Labels outside the viewport (with padding) are marked with `.culled` class
+- **Performance optimized**: Uses `requestAnimationFrame` throttling to prevent excessive DOM queries
+- **Padding support**: 24px padding around viewport edges for smooth transitions
+
+#### 2. **Ocean Label Sticky Behavior**
+- **Always visible**: Ocean label is forced to be visible when Tier 1 is active (zoom level allows ocean visibility)
+- **Sticky priority**: Ocean label overrides culling state when it should be visible
+- **Tier-aware**: Respects the existing LOD tier system
+
+#### 3. **Seamless Integration**
+- **Works with existing LOD**: Integrates with tier-based visibility system
+- **Zoom-responsive**: Recalculates culling on every zoom operation
+- **No performance impact**: Throttled updates prevent excessive computation
+
+### Implementation Details
+
+#### **CSS Rules (styles.css)**
+```css
+/* off-screen virtualization */
+.culled { display: none; }
+```
+
+#### **Core Functions (labels.js)**
+
+**RAF Throttling**
+```javascript
+function rafThrottle(fn) {
+  let scheduled = false, lastArgs;
+  return function throttled(...args) {
+    lastArgs = args;
+    if (!scheduled) {
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        fn(...lastArgs);
+      });
+    }
+  };
+}
+```
+
+**Viewport Culling**
+```javascript
+export function updateViewportCull(svgNode, pad = 24) {
+  const svgRect = svgNode.getBoundingClientRect();
+  const left = svgRect.left - pad, right = svgRect.right + pad;
+  const top  = svgRect.top  - pad, bottom = svgRect.bottom + pad;
+
+  d3.selectAll("text.label").each(function () {
+    const r = this.getBoundingClientRect();
+    const off = (r.right < left) || (r.left > right) || (r.bottom < top) || (r.top > bottom);
+    d3.select(this).classed("culled", off);
+  });
+
+  // Ocean label is sticky: if Tier 1 is allowed, never leave it culled/hidden.
+  ensureOceanStickyVisibility();
+}
+```
+
+**Ocean Sticky Visibility**
+```javascript
+export function ensureOceanStickyVisibility() {
+  const ocean = d3.select("text.label--ocean");
+  if (ocean.empty()) return;
+
+  // Ocean is Tier 1; whenever currentTier >= 1 it must be visible.
+  if (_currentTier >= 1) {
+    ocean.classed("culled", false)
+         .classed("hidden", false)
+         .style("display", null)
+         .attr("visibility", null)
+         .attr("opacity", null);
+  }
+}
+```
+
+#### **State Management**
+
+**Shared Tier State**
+```javascript
+// labels.js
+let _currentTier = 1;
+
+export function getCurrentTier() { return _currentTier; }
+export function setCurrentTier(tier) { _currentTier = tier; }
+export const currentTier = {
+  get value() { return _currentTier; },
+  set value(tier) { _currentTier = tier; }
+};
+```
+
+**Interaction Integration (interaction.js)**
+```javascript
+import { setCurrentTier, currentTier } from './labels.js';
+
+// In zoom handler
+const next = tierForZoom(t.k);
+if (next !== currentTier.value) {
+  setCurrentTier(next);
+  applyTierVisibility();
+}
+
+// NEW: recalc viewport culling every zoom (throttled)
+if (typeof _updateCullRaf === "function") _updateCullRaf();
+```
+
+#### **Initialization**
+```javascript
+// Initialize culling after labels are built
+initLabelCulling(d3.select('svg'));
+updateViewportCull(d3.select('svg').node());
+```
+
+### Performance Benefits
+
+1. **Reduced DOM queries**: Only visible labels are rendered
+2. **Smooth zooming**: Throttled updates prevent performance degradation
+3. **Memory efficient**: Off-screen labels don't consume rendering resources
+4. **Scalable**: Works with any number of labels without performance impact
+
+### Testing
+
+**Test Files**
+- `dev/test-viewport-culling.html` - Comprehensive test suite
+- `dev/verify-culling.html` - Interactive verification page
+
+**Test Scenarios**
+1. Zoom in until labels scroll off screen
+2. Zoom back out and verify ocean label returns (sticky behavior)
+3. Pan around and verify culling updates correctly
+4. Test with different zoom levels and tier changes
+
+### Integration with Existing Systems
+
+- **LOD System**: Works with existing tier-based visibility
+- **Counter-Scaling**: Compatible with constant-size label rendering
+- **Ocean Labels**: Sticky behavior respects ocean label priority
+- **Performance Monitoring**: Uses existing timer infrastructure
   
   // ... debug logging ...
 }

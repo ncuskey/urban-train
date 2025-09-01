@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Font Caps Test</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .error { color: red; }
+        .success { color: green; }
+        .info { color: blue; }
+        .warning { color: orange; }
+        
+        #test-svg {
+            border: 1px solid #ccc;
+            background: #f0f0f0;
+        }
+        
+        .font-info {
+            font-size: 12px;
+            margin: 5px 0;
+        }
+    </style>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <h1>Font Caps Test - Ocean Label Hierarchy</h1>
+    
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>SVG Test Area</h2>
+        <svg id="test-svg" width="800" height="600">
+            <g id="viewport">
+                <g id="world">
+                    <g id="map"></g>
+                    <g id="labels-world"></g>
+                </g>
+            </g>
+        </svg>
+    </div>
+
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script type="module">
+        // Import the functions we need to test
+        import { renderNonOceanLabels, renderOceanInWorld, applyFontCaps } from '../src/modules/labels.js';
+        
+        // Mock data with varying font sizes to test capping
+        const mockLabels = [
+            // Ocean (should be largest at 22px)
+            { id: 'ocean-1', kind: 'ocean', text: 'Great Ocean', x: 400, y: 300, area: 1000, tier: 1 },
+            
+            // Labels with intentionally large font sizes to test capping
+            { id: 'island-1', kind: 'island', text: 'Major Island', x: 200, y: 200, area: 800, tier: 1, baseFontPx: 30 },
+            { id: 'island-2', kind: 'island', text: 'Large Island', x: 600, y: 200, area: 600, tier: 2, baseFontPx: 28 },
+            { id: 'island-3', kind: 'island', text: 'Medium Island', x: 300, y: 400, area: 400, tier: 3, baseFontPx: 26 },
+            { id: 'island-4', kind: 'island', text: 'Small Island', x: 500, y: 400, area: 200, tier: 4, baseFontPx: 24 },
+            
+            // Lakes with varying sizes
+            { id: 'lake-1', kind: 'lake', text: 'Large Lake', x: 700, y: 300, area: 500, tier: 2, baseFontPx: 25 },
+            { id: 'lake-2', kind: 'lake', text: 'Medium Lake', x: 150, y: 300, area: 300, tier: 3, baseFontPx: 20 },
+            { id: 'lake-3', kind: 'lake', text: 'Small Lake', x: 650, y: 500, area: 100, tier: 4, baseFontPx: 18 },
+        ];
+        
+        // Test function
+        function testFontCaps() {
+            const svg = d3.select('#test-svg');
+            const results = d3.select('#results');
+            
+            // First render ocean label
+            window.state = {
+                ocean: {
+                    text: 'Great Ocean',
+                    rectWorld: { x: 350, y: 250, w: 100, h: 50 }
+                }
+            };
+            renderOceanInWorld(svg, 'Great Ocean');
+            
+            // Then render other labels
+            const gAll = svg.select('#labels-world');
+            renderNonOceanLabels(gAll, mockLabels);
+            
+            // Apply font caps
+            applyFontCaps();
+            
+            // Check results
+            const labels = svg.selectAll('text.label');
+            if (labels.size() > 0) {
+                results.html('<div class="success">✅ Labels created and font caps applied</div>');
+                
+                // Check ocean label size
+                const oceanLabel = svg.select('text.label--ocean');
+                if (!oceanLabel.empty()) {
+                    const oceanSize = parseFloat(getComputedStyle(oceanLabel.node()).fontSize);
+                    results.html(results.html() + 
+                        `<div class="info">🌊 Ocean label size: ${oceanSize}px</div>`);
+                }
+                
+                // Check non-ocean label sizes
+                results.html(results.html() + '<div class="info"><strong>Non-Ocean Label Sizes:</strong></div>');
+                svg.selectAll('text.label:not(.label--ocean)').each(function(d, i) {
+                    const sel = d3.select(this);
+                    const computedSize = parseFloat(getComputedStyle(this).fontSize);
+                    const text = sel.text();
+                    const tier = d.tier || 4;
+                    const originalSize = d.baseFontPx || 16;
+                    
+                    const status = computedSize <= 22 ? '✅' : '❌';
+                    results.html(results.html() + 
+                        `<div class="font-info">${status} T${tier}: "${text}" - ${originalSize}px → ${computedSize}px</div>`);
+                });
+                
+                // Verify hierarchy
+                let maxNonOceanSize = 0;
+                svg.selectAll('text.label:not(.label--ocean)').each(function() {
+                    const size = parseFloat(getComputedStyle(this).fontSize);
+                    maxNonOceanSize = Math.max(maxNonOceanSize, size);
+                });
+                
+                const oceanSize = parseFloat(getComputedStyle(svg.select('text.label--ocean').node()).fontSize);
+                
+                if (maxNonOceanSize < oceanSize) {
+                    results.html(results.html() + 
+                        `<div class="success">✅ Hierarchy maintained: max non-ocean (${maxNonOceanSize}px) < ocean (${oceanSize}px)</div>`);
+                } else {
+                    results.html(results.html() + 
+                        `<div class="error">❌ Hierarchy broken: max non-ocean (${maxNonOceanSize}px) >= ocean (${oceanSize}px)</div>`);
+                }
+                
+            } else {
+                results.html('<div class="error">❌ No labels found</div>');
+            }
+        }
+        
+        // Run the test when the page loads
+        window.addEventListener('load', testFontCaps);
+    </script>
+</body>
+</html>

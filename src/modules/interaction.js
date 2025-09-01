@@ -1,5 +1,5 @@
 // d3 is global; do not import it.
-import { updateLabelZoom, updateLabelVisibility, updateOverlayOceanLabel, clearDebugOverlays, clearScreenLabels, updateOceanLabelScreenPosition } from './labels.js';
+import { updateLabelZoom, updateLabelVisibility, updateOverlayOceanLabel, clearDebugOverlays, clearScreenLabels, updateOceanLabelScreenPosition, _updateCullRaf, tierForZoom, applyTierVisibility, currentTier, setCurrentTier } from './labels.js';
 import { filterByZoom } from './labels.js';
 
 // Add a tiny accessor so other modules can safely read current zoom.
@@ -81,6 +81,16 @@ export function attachInteraction({
       updateCellsLOD(t.k);
     }
 
+    // LOD: flip tiers as zoom changes
+    const next = tierForZoom(t.k);
+    if (next !== currentTier.value) {
+      setCurrentTier(next);
+      applyTierVisibility();
+    }
+
+    // NEW: recalc viewport culling every zoom (throttled)
+    if (typeof _updateCullRaf === "function") _updateCullRaf();
+
     // Apply world transforms (both world + labels-world usually follow the same transform)
     d3.select('#world')
       .attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
@@ -148,7 +158,10 @@ export function attachInteraction({
       [-100, -100],
       [r.width + 100, r.height + 100]
     ])
-    .on('zoom', zoomed);
+    .on('zoom', zoomed)
+    .on('end.cull', () => {
+      if (typeof _updateCullRaf === "function") _updateCullRaf();
+    });
 
   svg.call(zoom)
      .on('dblclick.zoom', null)
