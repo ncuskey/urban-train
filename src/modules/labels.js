@@ -1,11 +1,15 @@
 // d3 is global
 
 // Stable label key: prefer a unique id; fallback to kind+name
-const labelKey = d => d.label_id || d.id || `${d.kind}:${(d.name||'').toUpperCase()}`;
+const labelKey = d => {
+  if (!d) return 'unknown';
+  return d.label_id || d.id || `${d.kind || 'unknown'}:${(d.name||'').toUpperCase()}`;
+};
 export { labelKey };
 
 // Helper functions for label positioning with zoom
 function worldPoint(d) {
+  if (!d) return { x: 0, y: 0 };
   if (d?.placed && Number.isFinite(d.placed.x) && Number.isFinite(d.placed.y)) return d.placed;
   if (d?.layout && Number.isFinite(d.layout.x) && Number.isFinite(d.layout.y)) return d.layout;
   if (d?.anchor && Number.isFinite(d.anchor.x) && Number.isFinite(d.anchor.y)) {
@@ -18,25 +22,69 @@ function worldPoint(d) {
   return { x: 0, y: 0 };
 }
 
-// Legacy helper functions - kept for backward compatibility
-function labelScreenX(d, t){
-  const x = (d.placed?.x ?? d.anchor?.x ?? d.x ?? d.cx);
-  return t.applyX(x);
+// Legacy helper functions removed - no longer needed with world coordinates + counter-scaling
+
+// LOD opacity helper functions
+const fadeW = 0.25; // or your tokens.fadeW
+
+function smooth01(x){ return x<=0?0 : x>=1?1 : x*x*(3-2*x); }
+function bandOpacity(k, z0, z1, w=fadeW){
+  const a = smooth01((k-(z0-w))/w);
+  const b = 1 - smooth01((k-(z1-w))/w);
+  return Math.max(0, Math.min(a*b, 1));
 }
-function labelScreenY(d, t){
-  const y = (d.placed?.y ?? d.anchor?.y ?? d.y ?? d.cy);
-  return t.applyY(y);
+
+function labelSelection(svg){
+  return svg.select('#labels-world')
+            .selectAll('g.label, g.ocean-label, g.label--ocean')
+            .filter(d => d != null); // Skip nodes without data so logs don't get noisy
+}
+
+export function updateLabelLOD(svg){
+  const t = d3.zoomTransform(svg.node());
+  const k = t.k || 1;
+  const win = (window.labelTokens?.lod?.tiers) || { t1:[0.8,3.2], t2:[1.8,4.4], t3:[3,6], t4:[4,7] };
+
+  const sel = labelSelection(svg);
+
+  // Only operate on nodes that actually have data
+  const withData = sel.filter(function(d){ return d != null; });
+  const withoutData = sel.filter(function(d){ return d == null; });
+
+  // Safe path for data-bound labels
+  withData.each(function(d,i){
+    const tier = d.tier || 't1';
+    const [z0,z1] = win[tier] || [0, 1e9];
+    const o = bandOpacity(k, z0, z1);
+    d3.select(this)
+      .style('opacity', o)
+      .style('pointer-events', o ? 'auto' : 'none')
+      .attr('display', null);
+    if (i < 5) console.log('[LOD]', i, {tier, k, z0, z1, o});
+  });
+
+  // Skip unbound nodes (e.g., debug markers) or give them a fixed opacity
+  withoutData
+    .style('opacity', 1)
+    .style('pointer-events', 'none');
+
+  console.log('[LOD] applied to', withData.size(), 'labels; unbound skipped:', withoutData.size());
 }
 
 export function applyLabelTransforms(svg){
   const t = d3.zoomTransform(svg.node());
-  const toScreen = (p) => `translate(${t.applyX(p.x)},${t.applyY(p.y)}) scale(${1/t.k})`;
+  const k = Math.max(t.k || 1, 1e-6);
 
-  svg.selectAll('#labels-world-areas g.label')
-     .attr('transform', d => toScreen(worldPoint(d)));
+  labelSelection(svg).each(function(d){
+    const a = (d && d.anchor) || d;     // accept {x,y} or whole datum
+    if (!a) return;                      // skip unbound (e.g., smoke label)
+    this.setAttribute('transform', `translate(${a.x},${a.y}) scale(${1/k})`);
+  });
 
-  svg.selectAll('#labels-world-ocean g.label--ocean')
-     .attr('transform', d => toScreen(worldPoint(d)));
+  // Optional: keep debug markers visible & constant-size
+  svg.select('#labels-world')
+     .selectAll('g.dbg')
+     .attr('transform', `translate(100,100) scale(${1/k})`);
 }
 
 // Choose a world-space anchor for a label.
@@ -90,6 +138,7 @@ import { fontPxFor, getLabelTokens, opacityForZoom } from './labelTokens.js';
 // Robust tier extraction - datum first, then CSS class fallback
 function tierFrom(selNode, d){
   if (d?.tier != null) return d.tier;
+  if (!selNode || !selNode.classList) return 3;
   const cls = selNode.classList;
   const m = [...cls].find(k => /^tier-\d$/.test(k));
   if (m) return +m.split('-')[1];
@@ -98,28 +147,46 @@ function tierFrom(selNode, d){
 
 // Robust visibility updater - recompute on every zoom with tier fallback
 export function updateLabelVisibility(svg){
-  const t = d3.zoomTransform(svg.node());
-  const fade = !!window.labelFlags?.fadeBands;
+  if (!svg || !svg.node) {
+    console.warn('[labels] updateLabelVisibility: invalid svg', svg);
+    return;
+  }
+  try {
+    const t = d3.zoomTransform(svg.node());
+    const fade = !!window.labelFlags?.fadeBands;
 
-  svg.selectAll('#labels-world-areas g.label, #labels-world-ocean g.label--ocean')
-    .each(function(d){
-      const tier = tierFrom(this, d);
-      const o = fade ? opacityForZoom(t.k, tier) : (opacityForZoom(t.k, tier, 0) > 0 ? 1 : 0);
-      d3.select(this).classed('is-visible', o > 0).style('opacity', o);
-    });
+    svg.selectAll('#labels-world-areas g.label, #labels-world-ocean g.label--ocean')
+      .each(function(d){
+        if (!d) return;
+        const tier = tierFrom(this, d);
+        const o = fade ? opacityForZoom(t.k, tier) : (opacityForZoom(t.k, tier, 0) > 0 ? 1 : 0);
+        d3.select(this).classed('is-visible', o > 0).style('opacity', o);
+      });
+  } catch (e) {
+    console.warn('[labels] updateLabelVisibility: error', e);
+  }
 }
 
 // Legacy LOD visibility updater - kept for backward compatibility
 export function updateLabelVisibilityLOD(svg){
-  const t = d3.zoomTransform(svg.node());
-  const fade = !!window.labelFlags?.fadeBands;
+  if (!svg || !svg.node) {
+    console.warn('[labels] updateLabelVisibilityLOD: invalid svg', svg);
+    return;
+  }
+  try {
+    const t = d3.zoomTransform(svg.node());
+    const fade = !!window.labelFlags?.fadeBands;
 
-  const all = svg.selectAll('#labels-world-areas g.label, #labels-world-ocean g.label--ocean');
-  all.each(function(d){
-    const tier = d?.tier ?? 3;
-    const o = fade ? opacityForZoom(t.k, tier) : (opacityForZoom(t.k, tier, 0) > 0 ? 1 : 0);
-    d3.select(this).classed('is-visible', o > 0).style('opacity', o);
-  });
+    const all = svg.selectAll('#labels-world-areas g.label, #labels-world-ocean g.label--ocean');
+    all.each(function(d){
+      if (!d) return;
+      const tier = d?.tier ?? 3;
+      const o = fade ? opacityForZoom(t.k, tier) : (opacityForZoom(t.k, tier, 0) > 0 ? 1 : 0);
+      d3.select(this).classed('is-visible', o > 0).style('opacity', o);
+    });
+  } catch (e) {
+    console.warn('[labels] updateLabelVisibilityLOD: error', e);
+  }
 }
 
 
@@ -128,13 +195,15 @@ export function updateLabelVisibilityLOD(svg){
 
 // helper (add at top-level in labels.js)
 export function quantilesOf(arr, qs=[0.5, 0.7, 0.85]) {
-  if (!arr.length) return { q50: Infinity, q70: Infinity, q85: Infinity };
+  if (!Array.isArray(arr) || !arr.length) return { q50: Infinity, q70: Infinity, q85: Infinity };
+  if (!Array.isArray(qs) || qs.length === 0) qs = [0.5, 0.7, 0.85];
   const a = [...arr].sort((x,y)=>x-y);
   const pick = q => a[Math.max(0, Math.min(a.length-1, Math.floor(q*(a.length-1))))];
   return { q50: pick(0.5), q70: pick(0.7), q85: pick(0.85) };
 }
 
 export function baseFontPxForTier(tier) {
+  if (tier == null || tier < 1 || tier > 4) return 12; // Default to smallest
   return tier === 1 ? 26
        : tier === 2 ? 18
        : tier === 3 ? 14
@@ -142,6 +211,7 @@ export function baseFontPxForTier(tier) {
 }
 
 export function rankTier(label, q) {
+  if (!label) return 4;
   if (label.kind === 'ocean') return 1; // Ocean = Tier 1
   const A = label.area || 0;
   if (label.kind === 'island') {
@@ -165,6 +235,10 @@ export function getCurrentTier() {
 }
 
 export function setCurrentTier(tier) {
+  if (typeof tier !== 'number' || tier < 1 || tier > 4) {
+    console.warn('[labels] setCurrentTier: invalid tier', tier);
+    return;
+  }
   _currentTier = tier;
 }
 
@@ -176,6 +250,7 @@ export const currentTier = {
 
 // Map zoom k → max visible tier (tweak to taste)
 export function tierForZoom(k) {
+  if (typeof k !== 'number' || k <= 0) return 1;
   if (k < 1.4) return 1;   // far out: only the biggest names
   if (k < 2.5) return 2;   // mid: add key secondary labels
   if (k < 5.0) return 3;   // close: most labels
@@ -184,28 +259,45 @@ export function tierForZoom(k) {
 
 // Apply visibility by tier
 export function applyTierVisibility() {
-  d3.selectAll("text.label")
-    .classed("hidden", d => (d?.tier ?? 4) > _currentTier);
+  try {
+    d3.selectAll("text.label")
+      .classed("hidden", d => (d?.tier ?? 4) > _currentTier);
+  } catch (e) {
+    console.warn('[labels] applyTierVisibility: error', e);
+  }
 }
 
   // Call once after (re)building labels
   export function initLabelLOD() {
-    applyTierVisibility();
+    try {
+      applyTierVisibility();
+    } catch (e) {
+      console.warn('[labels] initLabelLOD: error', e);
+    }
   }
 
   // ---------- Font cap helpers (ocean must be largest) ----------
 
   // Read the actual computed pixel font-size of the ocean label
   function getOceanFontPx(fallback = 22) {
-    const node = d3.select("text.label--ocean").node();
-    if (!node) return fallback;
-    const fs = getComputedStyle(node).fontSize || "";
-    const n = parseFloat(fs);
-    return Number.isFinite(n) ? n : fallback;
+    try {
+      const node = d3.select("text.label--ocean").node();
+      if (!node) return fallback;
+      const fs = getComputedStyle(node).fontSize || "";
+      const n = parseFloat(fs);
+      return Number.isFinite(n) ? n : fallback;
+    } catch (e) {
+      console.warn('[labels] getOceanFontPx error:', e);
+      return fallback;
+    }
   }
 
   // Compute per-tier ceilings strictly below the ocean size
   function computeTierCaps(oceanPx) {
+    if (typeof oceanPx !== 'number' || oceanPx <= 0) {
+      console.warn('[labels] computeTierCaps: invalid oceanPx', oceanPx);
+      oceanPx = 22; // fallback to default
+    }
     // Tunable multipliers; keep all < 1.0 so ocean is always largest
     return {
       1: Math.floor(oceanPx * 0.86), // top non-ocean (e.g., biggest island)
@@ -218,6 +310,18 @@ export function applyTierVisibility() {
   // Clamp a size by its tier (with a reasonable minimum for legibility)
   const MIN_LABEL_PX = 11;
   function clampByTierPx(px, tier, caps) {
+    if (typeof px !== 'number' || px <= 0) {
+      console.warn('[labels] clampByTierPx: invalid px', px);
+      px = MIN_LABEL_PX;
+    }
+    if (typeof tier !== 'number' || tier < 1 || tier > 4) {
+      console.warn('[labels] clampByTierPx: invalid tier', tier);
+      tier = 4;
+    }
+    if (!caps || typeof caps !== 'object') {
+      console.warn('[labels] clampByTierPx: invalid caps', caps);
+      return px;
+    }
     const cap = caps[tier] ?? caps[4];
     return Math.max(MIN_LABEL_PX, Math.min(px, cap));
   }
@@ -226,48 +330,84 @@ export function applyTierVisibility() {
   // This preserves whatever base size you computed (area/importance/etc.),
   // but hard-limits it below the ocean size.
   export function applyFontCaps() {
-    const oceanPx = getOceanFontPx();
-    const caps = computeTierCaps(oceanPx);
+    try {
+      const oceanPx = getOceanFontPx();
+      const caps = computeTierCaps(oceanPx);
 
-    d3.selectAll("text.label:not(.label--ocean)")
-      .each(function(d) {
-        const sel = d3.select(this);
+      d3.selectAll("text.label:not(.label--ocean)")
+        .each(function(d) {
+          try {
+            const sel = d3.select(this);
 
-        // try inline style first, then computed style
-        const inline = parseFloat(sel.style("font-size"));
-        const computed = parseFloat(getComputedStyle(this).fontSize);
-        const basePx = Number.isFinite(inline) ? inline :
-                       (Number.isFinite(computed) ? computed : MIN_LABEL_PX);
+            // try inline style first, then computed style
+            const inline = parseFloat(sel.style("font-size"));
+            const computed = parseFloat(getComputedStyle(this).fontSize);
+            const basePx = Number.isFinite(inline) ? inline :
+                           (Number.isFinite(computed) ? computed : MIN_LABEL_PX);
 
-        const tier = d?.tier ?? 4;
-        const finalPx = clampByTierPx(basePx, tier, caps);
+            const tier = d?.tier ?? 4;
+            const finalPx = clampByTierPx(basePx, tier, caps);
 
-        // write inline so it wins over CSS class rules
-        sel.style("font-size", finalPx + "px");
+            // write inline so it wins over CSS class rules
+            sel.style("font-size", finalPx + "px");
+          } catch (e) {
+            console.warn('[labels] applyFontCaps: error processing label', e);
+          }
+        });
+
+      console.log("[labels] font caps applied", {
+        oceanPx,
+        caps,
+        sample: d3.selectAll("text.label").size()
       });
-
-    console.log("[labels] font caps applied", {
-      oceanPx,
-      caps,
-      sample: d3.selectAll("text.label").size()
-    });
+    } catch (e) {
+      console.warn('[labels] applyFontCaps: error', e);
+    }
   }
 
 const worldRectToScreenRect = ({x,y,w,h}) => {
-  const t = d3.zoomTransform(d3.select('svg').node()); 
+  if (typeof x !== 'number' || typeof y !== 'number' || typeof w !== 'number' || typeof h !== 'number') {
+    console.warn('[labels] worldRectToScreenRect: invalid parameters', {x, y, w, h});
+    return {x: 0, y: 0, w: 0, h: 0};
+  }
+  const svgNode = d3.select('svg').node();
+  if (!svgNode) return {x: 0, y: 0, w: 0, h: 0};
+  const t = d3.zoomTransform(svgNode); 
   return { x:x*t.k + t.x, y:y*t.k + t.y, w:w*t.k, h:h*t.k };
 };
 
 // Disjoint key functions for world vs ocean labels
-const keyWorld = d => `w:${d.kind}:${d.id}`;
-const keyOcean = d => `ocean:${d.id || 0}`;
+const keyWorld = d => {
+  if (!d) return 'w:unknown:unknown';
+  return `w:${d.kind || 'unknown'}:${d.id || 'unknown'}`;
+};
+const keyOcean = d => {
+  if (!d) return 'ocean:0';
+  return `ocean:${d.id || 0}`;
+};
 
 // --- LOD helpers (tier-aware) ---
-function lerp(a,b,t){ return a + (b-a)*t; }
-function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+function lerp(a,b,t){ 
+  if (typeof a !== 'number' || typeof b !== 'number' || typeof t !== 'number') {
+    console.warn('[labels] lerp: invalid parameters', {a, b, t});
+    return a;
+  }
+  return a + (b-a)*t; 
+}
+function clamp01(x){ 
+  if (typeof x !== 'number') {
+    console.warn('[labels] clamp01: invalid parameter', x);
+    return 0;
+  }
+  return Math.max(0, Math.min(1, x)); 
+}
 
 // ---- RAF throttle ----
 function rafThrottle(fn) {
+  if (typeof fn !== 'function') {
+    console.warn('[labels] rafThrottle: invalid function', fn);
+    return () => {};
+  }
   let scheduled = false, lastArgs;
   return function throttled(...args) {
     lastArgs = args;
@@ -293,46 +433,85 @@ export { _updateCullRaf };
  * returns correct screen-space boxes for text.
  */
 export function updateViewportCull(svgNode, pad = 24) {
-  const svgRect = svgNode.getBoundingClientRect();
-  const left = svgRect.left - pad, right = svgRect.right + pad;
-  const top  = svgRect.top  - pad, bottom = svgRect.bottom + pad;
+  if (!svgNode || typeof svgNode.getBoundingClientRect !== 'function') {
+    console.warn('[labels] updateViewportCull: invalid svgNode', svgNode);
+    return;
+  }
+  if (typeof pad !== 'number' || pad < 0) {
+    console.warn('[labels] updateViewportCull: invalid pad', pad);
+    pad = 24;
+  }
+  
+  try {
+    const svgRect = svgNode.getBoundingClientRect();
+    const left = svgRect.left - pad, right = svgRect.right + pad;
+    const top  = svgRect.top  - pad, bottom = svgRect.bottom + pad;
 
-  d3.selectAll("text.label").each(function () {
-    const r = this.getBoundingClientRect();
-    const off = (r.right < left) || (r.left > right) || (r.bottom < top) || (r.top > bottom);
-    d3.select(this).classed("culled", off);
-  });
+    d3.selectAll("text.label").each(function () {
+      try {
+        const r = this.getBoundingClientRect();
+        const off = (r.right < left) || (r.left > right) || (r.bottom < top) || (r.top > bottom);
+        d3.select(this).classed("culled", off);
+      } catch (e) {
+        console.warn('[labels] updateViewportCull: error processing label', e);
+      }
+    });
 
-  // Ocean label is sticky: if Tier 1 is allowed, never leave it culled/hidden.
-  ensureOceanStickyVisibility();
+    // Ocean label is sticky: if Tier 1 is allowed, never leave it culled/hidden.
+    ensureOceanStickyVisibility();
+  } catch (e) {
+    console.warn('[labels] updateViewportCull: error', e);
+  }
 }
 
 /** Force the ocean label back to visible when Tier 1 is active */
 export function ensureOceanStickyVisibility() {
-  const ocean = d3.select("text.label--ocean");
-  if (ocean.empty()) return;
+  try {
+    const ocean = d3.select("text.label--ocean");
+    if (ocean.empty()) return;
 
-  // Ocean is Tier 1; whenever currentTier >= 1 it must be visible.
-  if (_currentTier >= 1) {
-    ocean.classed("culled", false)
-         .classed("hidden", false)
-         .style("display", null)
-         .attr("visibility", null)
-         .attr("opacity", null);
+    // Ocean is Tier 1; whenever currentTier >= 1 it must be visible.
+    if (_currentTier >= 1) {
+      ocean.classed("culled", false)
+           .classed("hidden", false)
+           .style("display", null)
+           .attr("visibility", null)
+           .attr("opacity", null);
+    }
+  } catch (e) {
+    console.warn('[labels] ensureOceanStickyVisibility: error', e);
   }
 }
 
 // Initialize throttled updater once (call from init time)
 export function initLabelCulling(svgSelection) {
+  if (!svgSelection || !svgSelection.node) {
+    console.warn('[labels] initLabelCulling: invalid svgSelection', svgSelection);
+    return;
+  }
   const svgNode = svgSelection.node();
+  if (!svgNode) {
+    console.warn('[labels] initLabelCulling: no node in svgSelection');
+    return;
+  }
   _updateCullRaf = rafThrottle(() => updateViewportCull(svgNode));
 }
 // Smoothstep from edge0..edge1
-function smooth01(x0, x1, k){ return clamp01((k - x0) / Math.max(1e-6, (x1 - x0))); }
+function smoothRange01(x0, x1, k){ 
+  if (typeof x0 !== 'number' || typeof x1 !== 'number' || typeof k !== 'number') {
+    console.warn('[labels] smoothRange01: invalid parameters', {x0, x1, k});
+    return 0;
+  }
+  return clamp01((k - x0) / Math.max(1e-6, (x1 - x0))); 
+}
 
 // Keep a smoothed k to reduce flicker near thresholds
 let __LOD_prevK = 1.0;
 export function getSmoothedK(k){
+  if (typeof k !== 'number' || k <= 0) {
+    console.warn('[labels] getSmoothedK: invalid k', k);
+    return __LOD_prevK;
+  }
   const α = 0.25;               // smoothing factor; 0=no smoothing, 1=instant
   __LOD_prevK = (1-α)*__LOD_prevK + α*k;
   return __LOD_prevK;
@@ -348,14 +527,26 @@ const LOD_BREAKS = {
 
 // Per-tier separation in *screen* pixels (counter-scaled to world later)
 function separationPxForTier(tier){
+  if (typeof tier !== 'number' || tier < 1 || tier > 4) {
+    console.warn('[labels] separationPxForTier: invalid tier', tier);
+    return 22; // default to smallest separation
+  }
   return tier === 2 ? 38 : tier === 3 ? 28 : 22;
 }
 
 // Minimum feature screen area (px^2) by tier as a function of k
 function minAreaPxForTier(tier, k){
-  const s2 = smooth01(LOD_BREAKS.t2.start, LOD_BREAKS.t2.full, k);
-  const s3 = smooth01(LOD_BREAKS.t3.start, LOD_BREAKS.t3.full, k);
-  const s4 = smooth01(LOD_BREAKS.t4.start, LOD_BREAKS.t4.full, k);
+  if (typeof tier !== 'number' || tier < 1 || tier > 4) {
+    console.warn('[labels] minAreaPxForTier: invalid tier', tier);
+    return 28; // default to smallest area
+  }
+  if (typeof k !== 'number' || k <= 0) {
+    console.warn('[labels] minAreaPxForTier: invalid k', k);
+    return 28; // default to smallest area
+  }
+  const s2 = smoothRange01(LOD_BREAKS.t2.start, LOD_BREAKS.t2.full, k);
+  const s3 = smoothRange01(LOD_BREAKS.t3.start, LOD_BREAKS.t3.full, k);
+  const s4 = smoothRange01(LOD_BREAKS.t4.start, LOD_BREAKS.t4.full, k);
   if (tier === 2) return Math.round(lerp(420,  80, s2));
   if (tier === 3) return Math.round(lerp(360,  60, s3));
   return                Math.round(lerp(280,  28, s4)); // tier 4
@@ -364,7 +555,7 @@ function minAreaPxForTier(tier, k){
 // Budget (how many labels per tier) given k and candidate count n
 function tierBudget(tier, k, n){
   const b = tier === 2 ? LOD_BREAKS.t2 : tier === 3 ? LOD_BREAKS.t3 : LOD_BREAKS.t4;
-  const s = smooth01(b.start, b.full, k);
+  const s = smoothRange01(b.start, b.full, k);
   const base   = tier === 2 ? 2 : 0;
   const growth = tier === 2 ? 6 : tier === 3 ? 10 : 14;
   return Math.min(n, Math.round(base + growth * s));
@@ -398,8 +589,111 @@ export function ensureLabelLayers(svg) {
   }
 }
 
+// NEW: ensure label containers are in the right coordinate space
+export function ensureLabelContainers(svg) {
+  if (!svg || !svg.select) {
+    console.warn('[labels] ensureLabelContainers: invalid svg', svg);
+    return;
+  }
+  
+  const world = svg.select('#world');
+  if (world.empty()) { console.warn('[labels] #world missing'); return; }
+
+  let labelsRoot = svg.select('#labels');
+  if (labelsRoot.empty()) labelsRoot = svg.append('g').attr('id', 'labels');
+
+  let labelsWorld = svg.select('#labels-world');
+  if (labelsWorld.empty()) labelsWorld = world.append('g').attr('id', 'labels-world');
+  else if (labelsWorld.node().parentNode !== world.node()) world.node().appendChild(labelsWorld.node());
+
+  let labelsOverlay = svg.select('#labels-overlay');
+  if (labelsOverlay.empty()) labelsOverlay = svg.append('g').attr('id', 'labels-overlay');
+
+  // make sure sub-containers exist (idempotent)
+  if (labelsWorld.select('#labels-world-areas').empty()) {
+    labelsWorld.append('g').attr('id', 'labels-world-areas');
+  }
+  if (labelsWorld.select('#labels-world-ocean').empty()) {
+    labelsWorld.append('g').attr('id', 'labels-world-ocean');
+  }
+
+  // Critical: keep world labels on top of all world geometry
+  labelsWorld.raise();
+
+  // Make it obvious if a global style accidentally hid us
+  labelsWorld.attr('display', null).style('opacity', 1).style('pointer-events', 'none');
+
+  // Debug: show children order under #world
+  try {
+    const order = Array.from(world.node().children).map(n => n.id || n.className?.baseVal || n.nodeName);
+    console.log('[labels] #world child order (top last):', order);
+  } catch (e) {
+    console.warn('[labels] ensureLabelContainers: error getting children order', e);
+  }
+  
+  return labelsWorld;
+}
+
+/**
+ * Draw a visible, fixed debug label to test basic rendering and layering
+ * @param {Object} svg - D3 selection of the SVG element
+ */
+export function smokeLabel(svg) {
+  if (!svg || !svg.node) {
+    console.warn('[labels] smokeLabel: invalid svg', svg);
+    return;
+  }
+  
+  try {
+    const k = d3.zoomTransform(svg.node()).k || 1;
+    const g = svg.select('#labels-world').append('g')
+      .attr('class', 'label dbg')
+      .attr('transform', `translate(100,100) scale(${1/Math.max(k,1e-6)})`);
+
+    g.append('circle').attr('r', 6).attr('cx', 0).attr('cy', 0).attr('fill', 'magenta');
+    g.append('text').text('DBG').attr('x', 0).attr('y', -10).style('font-size', '22px')
+      .style('font-family', 'IM FELL English, serif').style('fill', '#000');
+    console.log('[labels] smokeLabel appended');
+  } catch (e) {
+    console.warn('[labels] smokeLabel: error', e);
+  }
+}
+
+/**
+ * Force all world labels to full opacity, bypassing LOD logic
+ * @param {Object} svg - D3 selection of the SVG element
+ */
+export function forceAllLabelsVisible(svg) {
+  if (!svg || !svg.select) {
+    console.warn('[labels] forceAllLabelsVisible: invalid svg', svg);
+    return;
+  }
+  
+  try {
+    const s = svg.select('#labels-world');
+    s.selectAll('g.label, g.ocean-label, g.label--ocean')
+      .style('opacity', 1)
+      .attr('display', null);
+    console.log('[labels] forceAllLabelsVisible count:',
+      s.selectAll('g.label, g.ocean-label, g.label--ocean').size());
+  } catch (e) {
+    console.warn('[labels] forceAllLabelsVisible: error', e);
+  }
+}
+
+
+
+
+
+
+
 // ensureScreenLabelLayer(svg)
 export function ensureScreenLabelLayer(svg) {
+  if (!svg || !svg.select) {
+    console.warn('[labels] ensureScreenLabelLayer: invalid svg', svg);
+    return d3.select(null);
+  }
+  
   let root = svg.select('#screen-labels');
   if (root.empty()) {
     root = svg.append('g')
@@ -412,6 +706,10 @@ export function ensureScreenLabelLayer(svg) {
 function assertOceanWithinRect(textSel, rectPx, pad=2) {
   const n = textSel.node();
   if (!n) return;
+  if (!rectPx || typeof rectPx.x !== 'number' || typeof rectPx.y !== 'number' || typeof rectPx.w !== 'number' || typeof rectPx.h !== 'number') {
+    console.warn('[assert] assertOceanWithinRect: invalid rectPx', rectPx);
+    return false;
+  }
   const b = n.getBBox(); // in px because the element lives in the screen layer
   const ok =
     b.x >= rectPx.x + pad &&
@@ -424,25 +722,38 @@ function assertOceanWithinRect(textSel, rectPx, pad=2) {
 }
 
 function screenToWorldXY(pxX, pxY) {
+  if (typeof pxX !== 'number' || typeof pxY !== 'number') {
+    console.warn('[labels] screenToWorldXY: invalid coordinates', {pxX, pxY});
+    return {x: 0, y: 0};
+  }
   const {k, x, y} = getZoomState();
   return {x: (pxX - x) / k, y: (pxY - y) / k};
 }
 
 function screenRectToWorldRect(rpx) {
   // rpx: {x, y, w, h} in screen pixels (top-left)
+  if (!rpx || typeof rpx.x !== 'number' || typeof rpx.y !== 'number' || typeof rpx.w !== 'number' || typeof rpx.h !== 'number') {
+    console.warn('[labels] screenRectToWorldRect: invalid rpx', rpx);
+    return {x: 0, y: 0, w: 0, h: 0};
+  }
   const tl = screenToWorldXY(rpx.x, rpx.y);
   const br = screenToWorldXY(rpx.x + rpx.w, rpx.y + rpx.h);
   return {x: tl.x, y: tl.y, w: br.x - tl.x, h: br.y - tl.y};
 }
 
 function pxToWorldFont(px) {
+  if (typeof px !== 'number' || px <= 0) {
+    console.warn('[labels] pxToWorldFont: invalid px', px);
+    return 12;
+  }
   const {k} = getZoomState();        // critical: divide by k
   return px / Math.max(k, 1e-6);
 }
 
 // Accept either a DOM node or a D3 selection and return a D3 selection
 function asSel(svgOrSel) {
-  return svgOrSel && typeof svgOrSel.node === "function"
+  if (!svgOrSel) return d3.select(null);
+  return typeof svgOrSel.node === "function"
     ? svgOrSel
     : d3.select(svgOrSel);
 }
@@ -459,7 +770,7 @@ let __lastProbe = null; // cache for last probe state
 
 const DBG = {labels:true, ocean:true, cost:true, assert:true};
 function timeit(tag, fn) {
-  if (!DBG.cost) return fn();
+  if (!DBG.cost || !fn) return fn ? fn() : undefined;
   const t0 = performance.now();
   const out = fn();
   const t1 = performance.now();
@@ -477,12 +788,18 @@ const __measureCtx = (() => {
 
 export function labelFontFamily() {
   // keep in sync with CSS var/family used elsewhere
-  const v = getComputedStyle(document.documentElement).getPropertyValue('--label-font-family');
-  return (v && v.trim()) || 'Lora, serif';
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--label-font-family');
+    return (v && v.trim()) || 'Lora, serif';
+  } catch (e) {
+    return 'Lora, serif'; // fallback if getComputedStyle fails
+  }
 }
 
 export function textWidthPx(str, sizePx, family = labelFontFamily()) {
+  if (!str || !sizePx || sizePx <= 0) return 0;
   const ctx = __measureCtx;
+  if (!ctx) return 0;
   ctx.font = `${Math.max(1, Math.round(sizePx))}px ${family}`;
   const m = ctx.measureText(str || '');
   return (m && m.width) ? m.width : 0;
@@ -492,6 +809,10 @@ export function textWidthPx(str, sizePx, family = labelFontFamily()) {
 if (typeof window.__wrapText__ === "undefined") {
   window.__wrapText__ = true;
   window.wrapText = function wrapText(textSel, maxWidth, lineHeightEm = 1.2) {
+    if (!maxWidth || maxWidth <= 0) {
+      console.warn('[labels] wrapText: invalid maxWidth', maxWidth);
+      return;
+    }
     textSel.each(function () {
       const text = d3.select(this);
 
@@ -562,22 +883,30 @@ if (typeof window.__wrapText__ === "undefined") {
 
 export function getZoomK() {
   const world = d3.select('#world').node() || d3.select('svg').node();
+  if (!world) return 1;
   return d3.zoomTransform(world).k || 1;
 }
 
 // --- Ocean anchor storage (stable on the <svg> node) ---
 function setOceanAnchor(svg, anchor) {
-  const host = svg.node();
+  const host = svg?.node();
+  if (!host) return;
   host.__oceanWorldAnchor = anchor || null;
 }
 function getOceanAnchor(svg) {
-  return svg.node().__oceanWorldAnchor || null;
+  const host = svg?.node();
+  if (!host) return null;
+  return host.__oceanWorldAnchor || null;
 }
 function setOceanRectPx(svg, rectPx) {
-  svg.node().__oceanRectPx = rectPx || null;
+  const host = svg?.node();
+  if (!host) return;
+  host.__oceanRectPx = rectPx || null;
 }
 function getOceanRectPx(svg) {
-  return svg.node().__oceanRectPx || null;
+  const host = svg?.node();
+  if (!host) return null;
+  return host.__oceanRectPx || null;
 }
 export { getOceanAnchor, setOceanAnchor, getOceanRectPx, setOceanRectPx };
 
@@ -586,6 +915,10 @@ const OCEAN_EDGE_PAD_PX = 24; // tweak 20–32 to taste
 
 // Place text element inside a rectangle with space-aware centering
 export function placeTextInRect(textSel, rect, {space='px', lineH=1.1} = {}) {
+  if (!rect || typeof rect.x !== 'number' || typeof rect.y !== 'number' || typeof rect.w !== 'number' || typeof rect.h !== 'number') {
+    console.warn('[labels] placeTextInRect: invalid rect', rect);
+    return;
+  }
   const cx = rect.x + rect.w / 2;
   const cy = rect.y + rect.h / 2;
 
@@ -608,6 +941,14 @@ export function placeTextInRect(textSel, rect, {space='px', lineH=1.1} = {}) {
 }
 
 function insetPxRect(rect, pad) {
+  if (!rect || typeof rect.x0 !== 'number' || typeof rect.y0 !== 'number' || typeof rect.x1 !== 'number' || typeof rect.y1 !== 'number') {
+    console.warn('[labels] insetPxRect: invalid rect', rect);
+    return {x0: 0, y0: 0, x1: 0, y1: 0, w: 0, h: 0};
+  }
+  if (typeof pad !== 'number' || pad < 0) {
+    console.warn('[labels] insetPxRect: invalid pad', pad);
+    pad = 0;
+  }
   return {
     x0: rect.x0 + pad,
     y0: rect.y0 + pad,
@@ -619,6 +960,10 @@ function insetPxRect(rect, pad) {
 }
 
 function worldPadFromPx(padPx) {
+  if (typeof padPx !== 'number' || padPx < 0) {
+    console.warn('[labels] worldPadFromPx: invalid padPx', padPx);
+    return 0;
+  }
   const k = getZoomK(); // you already have this helper
   return padPx / Math.max(1e-6, k);
 }
@@ -639,9 +984,9 @@ function pickProbeLabel(selection) {
     const textSel = d3.select(node);
     if (textSel.empty()) return;
     // store for later debugging
-    textSel.attr('data-label-id', dd.id || `lbl-${i}`);
+    textSel.attr('data-label-id', dd?.id || `lbl-${i}`);
     
-    if (!d && (dd.kind === 'island' || dd.kind === 'lake')) d = dd; 
+    if (!d && dd && (dd.kind === 'island' || dd.kind === 'lake')) d = dd; 
   });
   if (!d) selection.each(function(dd, i, nodes){ 
     // Use normal function to get a real node-bound `this`
@@ -650,23 +995,24 @@ function pickProbeLabel(selection) {
     const textSel = d3.select(node);
     if (textSel.empty()) return;
     // store for later debugging
-    textSel.attr('data-label-id', dd.id || `lbl-${i}`);
+    textSel.attr('data-label-id', dd?.id || `lbl-${i}`);
     
-    if (!d) d = dd; 
+    if (!d && dd) d = dd; 
   });
   if (d) {
-    if (d.uid == null) d.uid = `lbl_${d.kind}_${Math.random().toString(36).slice(2,7)}`;
+    if (d.uid == null) d.uid = `lbl_${d.kind || 'unknown'}_${Math.random().toString(36).slice(2,7)}`;
     __labelProbeId = d.uid;
   }
 }
 
 function countScales(transformStr) {
-  if (!transformStr) return 0;
+  if (!transformStr || typeof transformStr !== 'string') return 0;
   const m = transformStr.match(/scale\(/g);
   return m ? m.length : 0;
 }
 
 function hasChanged(msg) {
+  if (!msg) return false;
   const key = JSON.stringify([msg.k, msg.uid, msg.baseFontPx, msg.computedFontPx, msg.transform]);
   if (__lastProbe === key) return false;
   __lastProbe = key;
@@ -674,8 +1020,18 @@ function hasChanged(msg) {
 }
 
 // ==== ocean text fit helpers (screen-space) ====
-function __clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function __clamp(v, a, b) { 
+  if (typeof v !== 'number' || typeof a !== 'number' || typeof b !== 'number') {
+    console.warn('[labels] __clamp: invalid parameters', {v, a, b});
+    return a;
+  }
+  return Math.max(a, Math.min(b, v)); 
+}
 function __measureTextWidth(containerSel, cls, text, fontPx) {
+  if (!containerSel || containerSel.empty() || !text || typeof fontPx !== 'number' || fontPx <= 0) {
+    console.warn('[labels] __measureTextWidth: invalid parameters', {containerSel, cls, text, fontPx});
+    return 0;
+  }
   const ghost = containerSel.append("text")
     .attr("class", cls)
     .style("opacity", 0)
@@ -689,6 +1045,7 @@ function __measureTextWidth(containerSel, cls, text, fontPx) {
 // Single or two-line fit with shrink-to-fit
 export function fitTextToRect({ svg, textSel, text, rect, pad=8, maxPx=200, minPx=14, lineH=1.1, k }) {
   if (!textSel || textSel.empty()) return {ok:false, reason:'empty-selection'};
+  if (!rect || typeof rect.w !== 'number' || typeof rect.h !== 'number') return {ok:false, reason:'invalid-rect'};
   const node = textSel.node();
   if (!node) return {ok:false, reason:'no-node'};
   // ensure tspans container
@@ -769,7 +1126,7 @@ export function logProbe(tag, selection) {
     const textSel = d3.select(currentNode);
     if (textSel.empty()) return;
     // store for later debugging
-    textSel.attr('data-label-id', d.id || `lbl-${i}`);
+    textSel.attr('data-label-id', d?.id || `lbl-${i}`);
     
     if (d?.uid === __labelProbeId && !node) { node = currentNode; data = d; }
   });
@@ -2055,7 +2412,7 @@ function polygonArea(poly) {
 // ---- Placement / collision avoidance ----
 
 function clampWithinCircle(d) {
-  if (!d.keepWithin) return;
+  if (!d || !d.keepWithin) return;
   const { cx, cy, r } = d.keepWithin;
   const vx = d.x - cx, vy = d.y - cy;
   const L = Math.hypot(vx, vy);
@@ -2067,6 +2424,7 @@ function clampWithinCircle(d) {
 }
 
 function clampWithinRect(d) {
+  if (!d) return;
   const r = d.keepWithinRect;
   if (!r) return;
   if (d.x < r.x0) d.x = r.x0;
@@ -2778,8 +3136,16 @@ export function ensureMetrics(labels, svg) {
 
 // Seed ocean labels inside their chosen rectangle
 function seedOceanIntoRect(oceanLabel) {
+  if (!oceanLabel || !oceanLabel.keepWithinRect) return;
   const r = oceanLabel.keepWithinRect;
-  if (!r) return;
+  if (!r || typeof r.x0 !== 'number' || typeof r.x1 !== 'number' || typeof r.y0 !== 'number' || typeof r.y1 !== 'number') {
+    console.warn('[labels] seedOceanIntoRect: invalid rect', r);
+    return;
+  }
+  if (typeof oceanLabel.width !== 'number' || typeof oceanLabel.height !== 'number') {
+    console.warn('[labels] seedOceanIntoRect: invalid dimensions', {width: oceanLabel.width, height: oceanLabel.height});
+    return;
+  }
   const availW = Math.max(0, r.x1 - r.x0 - oceanLabel.width);
   const availH = Math.max(0, r.y1 - r.y0 - oceanLabel.height);
   oceanLabel.x = r.x0 + availW / 2;
@@ -2793,8 +3159,26 @@ function seedOceanIntoRect(oceanLabel) {
 
 // Seed ocean label inside world rectangle (world coordinates)
 export function seedOceanIntoWorldRect(l) {
+  if (!l || !l.keepWithinRect) {
+    console.warn('[labels] seedOceanIntoWorldRect: invalid label or rect', l);
+    return;
+  }
   const r = l.keepWithinRect;        // world coords!
-  const k = d3.zoomTransform(d3.select('#map').node()).k || 1;
+  if (!r || typeof r.x !== 'number' || typeof r.y !== 'number' || typeof r.w !== 'number' || typeof r.h !== 'number') {
+    console.warn('[labels] seedOceanIntoWorldRect: invalid rect', r);
+    return;
+  }
+  if (typeof l.width !== 'number' || typeof l.height !== 'number') {
+    console.warn('[labels] seedOceanIntoWorldRect: invalid dimensions', {width: l.width, height: l.height});
+    return;
+  }
+  
+  const mapNode = d3.select('#map').node();
+  if (!mapNode) {
+    console.warn('[labels] seedOceanIntoWorldRect: #map not found');
+    return;
+  }
+  const k = d3.zoomTransform(mapNode).k || 1;
 
   // your d.width/d.height are in *screen* px; convert to world units
   const wWorld = l.width  / k;
@@ -2821,7 +3205,12 @@ function labelDrawXY(d) {
       return { x: d.placed.x, y: d.placed.y };
     } else {
       // Ocean labels may need screen-to-world conversion
-      const k = d3.zoomTransform(d3.select('#map').node()).k || 1;
+      const mapNode = d3.select('#map').node();
+      if (!mapNode) {
+        console.warn('[labels] labelDrawXY: #map not found');
+        return { x: d.placed.x, y: d.placed.y };
+      }
+      const k = d3.zoomTransform(mapNode).k || 1;
       const wWorld = (d.width || 0) / k;
       const hWorld = (d.height || 0) / k;
       return { x: d.placed.x + wWorld / 2, y: d.placed.y + hWorld * 0.75 };
@@ -2832,6 +3221,14 @@ function labelDrawXY(d) {
 
 // Render world layer: oceans + lakes + islands (single source of truth)
 export function renderWorldLabels(svg, features) {
+  if (!svg || !features || !Array.isArray(features)) {
+    console.warn('[labels] renderWorldLabels: invalid parameters', {svg, features});
+    return;
+  }
+  
+  // Ensure label containers are in the right coordinate space
+  ensureLabelContainers(svg);
+  
   // DIAG: count features by kind making it to this function
   if (window.DEBUG) {
     const counts = (arr) => arr.reduce((m,d)=> (m[d.kind]=(m[d.kind]||0)+1, m), {});
@@ -2840,7 +3237,7 @@ export function renderWorldLabels(svg, features) {
 
   // Build world dataset explicitly
   const WORLD_KINDS = new Set(['lake','island']);
-const worldData = features.filter(d => d && WORLD_KINDS.has(d.kind));
+  const worldData = features.filter(d => d && WORLD_KINDS.has(d.kind));
 
   if (window.DEBUG) {
     const wc = worldData.reduce((m,d)=> (m[d.kind]=(m[d.kind]||0)+1, m), {});
@@ -2865,6 +3262,7 @@ const worldData = features.filter(d => d && WORLD_KINDS.has(d.kind));
 
   // Apply positioning and text content
   const sizeFor = d => {
+    if (!d) return 12; // Default size for undefined data
     const base = baseFontPxForTier(d.tier ?? 3);
     if (d.kind === 'lake')   return Math.max(Math.min(base, 18), 11);
     if (d.kind === 'island') {
@@ -2876,6 +3274,8 @@ const worldData = features.filter(d => d && WORLD_KINDS.has(d.kind));
   
   // Create/update text elements inside the g.label groups
   worldMerged.each(function(d) {
+    if (!d) return; // Skip undefined data
+    
     const g = d3.select(this);
     let text = g.select('text');
     
@@ -2883,9 +3283,12 @@ const worldData = features.filter(d => d && WORLD_KINDS.has(d.kind));
       text = g.append('text');
     }
     
+    // Store world coordinates in anchor property for applyLabelTransforms to use
+    d.anchor = { x: d.x, y: d.y };
+    
     text
       .style('font-size', `${sizeFor(d)}px`)  // screen-space sizing
-      .text(d.text)
+      .text(d.text || '')
       // Only assign x/y for features that rely on a point anchor (lakes/islands).
       .attr('x', d => {
         if (d.kind === 'lake' || d.kind === 'island') return labelAnchorWorld(d).x;
@@ -2935,6 +3338,14 @@ const worldData = features.filter(d => d && WORLD_KINDS.has(d.kind));
 
 // Render overlay layer: no lakes/islands right now (HUD/debug only)
 export function renderOverlayLabels(svg, features) {
+  if (!svg) {
+    console.warn('[labels] renderOverlayLabels: invalid svg', svg);
+    return;
+  }
+  
+  // Ensure label containers are in the right coordinate space
+  ensureLabelContainers(svg);
+  
   // Overlay labels are disabled for area features for now to avoid world→screen mismatch
   const overlayData = []; // or keep your HUD only, but do not bind lakes/islands here.
 
@@ -2954,8 +3365,8 @@ function applyTierClasses(sel) {
      .classed('tier-4', d => (d?.tier ?? 3) >= 4);
   // Optional style hooks (behind your flags)
   if (window.labelFlags?.styleTokensOnly) {
-    sel.classed('label--water', d => d.kind === 'lake')
-       .classed('label--area',  d => d.kind === 'island' && (d.area ?? 0) > 15000);
+    sel.classed('label--water', d => d?.kind === 'lake')
+       .classed('label--area',  d => d?.kind === 'island' && (d?.area ?? 0) > 15000);
   } else {
     sel.classed('label--water', false).classed('label--area', false);
   }
@@ -2963,8 +3374,11 @@ function applyTierClasses(sel) {
 
 // Legacy function for backward compatibility
 export function renderNonOceanLabels(gAll, labels) {
+  // Ensure label containers are in the right coordinate space
+  ensureLabelContainers(gAll);
+  
   // Filter out ocean labels
-  const nonOceanLabels = labels.filter(d => d.kind !== 'ocean');
+  const nonOceanLabels = labels.filter(d => d && d.kind !== 'ocean');
   
   if (nonOceanLabels.length === 0) {
     // Clear layer if no non-ocean labels, but preserve ocean labels
@@ -3011,6 +3425,14 @@ export function renderNonOceanLabels(gAll, labels) {
 
 // Put this near other render helpers
 export function renderOceanInWorld(svg, text) {
+  if (!svg) {
+    console.warn('[labels] renderOceanInWorld: invalid svg', svg);
+    return;
+  }
+  
+  // Ensure label containers are in the right coordinate space
+  ensureLabelContainers(svg);
+  
   // Use dedicated ocean container
   const gOcean = svg.select('#labels-world-ocean');
   
@@ -3038,15 +3460,23 @@ export function renderOceanInWorld(svg, text) {
     .attr('class', 'ocean-label label label--ocean ocean tier-1')
     .merge(oceanSel);
   
+  // When creating the ocean label group:
+  console.log('[ocean] appended ocean label group', ocean.node());
+  
   // Apply tier classes to ocean label
   applyTierClasses(ocean);
   
-  // Position the ocean label group in world coordinates
-  ocean.attr('transform', d => {
-    if (d && d.rectWorld) {
-      return `translate(${d.rectWorld.x + d.rectWorld.w / 2}, ${d.rectWorld.y + d.rectWorld.h / 2})`;
+  // Store world coordinates in anchor property for applyLabelTransforms to use
+  ocean.each(function(d) {
+    if (!d) return;
+    if (d.rectWorld) {
+      d.anchor = { 
+        x: d.rectWorld.x + d.rectWorld.w / 2, 
+        y: d.rectWorld.y + d.rectWorld.h / 2 
+      };
+    } else {
+      d.anchor = { x: 0, y: 0 };
     }
-    return 'translate(0,0)'; // fallback
   });
   
   // Build/update the text inside
@@ -3065,44 +3495,48 @@ export function renderOceanInWorld(svg, text) {
   ocean.select('text').style('font-size', `${OCEAN_PX}px`);
   
   // Apply text wrapping if we have a rectangle
-  if (window.state && window.state.ocean && window.state.ocean.rectWorld) {
+  if (window.state?.ocean?.rectWorld) {
     const { rectWorld } = window.state.ocean;
-    // Convert world rect to screen pixels for wrapping
-    const z = d3.zoomTransform(svg.node());
-    const rectPx = {
-      w: rectWorld.w * z.k,
-      h: rectWorld.h * z.k
-    };
-    // Wrap text to 85% of rectangle width
-    window.wrapText(txt, rectPx.w * 0.85);
+    if (rectWorld && typeof rectWorld.w === 'number' && typeof rectWorld.h === 'number') {
+      // Convert world rect to screen pixels for wrapping
+      const z = d3.zoomTransform(svg.node());
+      const rectPx = {
+        w: rectWorld.w * z.k,
+        h: rectWorld.h * z.k
+      };
+      // Wrap text to 85% of rectangle width
+      window.wrapText(txt, rectPx.w * 0.85);
+    }
   }
   
   // VERIFICATION CHECKS - Log parent transform and verify roundtrip coordinates
-  if (window.state && window.state.ocean && window.state.ocean.rectWorld) {
-    // Check 1: Verify parent transform (should be the same as other labels)
-    const parentTransform = d3.select(gOcean.node().parentNode).attr('transform');
-    console.log('[ocean] parent <g> transform =', parentTransform);
-    
-    // Check 2: Verify roundtrip coordinate conversion
-    const t = d3.zoomTransform(svg.node());
+  if (window.state?.ocean?.rectWorld) {
     const r = window.state.ocean.rectWorld;
-    const x0 = t.applyX(r.x), y0 = t.applyY(r.y);
-    const x1 = t.applyX(r.x + r.w), y1 = t.applyY(r.y + r.h);
-    
-    console.log('[ocean] Roundtrip verification:', {
-      worldRect: r,
-      screenRect: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 },
-      zoomTransform: { k: t.k, x: t.x, y: t.y }
-    });
-    
-    // Check 3: Verify the ocean label is in the dedicated container
-    const oceanParent = gOcean.node().parentNode;
-    const areasParent = svg.select('#labels-world-areas').node()?.parentNode;
-    console.log('[ocean] Container check:', {
-      oceanParent: oceanParent?.id || oceanParent?.className || 'unknown',
-      areasParent: areasParent?.id || areasParent?.className || 'unknown',
-      sameParent: oceanParent === areasParent
-    });
+    if (r && typeof r.x === 'number' && typeof r.y === 'number' && typeof r.w === 'number' && typeof r.h === 'number') {
+      // Check 1: Verify parent transform (should be the same as other labels)
+      const parentTransform = d3.select(gOcean.node().parentNode).attr('transform');
+      console.log('[ocean] parent <g> transform =', parentTransform);
+      
+      // Check 2: Verify roundtrip coordinate conversion
+      const t = d3.zoomTransform(svg.node());
+      const x0 = t.applyX(r.x), y0 = t.applyY(r.y);
+      const x1 = t.applyX(r.x + r.w), y1 = t.applyY(r.y + r.h);
+      
+      console.log('[ocean] Roundtrip verification:', {
+        worldRect: r,
+        screenRect: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 },
+        zoomTransform: { k: t.k, x: t.x, y: t.y }
+      });
+      
+      // Check 3: Verify the ocean label is in the dedicated container
+      const oceanParent = gOcean.node().parentNode;
+      const areasParent = svg.select('#labels-world-areas').node()?.parentNode;
+      console.log('[ocean] Container check:', {
+        oceanParent: oceanParent?.id || oceanParent?.className || 'unknown',
+        areasParent: areasParent?.id || areasParent?.className || 'unknown',
+        sameParent: oceanParent === areasParent
+      });
+    }
   }
   
   // (Dev) sanity log at the end of ocean render
@@ -3114,6 +3548,14 @@ export function renderOceanInWorld(svg, text) {
 
 // Render all labels once with keyed join (hidden by default)
 export function renderLabels({ svg, placed, groupId }) {
+  if (!svg || !placed || !Array.isArray(placed)) {
+    console.warn('[labels] renderLabels: invalid parameters', {svg, placed, groupId});
+    return;
+  }
+  
+  // Ensure label containers are in the right coordinate space
+  ensureLabelContainers(svg);
+  
   // Route non-ocean joins to their own container
   const g = groupId === 'labels-world' ? svg.select('#labels-world-areas') : svg.select(`#${groupId}`);
   
@@ -3122,8 +3564,8 @@ export function renderLabels({ svg, placed, groupId }) {
   }
   
   // Safety check: ensure placed is an array
-  if (!Array.isArray(placed) || placed.length === 0) {
-    console.warn('[labels] renderLabels: no labels to render or invalid data');
+  if (placed.length === 0) {
+    console.warn('[labels] renderLabels: no labels to render');
     return;
   }
   
@@ -3135,13 +3577,13 @@ export function renderLabels({ svg, placed, groupId }) {
   sel.exit().remove();
   
   // Create new labels
-  const enter = sel.enter().append('g').attr('class', d => `label ${d.kind} tier-${d.tier || 4}`);
+  const enter = sel.enter().append('g').attr('class', d => `label ${d?.kind || 'unknown'} tier-${d?.tier || 4}`);
   
   // Add stroke and fill text elements
-  enter.append('text').attr('class', d => `label stroke tier-${d.tier || 4}`)
+  enter.append('text').attr('class', d => `label stroke tier-${d?.tier || 4}`)
     .attr('vector-effect', 'non-scaling-stroke')
     .style('paint-order', 'stroke');
-  enter.append('text').attr('class', d => `label fill tier-${d.tier || 4}`)
+  enter.append('text').attr('class', d => `label fill tier-${d?.tier || 4}`)
     .attr('vector-effect', 'non-scaling-stroke');
   
   // Update all labels (enter + update)
@@ -3175,7 +3617,7 @@ export function renderLabels({ svg, placed, groupId }) {
     // store for later debugging
     textSel.attr('data-label-id', d.id || `lbl-${i}`);
     // stable uid for debugging & joins
-    if (d.uid == null) d.uid = `lbl_${d.kind}_${Math.random().toString(36).slice(2,7)}`;
+    if (d.uid == null) d.uid = `lbl_${d?.kind || 'unknown'}_${Math.random().toString(36).slice(2,7)}`;
     // establish baselines once (Prompt 7 set these; keep here to be safe)
     if (d.baseFontPx == null) d.baseFontPx = d.fontPx || 28;
     if (d.baseStrokePx == null) d.baseStrokePx = 2;
@@ -3184,14 +3626,12 @@ export function renderLabels({ svg, placed, groupId }) {
   pickProbeLabel(labels);
   logProbe('renderLabels:after-join', labels);
   
-  // Set position and transform
-  merged.attr('transform', function(d) {
-    if (!d) return 'translate(0,0)'; // Safety guard
+  // Position labels in world coordinates (transforms handled by applyLabelTransforms)
+  merged.each(function(d) {
+    if (!d) return; // Safety guard
     const p = labelDrawXY(d);
-    // last-resort guard: never return NaN
-    const x = safe(p.x, 0);
-    const y = safe(p.y, 0);
-    return `translate(${x},${y})`;
+    // Store world coordinates in anchor property for applyLabelTransforms to use
+    d.anchor = { x: p.x, y: p.y };
   });
   
   // Update stroke text
@@ -3203,7 +3643,7 @@ export function renderLabels({ svg, placed, groupId }) {
       const textElement = d3.select(node);
       if (textElement.empty()) return;
       // store for later debugging
-      textElement.attr('data-label-id', d.id || `lbl-${i}`);
+      textElement.attr('data-label-id', d?.id || `lbl-${i}`);
       
       if (!d || !d.text) return;
       textElement
@@ -3215,14 +3655,14 @@ export function renderLabels({ svg, placed, groupId }) {
           return (d.font_world_px ?? (d.baseFontPx || 24)) + 'px';
         })
         .classed('is-visible', true)
-        .classed('ocean', d.kind === 'ocean')
-        .classed('lake', d.kind === 'lake')
-        .classed('island', d.kind === 'island')
+        .classed('ocean', d?.kind === 'ocean')
+        .classed('lake', d?.kind === 'lake')
+        .classed('island', d?.kind === 'island')
         .classed('label', true)
-        .classed(`tier-${d.tier || 4}`, true);
+        .classed(`tier-${d?.tier || 4}`, true);
       
       // Handle ocean labels with keepWithinRect using fitTextToRect
-      if (d.kind === 'ocean' && d.keepWithinRect) {
+      if (d?.kind === 'ocean' && d.keepWithinRect) {
         // Use world coordinates directly with fitTextToRect
         const {k} = getZoomState();
         const rw = d.keepWithinRect; // world units
@@ -3306,14 +3746,14 @@ export function renderLabels({ svg, placed, groupId }) {
         .classed('label', true)
         .classed(`tier-${d.tier || 4}`, true)
         // Style token classes when enabled
-        .classed('label--water', window.labelFlags?.styleTokensOnly && (d.kind === 'ocean' || d.kind === 'lake'))
+        .classed('label--water', window.labelFlags?.styleTokensOnly && (d?.kind === 'ocean' || d?.kind === 'lake'))
         .classed('label--area', window.labelFlags?.styleTokensOnly && (
-          d.kind === 'ocean' || 
-          (d.kind === 'island' && (d.area ?? 0) > 15000)
+          d?.kind === 'ocean' || 
+          (d?.kind === 'island' && (d?.area ?? 0) > 15000)
         ));
       
       // Handle ocean labels with keepWithinRect using fitTextToRect
-      if (d.kind === 'ocean' && d.keepWithinRect) {
+      if (d?.kind === 'ocean' && d.keepWithinRect) {
         // Use world coordinates directly with fitTextToRect
         const {k} = getZoomState();
         const rw = d.keepWithinRect; // world units
@@ -3844,16 +4284,60 @@ function enforceMinAspect(pxRect, minAspect) {
   return { x, y, w, h };
 }
 
+// SAT cache to avoid rebuilding when land/water geometry hasn't changed
+const satCache = new Map();
+
+// Expose cache management for debugging
+window.clearSATCache = () => {
+  const size = satCache.size;
+  satCache.clear();
+  console.log(`[ocean] SAT cache cleared (${size} entries removed)`);
+};
+
+window.getSATCacheSize = () => {
+  console.log(`[ocean] SAT cache size: ${satCache.size}`);
+  return satCache.size;
+};
+
+function getOrBuildSAT(key, buildFn) {
+  if (satCache.has(key)) {
+    console.log('[ocean] SAT cache HIT:', key);
+    return satCache.get(key);
+  }
+  console.log('[ocean] SAT cache MISS, building:', key);
+  const sat = buildFn();
+  satCache.set(key, sat);
+  
+  // Prevent cache from growing too large (keep last 10 entries)
+  if (satCache.size > 10) {
+    const firstKey = satCache.keys().next().value;
+    satCache.delete(firstKey);
+    console.log('[ocean] SAT cache cleanup: removed oldest entry');
+  }
+  
+  return sat;
+}
+
 // Exported entry point: call this AFTER autofit
+// Performance optimization: Uses raster scale factor to reduce SAT computation cost
+// SAT speed is ~O(n), so even 0.6× can nearly halve the cost with minimal quality loss
 export function findOceanLabelRectAfterAutofit(
   visibleBounds,
   getCellAtXY,
   seaLevel = 0.2,
   step = 8,
   pad = 1,
-  minAspect = 2.0
+  minAspect = 2.0,
+  rasterScale = 0.6
 ) {
   console.log(`[ocean] Using post-autofit bounds: [${visibleBounds.join(', ')}]`);
+
+  // Raster scale factor for performance (often imperceptible for ocean text)
+  // SAT speed is ~O(n), so even 0.6× can nearly halve the cost
+  const RASTER_SCALE = rasterScale;
+  const scaledStep = step / RASTER_SCALE;
+  
+  console.log(`[ocean] Raster scale: ${RASTER_SCALE}x (step: ${step} → ${scaledStep.toFixed(1)})`);
 
   const worldNode = d3.select('#world').node() || d3.select('svg').node();
   const z = d3.zoomTransform(worldNode);
@@ -3881,12 +4365,41 @@ export function findOceanLabelRectAfterAutofit(
     return true;
   }
 
+  // Wrapper for scaled SAT coordinates
+  function scaledPixelPointIsOcean(scaledPx, scaledPy) {
+    // Map scaled coordinates back to original coordinate space
+    const px = scaledPx / RASTER_SCALE;
+    const py = scaledPy / RASTER_SCALE;
+    return pixelPointIsOcean(px, py);
+  }
+
   // Get existing visible labels for hard avoidance
   const existingLabels = window.__labelsPlaced?.features || [];
   
   // Use inset search bounds instead of full viewport
   const insetBounds = [searchPx.x0, searchPx.y0, searchPx.x1, searchPx.y1];
-  const satEnv = timeit('SAT build water mask', () => buildWaterMaskSAT(insetBounds, step, pixelPointIsOcean, existingLabels));
+  
+  // Scale down bounds for rasterization (performance optimization)
+  const scaledBounds = [
+    insetBounds[0] * RASTER_SCALE,
+    insetBounds[1] * RASTER_SCALE,
+    insetBounds[2] * RASTER_SCALE,
+    insetBounds[3] * RASTER_SCALE
+  ];
+  
+  // Create cache key based on seed + viewport size + water comps count
+  const cacheKey = {
+    seed: window.state?.seed || 'unknown',
+    viewportSize: `${Math.round(insetBounds[2] - insetBounds[0])}x${Math.round(insetBounds[3] - insetBounds[1])}`,
+    waterCompsCount: existingLabels.filter(l => l.kind === 'ocean').length,
+    step: scaledStep,
+    seaLevel: seaLevel
+  };
+  const cacheKeyStr = JSON.stringify(cacheKey);
+  
+  const satEnv = timeit('SAT build water mask', () => 
+    getOrBuildSAT(cacheKeyStr, () => buildWaterMaskSAT(scaledBounds, scaledStep, scaledPixelPointIsOcean, existingLabels))
+  );
 
   // NEW: collect top-K horizontal rects, then re-rank by a label-friendly score
   const candidates = timeit('SAT search rects', () => largestHorizontalWaterRects(satEnv, 12));
@@ -3899,7 +4412,14 @@ export function findOceanLabelRectAfterAutofit(
   for (const r of candidates) {
     let rect = shrinkUntilAllWater(r, satEnv.landCount, pad, minAspect);
     if (rect.width < 1 || rect.height < 1) continue;
+    // Map scaled grid results back to original coordinate space
     let px = gridRectToPixels(rect, satEnv.origin, satEnv.step);
+    px = {
+      x: px.x / RASTER_SCALE,
+      y: px.y / RASTER_SCALE,
+      w: px.w / RASTER_SCALE,
+      h: px.h / RASTER_SCALE
+    };
     if (px.w < px.h * minAspect) px = enforceMinAspect(px, minAspect);
     
     // Clamp to inset search bounds
@@ -4552,7 +5072,7 @@ export function findOceanLabelRectHybrid(
   landPadPx = 12
 ) {
   // Try SAT-grid method
-  const satRect = findOceanLabelRectAfterAutofit(visibleBounds, getCellAtXY, seaLevel, step, pad, minAspect);
+          const satRect = findOceanLabelRectAfterAutofit(visibleBounds, getCellAtXY, seaLevel, step, pad, minAspect, 0.6);
   // Try bbox obstacle method
   const bbRect = findOceanRectByBBoxes(visibleBounds, getCellAtXY, seaLevel, step, landPadPx, minAspect);
   if (satRect && !bbRect) return satRect;

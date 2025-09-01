@@ -12,9 +12,12 @@ A web‑based fantasy map generator that builds Voronoi‑based worlds with real
 
   * Simulated‑annealing placement with collision avoidance for non‑ocean labels.
   * Ocean labels placed in **world space** and fitted into the largest valid rectangle; supports **two‑line** breaks and **counter‑scales** with zoom to keep readable on screen.
+  * **SAT caching**: Water mask computation cached between runs when geometry hasn't changed (keyed on seed + viewport + water components).
+  * **Deferred placement**: Ocean labels deferred to idle time when possible to avoid blocking `requestAnimationFrame`.
   * Zoom‑level LOD: small features fade in as you zoom.
   * **Viewport culling**: Off-screen labels are hidden for performance, with ocean label sticky visibility.
 * **Interaction**: Smooth pan/zoom (D3 v5), HUD readouts, and a lightweight performance HUD.
+* **Performance**: Intelligent deferral of heavy operations to idle time, SAT caching, and raster scaling optimizations.
 * **Safety**: Defensive checks against NaN/Infinity, clamped zoom, and self‑tests.
 
 ---
@@ -124,6 +127,9 @@ npm test
 * `ensureOceanStickyVisibility` (≈ line 197): ocean label sticky behavior.
 * `ensureLabelLayers` / `ensureScreenLabelLayer` (≈ lines 39/52): set up label layers.
 * `updateOceanLabelScreenPosition` (≈ line 3575) & `clearScreenLabels` (≈ line 3567).
+* **Performance optimizations**:
+  * `getOrBuildSAT()`: SAT caching with automatic cleanup (10 entry limit)
+  * `findOceanLabelRectAfterAutofit()`: Raster scaling for faster water mask computation
 * **New LOD functions**:
   * `worldPoint(d)`: Robust coordinate extraction with solver priority
   * `applyLabelTransforms(svg)`: Updates label positions on every zoom
@@ -152,6 +158,7 @@ npm test
 * A **Perf HUD** logs timings for generate/zoom/paint; toggle `window.DEBUG` in `src/main.js`.
 * **LOD Debug HUD**: Live overlay shows zoom level, tier bands, and opacity values (see `src/modules/labelsDebug.js`).
 * **Console LOD logging**: Shows filtered label counts at each zoom level.
+* **Performance debugging**: SAT cache size (`window.getSATCacheSize()`), ocean placement control (`window.forceImmediateOceanPlacement()`), and interaction tracking.
 * Dev sandboxes live in `/dev` (e.g., `test-label-zoom.html`, `test-anneal-labels.html`, `test-sat-ocean-placement.html`, `test-viewport-culling.html`, `verify-culling.html`).
 
 ---

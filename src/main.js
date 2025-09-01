@@ -28,6 +28,26 @@ function timeit(tag, fn) {
   return out;
 }
 
+// Safely insert new nodes before an in-parent anchor; otherwise append.
+// Works with D3 v5 .enter() selections.
+function safeInsertBefore(parentSel, enterSel, tag, beforeSelector) {
+  const parentNode = parentSel.node();
+  // Anchor must be selected inside the SAME parent
+  const beforeNode = beforeSelector ? parentSel.select(beforeSelector).node() : null;
+
+  const sameParent = !!beforeNode && beforeNode.parentNode === parentNode;
+  console.log('[safeInsertBefore] parent=#' + (parentNode && parentNode.id),
+              { beforeSelector, beforeNodeTag: beforeNode && beforeNode.tagName, sameParent });
+
+  if (sameParent) {
+    // Per-group insert (D3 v5): pass a function returning the before node
+    return enterSel.insert(tag, function() { return beforeNode; });
+  } else {
+    console.warn('[safeInsertBefore] anchor invalid or not in parent; using append');
+    return enterSel.append(tag);
+  }
+}
+
 import { RNG } from "./core/rng.js";
 import { Timers } from "./core/timers.js";
 import { ensureLayers, ensureLabelSubgroups } from "./render/layers.js";
@@ -41,7 +61,7 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction, getVisibleWorldBounds, padBounds, zoom } from "./modules/interaction.js";
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
-import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, updateLabelVisibilityWithOptions, updateLabelVisibilityByTier, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, logProbe, LABEL_DEBUG, clampToKeepRect, getZoomK, textWidthPx, labelFontFamily, placeOceanLabelInScreenSpace, renderOceanInWorld, renderNonOceanLabels, renderWorldLabels, renderOverlayLabels, ensureLabelLayers, applyFontCaps, applyLabelTransforms, updateLabelVisibilityLOD } from "./modules/labels.js";
+import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, updateLabelVisibilityWithOptions, updateLabelVisibilityByTier, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, logProbe, LABEL_DEBUG, clampToKeepRect, getZoomK, textWidthPx, labelFontFamily, placeOceanLabelInScreenSpace, renderOceanInWorld, renderNonOceanLabels, renderWorldLabels, renderOverlayLabels, ensureLabelContainers, smokeLabel, forceAllLabelsVisible, updateLabelLOD, applyFontCaps, applyLabelTransforms, updateLabelVisibilityLOD } from "./modules/labels.js";
 import { loadLabelTokens } from "./modules/labelTokens.js";
 import { showLODHUD } from "./modules/labelsDebug.js";
 
@@ -326,6 +346,26 @@ function afterGenerate() {
   }
 }
 
+// Track user interaction for intelligent ocean placement deferral
+function setupInteractionTracking() {
+  // Track mouse movement
+  document.addEventListener('mousemove', () => {
+    window.lastMouseMove = Date.now();
+  }, { passive: true });
+  
+  // Track touch events
+  document.addEventListener('touchstart', () => {
+    window.lastTouchEvent = Date.now();
+  }, { passive: true });
+  
+  // Track scroll events
+  document.addEventListener('scroll', () => {
+    window.lastScrollEvent = Date.now();
+  }, { passive: true });
+  
+  console.log('[ocean] Interaction tracking enabled for intelligent placement deferral');
+}
+
 // Global transform tracking for coordinate space conversions
 let currentTransform = d3.zoomIdentity;
 window.currentTransform = currentTransform; // Global transform tracking
@@ -353,6 +393,9 @@ console.warn = function(...args) {
 // Seeded RNG + Timers singletons
 const rng = new RNG(state.seed);
 const timers = new Timers();
+
+// Set up interaction tracking for intelligent ocean placement deferral
+setupInteractionTracking();
 
 console.group('Urban Train - Initial Generation');
 console.time('generate');
@@ -393,7 +436,10 @@ async function generate(count) {
   // Ensure proper layer structure
   const layers = ensureLayers(svg);
   ensureLabelSubgroups(svg);
-  ensureLabelLayers(svg);
+  ensureLabelContainers(svg);
+  
+  // Smoke test: draw a visible, fixed label to test basic rendering and layering
+  smokeLabel(svg);
   
   // One-time, non-zoomed container only for text measurement
   let gMeasure = svg.select("g.__measure");
@@ -600,8 +646,11 @@ async function generate(count) {
     renderWorldLabels(svgSel, featureLabels);
     renderOverlayLabels(svgSel, featureLabels);
     
+
+    
     // Apply per-label transforms with zoom
-    applyLabelTransforms(svgSel);
+    const initialZoom = d3.zoomTransform(svgSel.node()).k || 1;
+    applyLabelTransforms(svgSel, initialZoom); // Initial generation, no zoom
 
     // stash for zoom visibility updates (will be updated after autofit + ocean placement)
     window.__labelsPlaced = { features: placedFeatures };
@@ -647,6 +696,12 @@ async function generate(count) {
       circlesLayer: circles,
       svg
     });
+    
+    // Re-ensure label containers are on top after drawing terrain/water/coastlines
+    ensureLabelContainers(svg);
+    
+    // Re-add smoke test label to ensure it's still visible after terrain drawing
+    smokeLabel(svg);
     
     // Ensure labels are on top after all map elements are rendered
     const labelsGroup = svgSel.select('#labels');
@@ -699,7 +754,8 @@ async function generate(count) {
       lockZoomToAutofitLevel();
       
       // Now place ocean labels with the correct post-autofit bounds
-      placeOceanLabelsAfterAutofit();
+      // Defer to idle when possible to avoid blocking requestAnimationFrame
+      deferOceanPlacement(placeOceanLabelsAfterAutofit);
       
     } catch (error) {
       console.warn('[autofit] Method 1 failed, falling back to Method 2:', error);
@@ -712,8 +768,8 @@ async function generate(count) {
         const tr = svgSel.transition().duration(600);
         
         // Set up transition event handlers
-        tr.on('end.placeOcean.autofit', placeOceanLabelsAfterAutofit);
-        tr.on('interrupt.placeOcean.autofit', placeOceanLabelsAfterAutofit); // safety
+        tr.on('end.placeOcean.autofit', () => deferOceanPlacement(placeOceanLabelsAfterAutofit));
+        tr.on('interrupt.placeOcean.autofit', () => deferOceanPlacement(placeOceanLabelsAfterAutofit)); // safety
         
         // Start the autofit
         await window.fitLand();
@@ -737,7 +793,7 @@ async function generate(count) {
         // Lock zoom to prevent zooming out beyond autofit level
         lockZoomToAutofitLevel();
         
-        afterLayout(placeOceanLabelsAfterAutofit);
+        afterLayout(() => deferOceanPlacement(placeOceanLabelsAfterAutofit));
       }
     }
   }
@@ -754,6 +810,71 @@ async function generate(count) {
     }
   }
 
+  // Check if ocean placement should be immediate (e.g., user is actively interacting)
+  function shouldPlaceImmediately() {
+    // Check if user is actively interacting
+    const isUserInteracting = document.hasFocus() && (
+      // Mouse movement in last 100ms
+      (window.lastMouseMove && Date.now() - window.lastMouseMove < 100) ||
+      // Touch events in last 100ms  
+      (window.lastTouchEvent && Date.now() - window.lastTouchTouch < 100) ||
+      // Scroll events in last 100ms
+      (window.lastScrollEvent && Date.now() - window.lastScrollEvent < 100)
+    );
+    
+    // Check if we're in a critical rendering phase
+    const isCriticalPhase = window.state?.isRendering || window.state?.isGenerating;
+    
+    return isUserInteracting || isCriticalPhase;
+  }
+
+  // Defer ocean placement to idle time when possible to avoid blocking requestAnimationFrame
+  // This improves perceived performance by:
+  // - Allowing smooth animations to continue uninterrupted
+  // - Reducing frame drops during autofit operations
+  // - Prioritizing user interactions over background label placement
+  // - Using browser idle time when available (requestIdleCallback)
+  function deferOceanPlacement(callback, options = {}) {
+    const { 
+      immediate = false,           // Force immediate execution
+      timeout = 1000,             // Idle callback timeout (ms)
+      fallbackDelay = 16          // Fallback delay (ms)
+    } = options;
+
+    // Determine if immediate placement is needed
+    const needsImmediate = immediate || shouldPlaceImmediately();
+
+    // If immediate placement is required, execute now
+    if (needsImmediate) {
+      console.log('[ocean] Immediate placement (blocking) - user interaction or critical phase');
+      callback();
+      return;
+    }
+
+    // Check if requestIdleCallback is available
+    if (typeof requestIdleCallback !== 'undefined') {
+      // Defer to idle time with configurable timeout
+      requestIdleCallback(callback, { timeout });
+      console.log(`[ocean] Deferred placement to idle time (timeout: ${timeout}ms)`);
+    } else {
+      // Fallback for browsers without requestIdleCallback
+      // Use a small delay to avoid blocking the current frame
+      setTimeout(callback, fallbackDelay);
+      console.log(`[ocean] Fallback: deferred placement with setTimeout (${fallbackDelay}ms)`);
+        }
+  }
+  
+  // Expose ocean placement control for debugging
+  window.forceImmediateOceanPlacement = () => {
+    console.log('[ocean] Forcing immediate placement (debug)');
+    deferOceanPlacement(placeOceanLabelsAfterAutofit, { immediate: true });
+  };
+
+  window.forceDeferredOceanPlacement = () => {
+    console.log('[ocean] Forcing deferred placement (debug)');
+    deferOceanPlacement(placeOceanLabelsAfterAutofit, { timeout: 5000, fallbackDelay: 100 });
+  };
+  
   // Ocean label placement function - called after autofit completes
   function placeOceanLabelsAfterAutofit() {
     console.log('[autofit] Autofit completed, now placing ocean labels...');
@@ -768,6 +889,52 @@ async function generate(count) {
       oceanCount: oceanLabels.length,
       sample: oceanLabels.slice(0, 2).map(l => ({ kind: l.kind, text: l.text }))
     });
+    
+    // --- Shared labels store (debug-friendly) ---
+    // Helper (global; keep in sync with labels.js logic)
+    function isOceanFeature(d) {
+      return d && (d.type === 'ocean' || d.kind === 'ocean' || d.isOcean === true);
+    }
+    
+    (function ensureLabelsStore(){
+      if (!window.__labelsStoreMeta) window.__labelsStoreMeta = {};
+
+      // Store the array used for rendering labels (ALL features)
+      window.__labelsStore = Array.isArray(featureLabels) ? featureLabels : [];
+      const oceanCount = window.__labelsStore.filter(isOceanFeature).length;
+      window.__labelsStoreMeta.lastSet = {
+        total: window.__labelsStore.length,
+        ocean: oceanCount,
+        nonOcean: window.__labelsStore.length - oceanCount,
+      };
+      console.log('[store] set __labelsStore', window.__labelsStoreMeta.lastSet);
+    })();
+    
+    // --- Stabilize feature keys for joins ---
+    (function stabilizeLabelIds(){
+      const store = window.__labelsStore || [];
+      const meta = window.__labelsStoreMeta || (window.__labelsStoreMeta = {});
+      // Prefer existing ids; fall back to a centroid-ish fingerprint
+      function labelKey(d, i) {
+        return (
+          d.labelId ||
+          d.id || d.gid || d.uid ||
+          (d.properties && (d.properties.id || d.properties.gid || d.properties.name)) ||
+          // conservative fallback: type + rounded coords; good enough within a single generation
+          `${d.type || d.kind || 'feat'}:${Math.round(d.x || d.cx || d.lon || 0)}:${Math.round(d.y || d.cy || d.lat || 0)}:${i}`
+        );
+      }
+      let collision = 0;
+      const seen = new Set();
+      for (let i = 0; i < store.length; i++) {
+        const k = labelKey(store[i], i);
+        if (seen.has(k)) collision++;
+        store[i].labelId = k;
+        seen.add(k);
+      }
+      meta.keys = { total: store.length, unique: seen.size, collision };
+      console.log('[store] stabilized ids', meta.keys, { sample: store.slice(0,5).map(d => d.labelId) });
+    })();
     
     if (oceanLabels.length > 0) {
       console.log('[ocean] 🎯 Placing ocean labels after autofit with correct bounds');
@@ -814,13 +981,15 @@ async function generate(count) {
             // Render ocean label in world space using the spot
             renderOceanInWorld(svgSel, oceanLabel.text);
             // Apply per-label transforms with zoom
-            applyLabelTransforms(svgSel);
+            const oceanZoom = d3.zoomTransform(svgSel.node()).k || 1;
+            applyLabelTransforms(svgSel, oceanZoom); // After ocean placement, no zoom
           } else {
-            console.log(`[labels] Ocean "${oceanLabel.text}" using centroid: (${oceanLabel.x.toFixed(1)}, ${oceanLabel.y.toFixed(1)}) - no suitable spot found`);
+            console.log(`[labels] Ocean "${oceanLabel.text}" using centroid: (${oceanLabel.y.toFixed(1)}, ${oceanLabel.y.toFixed(1)}) - no suitable spot found`);
             // Still render the ocean label even if no spot found
             renderOceanInWorld(svgSel, oceanLabel.text);
             // Apply per-label transforms with zoom
-            applyLabelTransforms(svgSel);
+            const oceanZoom2 = d3.zoomTransform(svgSel.node()).k || 1;
+            applyLabelTransforms(svgSel, oceanZoom2); // After ocean placement, no zoom
           }
         }
       } else {
@@ -834,7 +1003,7 @@ async function generate(count) {
         const step = Math.max(8, Math.min(14, Math.round(maxDim / 120)));
         
         // Use the new SAT-based rectangle finder with viewport bounds
-        const pxRect = findOceanLabelRectAfterAutofit(viewportBounds, state.getCellAtXY, state.seaLevel, step, 1);
+        const pxRect = findOceanLabelRectAfterAutofit(viewportBounds, state.getCellAtXY, state.seaLevel, step, 1, 2.0, 0.6);
         
         if (pxRect) {
           console.log(`[ocean] ✅ Using SAT-based placement for ${oceanLabels.length} ocean label(s)`);
@@ -869,12 +1038,13 @@ async function generate(count) {
           // Set up areas layer for non-ocean labels
           const gAll = svgSel.select('#labels-world-areas');    // islands + lakes (areas layer)
           
-          // Place ocean label in world space using the SAT rectangle
-          if (ocean && pxRect) {
-            renderOceanInWorld(svgSel, ocean.text);
-            
-            // Apply per-label transforms with zoom
-            applyLabelTransforms(svgSel);
+                      // Place ocean label in world space using the SAT rectangle
+            if (ocean && pxRect) {
+              renderOceanInWorld(svgSel, ocean.text);
+              
+              // Apply per-label transforms with zoom
+              const satZoom = d3.zoomTransform(svgSel.node()).k || 1;
+              applyLabelTransforms(svgSel, satZoom); // After ocean placement, no zoom
             
             // Apply font caps after ocean label is placed (now we can read its size)
             applyFontCaps();
@@ -902,8 +1072,11 @@ async function generate(count) {
             renderWorldLabels(svgSel, selected);
             renderOverlayLabels(svgSel, selected);
             
+
+            
             // Apply per-label transforms with zoom
-            applyLabelTransforms(svgSel);
+            const saZoom = d3.zoomTransform(svgSel.node()).k || 1;
+            applyLabelTransforms(svgSel, saZoom); // After SA placement, no zoom
             
             // Debug logging after SA placement render
             if (LABEL_DEBUG) {
@@ -915,6 +1088,115 @@ async function generate(count) {
             window.__labelsPlaced = { features: selected };
           } else {
             console.log('[labels] ok==true; skipping global re-cull BUT re-rendering non-ocean labels');
+            
+
+
+
+
+
+
+            // ---- Instrumented re-render for NON-ocean labels
+            (function instrumentedNonOceanRerender() {
+
+              // DOM snapshot BEFORE join
+              const domBefore = {
+                worldGroups: d3.select('#labels-world').selectAll('g').size(),
+                oceanGroups: d3.select('#labels-world').selectAll('g.label--ocean').size(),
+                areaGuess: d3.select('#labels-world-areas').selectAll('g.label').size()
+              };
+
+              // Source sanity: compare old vs new
+              console.log('[non-ocean] source sanity', {
+                fromWindowFeature: (window.featureLabels || []).length,
+                fromStore: (window.__labelsStore || []).length
+              });
+
+              // Use the unified store
+              const nonOceans = (window.__labelsStore || []).filter(f => !isOceanFeature(f));
+
+              // If it's empty, bail early to avoid turning everything into exits
+              if (!nonOceans.length) {
+                console.warn('[non-ocean] EMPTY DATA — skipping join to prevent accidental deletions');
+                return;
+              }
+
+              console.log('[non-ocean] data before join', {
+                totalFeatures: (window.__labelsStore || []).length,
+                nonOceans: nonOceans.length,
+                domBefore
+              });
+
+              // Work only inside the non-ocean container
+              let labelsWorld = d3.select('#labels-world-areas');
+              if (labelsWorld.empty()) {
+                console.warn('[non-ocean] #labels-world-areas not found; falling back to #labels-world');
+                labelsWorld = d3.select('#labels-world'); // last resort
+              }
+
+              const keyFn = d => d.labelId;
+
+              // JOIN (scoped to the correct parent)
+              const sel = labelsWorld
+                .selectAll('.label--area, .label--river, .label--lake, .label--island')
+                .data(nonOceans, keyFn);
+
+              // EXIT
+              const exitSel = sel.exit();
+              console.log('[non-ocean] exiting count', exitSel.size());
+              exitSel.each(d => console.log('[non-ocean] removing node', d && d.labelId, d && d.type))
+                     .remove();
+
+              // ENTER
+              const enterSel = sel.enter();
+              console.log('[non-ocean] enter count', enterSel.size());
+
+              // Simple append to the non-ocean container (z-order handled by container hierarchy)
+              const enterG = enterSel.append('g')
+                .attr('class', d => {
+                  // keep your existing class logic here
+                  // e.g., return `label ${d.kindClass} ${d.tierClass} label--${d.type}`;
+                  return d.class || 'label non-ocean';
+                });
+
+              // Basic text creation for entered labels
+              enterG.append('text')
+                .attr('text-anchor', 'middle')
+                .attr('dominant-baseline', 'middle')
+                .style('font-size', '14px')
+                .style('font-family', 'serif')
+                .text(d => d.text || d.name || 'Label');
+
+              // UPDATE + MERGE
+              const merged = enterG.merge(sel);
+
+              // (Optional) if you rely on z-order after update, you can re-assert it safely:
+              // merged.each(function() { this.parentNode && this.parentNode.appendChild(this); }); // bring to front
+              // or merged.lower(); // send behind (D3 adds .lower in v5)
+
+              // Post-join integrity logs
+              const domAfter = {
+                worldGroups: d3.select('#world').selectAll(':scope > g').size(),
+                oceanGroups: d3.selectAll('#labels-world-ocean .ocean-label').size(),
+                nonOceanGroups: d3.selectAll('#labels-world-areas .label').size(),
+              };
+              console.log('[non-ocean] after merge size', merged.size());
+              console.log('[non-ocean] DOM after cleanup', domAfter);
+
+              // Also log the join delta with keys for clarity
+              console.log('[non-ocean] join delta (keys)', {
+                entered: enterSel.size(),
+                updated: merged.size() - enterSel.size(),
+                exiting: 0 // we removed them above
+              });
+
+              // Explicit z-order (optional, but removes any doubt)
+              // After your non-ocean join, adjust stacking once, not per label:
+              svg.select('#labels-world-areas').raise(); // put areas above
+              svg.select('#labels-world-ocean').lower(); // keep ocean below
+              // (Flip these if you want oceans on top.)
+
+
+            })();
             
             // Ocean labels are already placed, but we still need to render lakes/islands
             // No need to re-run LOD filtering or collision avoidance, but we must render world labels
@@ -928,7 +1210,8 @@ async function generate(count) {
           renderWorldLabels(svgSel, selected);
           
           // Apply per-label transforms with zoom
-          applyLabelTransforms(svgSel);
+          const reRenderZoom = d3.zoomTransform(svgSel.node()).k || 1;
+          applyLabelTransforms(svgSel, reRenderZoom); // After re-render, no zoom
           
         } else {
           console.warn('[ocean] ❌ No suitable SAT rectangle found; ocean labels will use default placement.');
@@ -954,8 +1237,11 @@ async function generate(count) {
           renderWorldLabels(svgSel, selected);
           renderOverlayLabels(svgSel, selected);
           
+
+          
           // Apply per-label transforms with zoom
-          applyLabelTransforms(svgSel);
+          const saPlacementZoom = d3.zoomTransform(svgSel.node()).k || 1;
+          applyLabelTransforms(svgSel, saPlacementZoom); // After SA placement, no zoom
           
           // Debug logging after SA placement render
           if (LABEL_DEBUG) {
@@ -994,8 +1280,11 @@ async function generate(count) {
   console.groupEnd();
 
   // Update label visibility after generation completes
-  applyLabelTransforms(svgSel);
+  const finalZoom = d3.zoomTransform(svgSel.node()).k || 1;
+  applyLabelTransforms(svgSel, finalZoom); // After generation, no zoom
   updateLabelVisibility(svgSel);
+  
+
   
   // Show initial LOD debug information
   showLODHUD(svgSel);

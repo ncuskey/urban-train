@@ -328,3 +328,12 @@ text.place-label.ocean {
 
 /* off-screen virtualization */
 .culled { display: none; }
+
+/* Unify fonts between world-space and overlay labels */
+#labels .label text,
+#labels-overlay .ocean-text {
+  font-family: var(--label-font, "IM FELL English", serif);
+  font-kerning: normal;
+  font-feature-settings: "liga" 1, "kern" 1;
+  letter-spacing: 0.02em;
+}

@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Label Containers</title>
+    <style>
+        body { margin: 20px; font-family: system-ui; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .success { background: #d4edda; border-color: #c3e6cb; }
+        .error { background: #f8d7da; border-color: #f5c6cb; }
+        button { padding: 8px 16px; margin: 5px; }
+        #svg-container { border: 1px solid #ddd; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <h1>Test Label Containers</h1>
+    
+    <div class="test-section">
+        <h3>Test Controls</h3>
+        <button onclick="testBasicContainers()">Test Basic Container Creation</button>
+        <button onclick="testContainerOrder()">Test Container Z-Order</button>
+        <button onclick="testReparenting()">Test Container Reparenting</button>
+        <button onclick="testSmokeLabel()">Test Smoke Label</button>
+        <button onclick="testForceVisibility()">Test Force Visibility</button>
+        <button onclick="testLabelTransforms()">Test Label Transforms</button>
+        <button onclick="testLabelLOD()">Test Label LOD</button>
+        <button onclick="clearTest()">Clear Test</button>
+    </div>
+    
+    <div id="svg-container">
+        <svg id="test-svg" width="600" height="400">
+            <defs></defs>
+            <g id="world">
+                <rect x="50" y="50" width="100" height="100" fill="lightblue" stroke="blue"/>
+                <circle cx="200" cy="100" r="50" fill="lightgreen" stroke="green"/>
+            </g>
+        </svg>
+    </div>
+    
+    <div id="results"></div>
+
+    <script type="module">
+        import { ensureLabelContainers, smokeLabel, forceAllLabelsVisible, updateLabelLOD, applyLabelTransforms } from '../src/modules/labels.js';
+        
+        window.ensureLabelContainers = ensureLabelContainers;
+        window.smokeLabel = smokeLabel;
+        window.forceAllLabelsVisible = forceAllLabelsVisible;
+        window.updateLabelLOD = updateLabelLOD;
+        window.applyLabelTransforms = applyLabelTransforms;
+        
+        function logResult(message, isSuccess = true) {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `test-section ${isSuccess ? 'success' : 'error'}`;
+            div.innerHTML = `<strong>${isSuccess ? '✅' : '❌'}</strong> ${message}`;
+            results.appendChild(div);
+        }
+        
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+        
+        window.testBasicContainers = function() {
+            clearResults();
+            const svg = d3.select('#test-svg');
+            
+            try {
+                // Test basic container creation
+                ensureLabelContainers(svg);
+                
+                // Check if containers exist
+                const labelsRoot = svg.select('#labels');
+                const labelsWorld = svg.select('#labels-world');
+                const labelsOverlay = svg.select('#labels-overlay');
+                
+                if (!labelsRoot.empty() && !labelsWorld.empty() && !labelsOverlay.empty()) {
+                    logResult('All label containers created successfully');
+                } else {
+                    logResult('Some label containers are missing', false);
+                }
+                
+                // Check parent relationships
+                const world = svg.select('#world');
+                if (labelsWorld.node().parentNode === world.node()) {
+                    logResult('labels-world is correctly parented under #world');
+                } else {
+                    logResult('labels-world has incorrect parent', false);
+                }
+                
+                if (labelsOverlay.node().parentNode === svg.node()) {
+                    logResult('labels-overlay is correctly parented under #svg');
+                } else {
+                    logResult('labels-overlay has incorrect parent', false);
+                }
+                
+            } catch (error) {
+                logResult(`Error testing basic containers: ${error.message}`, false);
+            }
+        };
+        
+        window.testContainerOrder = function() {
+            clearResults();
+            const svg = d3.select('#test-svg');
+            
+            try {
+                // Add some test elements to world
+                const world = svg.select('#world');
+                const testElement = world.append('rect')
+                    .attr('x', 300).attr('y', 50)
+                    .attr('width', 100).attr('height', 100)
+                    .attr('fill', 'lightcoral')
+                    .attr('stroke', 'red');
+                
+                // Call ensureLabelContainers to re-raise labels
+                ensureLabelContainers(svg);
+                
+                // Check if labels-world is at the top
+                const worldChildren = Array.from(world.node().children);
+                const labelsWorldIndex = worldChildren.findIndex(child => child.id === 'labels-world');
+                const testElementIndex = worldChildren.findIndex(child => child === testElement.node());
+                
+                if (labelsWorldIndex > testElementIndex) {
+                    logResult('labels-world is correctly positioned above other elements');
+                } else {
+                    logResult('labels-world is not at the top of the z-order', false);
+                }
+                
+                // Log the order for debugging
+                const order = worldChildren.map(n => n.id || n.className?.baseVal || n.nodeName);
+                logResult(`World child order (top last): ${order.join(' → ')}`);
+                
+            } catch (error) {
+                logResult(`Error testing container order: ${error.message}`, false);
+            }
+        };
+        
+        window.testReparenting = function() {
+            clearResults();
+            const svg = d3.select('#test-svg');
+            
+            try {
+                // Move labels-world outside of world
+                const labelsWorld = svg.select('#labels-world');
+                if (!labelsWorld.empty()) {
+                    svg.node().appendChild(labelsWorld.node());
+                    logResult('Moved labels-world outside of #world');
+                    
+                    // Call ensureLabelContainers to reparent it back
+                    ensureLabelContainers(svg);
+                    
+                    // Check if it's back under world
+                    if (labelsWorld.node().parentNode === svg.select('#world').node()) {
+                        logResult('labels-world was correctly reparented back under #world');
+                    } else {
+                        logResult('labels-world was not reparented correctly', false);
+                    }
+                } else {
+                    logResult('No labels-world to test reparenting', false);
+                }
+                
+            } catch (error) {
+                logResult(`Error testing reparenting: ${error.message}`, false);
+            }
+        };
+        
+        window.testSmokeLabel = function() {
+            clearResults();
+            const svg = d3.select('#test-svg');
+            
+            try {
+                // Ensure containers exist first
+                ensureLabelContainers(svg);
+                
+                // Test smoke label
+                smokeLabel(svg);
+                
+                // Check if the debug label was created
+                const debugLabel = svg.select('#labels-world .label.dbg');
+                if (!debugLabel.empty()) {
+                    logResult('Smoke label created successfully');
+                    
+                    // Check if it has the expected elements
+                    const circle = debugLabel.select('circle');
+                    const text = debugLabel.select('text');
+                    
+                    if (!circle.empty() && !text.empty()) {
+                        logResult('Smoke label contains circle and text elements');
+                    } else {
+                        logResult('Smoke label missing expected elements', false);
+                    }
+                    
+                    // Check the transform
+                    const transform = debugLabel.attr('transform');
+                    if (transform && transform.includes('translate(100,100)')) {
+                        logResult('Smoke label has correct transform');
+                    } else {
+                        logResult('Smoke label transform incorrect', false);
+                    }
+                    
+                } else {
+                    logResult('Smoke label was not created', false);
+                }
+                
+            } catch (error) {
+                logResult(`Error testing smoke label: ${error.message}`, false);
+            }
+        };
+        
+        window.testForceVisibility = function() {
+            clearResults();
+            const svg = d3.select('#test-svg');
+            
+            try {
+                // Ensure containers exist first
+                ensureLabelContainers(svg);
+                
+                // Create some test labels with different opacity values
+                const labelsWorld = svg.select('#labels-world');
+                
+                // Create test labels with different classes
+                const testLabel1 = labelsWorld.append('g')
+                    .attr('class', 'label test')
+                    .style('opacity', 0.3)
+                    .append('text')
+                    .text('TEST1')
+                    .attr('x', 50).attr('y', 50);
+                
+                const testLabel2 = labelsWorld.append('g')
+                    .attr('class', 'ocean-label test')
+                    .style('opacity', 0.5)
+                    .append('text')
+                    .attr('x', 150).attr('y', 50);
+                
+                const testLabel3 = labelsWorld.append('g')
+                    .attr('class', 'label--ocean test')
+                    .style('opacity', 0.7)
+                    .append('text')
+                    .text('TEST3')
+                    .attr('x', 250).attr('y', 50);
+                
+                logResult('Created 3 test labels with different opacity values');
+                
+                // Call force visibility
+                forceAllLabelsVisible(svg);
+                
+                // Check if all labels now have opacity 1
+                const allLabels = svg.selectAll('#labels-world .test');
+                let allVisible = true;
+                
+                allLabels.each(function() {
+                    const opacity = d3.select(this).style('opacity');
+                    if (opacity !== '1') {
+                        allVisible = false;
+                        logResult(`Label ${d3.select(this).select('text').text()} still has opacity ${opacity}`, false);
+                    }
+                });
+                
+                if (allVisible) {
+                    logResult('All test labels now have opacity 1');
+                }
+                
+                // Check the count reported by the function
+                const count = allLabels.size();
+                logResult(`Force visibility function reported ${count} labels processed`);
+                
+            } catch (error) {
+                logResult(`Error testing force visibility: ${error.message}`, false);
+            }
+        };
+        
+        window.testLabelTransforms = function() {
+            clearResults();
+            const svg = d3.select('#test-svg');
+            
+            try {
+                // Ensure containers exist first
+                ensureLabelContainers(svg);
+                
+                // Create some test labels with anchor data
+                const labelsWorld = svg.select('#labels-world');
+                
+                // Create test labels with different anchor positions
+                const testLabel1 = labelsWorld.append('g')
+                    .attr('class', 'label test')
+                    .datum({ anchor: { x: 100, y: 100 } })
+                    .append('text')
+                    .text('TRANSFORM1')
+                    .attr('x', 0).attr('y', 0);
+                
+                const testLabel2 = labelsWorld.append('g')
+                    .attr('class', 'ocean-label test')
+                    .datum({ anchor: { x: 200, y: 150 } })
+                    .append('text')
+                    .text('TRANSFORM2')
+                    .attr('x', 0).attr('y', 0);
+                
+                const testLabel3 = labelsWorld.append('g')
+                    .attr('class', 'label--ocean test')
+                    .datum({ anchor: { x: 300, y: 200 } })
+                    .append('text')
+                    .text('TRANSFORM3')
+                    .attr('x', 0).attr('y', 0);
+                
+                logResult('Created 3 test labels with anchor data');
+                
+                // Check initial state (no transforms)
+                const initialTransforms = svg.selectAll('#labels-world .test').attr('transform');
+                logResult('Initial transforms:', initialTransforms);
+                
+                // Call applyLabelTransforms with zoom parameter
+                applyLabelTransforms(svg, 1); // Test with zoom = 1
+                
+                // Check final transforms
+                const finalTransforms = svg.selectAll('#labels-world .test').attr('transform');
+                logResult('Final transforms:', finalTransforms);
+                
+                // Verify each label has the expected transform
+                svg.selectAll('#labels-world .test').each(function(d, i) {
+                    const transform = d3.select(this).attr('transform');
+                    const expectedX = d.anchor.x;
+                    const expectedY = d.anchor.y;
+                    
+                    if (transform && transform.includes(`translate(${expectedX},${expectedY})`)) {
+                        logResult(`Label ${i+1} has correct translate: ${transform}`);
+                    } else {
+                        logResult(`Label ${i+1} transform incorrect: ${transform}`, false);
+                    }
+                });
+                
+            } catch (error) {
+                logResult(`Error testing label transforms: ${error.message}`, false);
+            }
+        };
+        
+        window.testLabelLOD = function() {
+            clearResults();
+            const svg = d3.select('#test-svg');
+            
+            try {
+                // Ensure containers exist first
+                ensureLabelContainers(svg);
+                
+                // Create some test labels with different tier data
+                const labelsWorld = svg.select('#labels-world');
+                
+                // Create test labels with different tiers
+                const testLabel1 = labelsWorld.append('g')
+                    .attr('class', 'label test')
+                    .datum({ tier: 't1', anchor: { x: 100, y: 100 } })
+                    .append('text')
+                    .text('TIER1')
+                    .attr('x', 0).attr('y', 0);
+                
+                const testLabel2 = labelsWorld.append('g')
+                    .attr('class', 'ocean-label test')
+                    .datum({ tier: 't2', anchor: { x: 200, y: 150 } })
+                    .append('text')
+                    .text('TIER2')
+                    .attr('x', 0).attr('y', 0);
+                
+                const testLabel3 = labelsWorld.append('g')
+                    .attr('class', 'label--ocean test')
+                    .datum({ tier: 't3', anchor: { x: 300, y: 200 } })
+                    .append('text')
+                    .text('TIER3')
+                    .attr('x', 0).attr('y', 0);
+                
+                logResult('Created 3 test labels with different tier data');
+                
+                // Check initial state (no opacity set)
+                const initialOpacity = svg.selectAll('#labels-world .test').style('opacity');
+                logResult('Initial opacity values:', initialOpacity);
+                
+                // Call updateLabelLOD with different zoom levels
+                logResult('Testing LOD at zoom k=1 (should show all tiers)');
+                updateLabelLOD(svg, 1);
+                
+                // Check opacity after LOD update
+                svg.selectAll('#labels-world .test').each(function(d, i) {
+                    const opacity = d3.select(this).style('opacity');
+                    logResult(`Label ${i+1} (${d.tier}) opacity at k=1: ${opacity}`);
+                });
+                
+                // Test at zoom k=2 (should hide some tiers)
+                logResult('Testing LOD at zoom k=2 (should hide some tiers)');
+                updateLabelLOD(svg, 2);
+                
+                // Check opacity after LOD update
+                svg.selectAll('#labels-world .test').each(function(d, i) {
+                    const opacity = d3.select(this).style('opacity');
+                    logResult(`Label ${i+1} (${d.tier}) opacity at k=2: ${opacity}`);
+                });
+                
+            } catch (error) {
+                logResult(`Error testing label LOD: ${error.message}`, false);
+            }
+        };
+        
+        window.clearTest = function() {
+            clearResults();
+            // Remove test containers
+            d3.select('#test-svg').selectAll('#labels, #labels-world, #labels-overlay').remove();
+            // Remove test elements
+            d3.select('#test-svg').select('#world').selectAll('rect[fill="lightcoral"]').remove();
+            // Remove test labels
+            d3.select('#test-svg').selectAll('.test').remove();
+        };
+        
+        // Initialize test
+        document.addEventListener('DOMContentLoaded', () => {
+            logResult('Test page loaded. Click buttons to test label container functionality.');
+        });
+    </script>
+    
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 // d3 is global; do not import it.
-import { updateLabelZoom, updateLabelVisibility, updateLabelVisibilityWithOptions, updateLabelVisibilityByTier, updateOverlayOceanLabel, clearDebugOverlays, clearScreenLabels, updateOceanLabelScreenPosition, _updateCullRaf, tierForZoom, applyTierVisibility, currentTier, setCurrentTier, applyLabelTransforms, updateLabelVisibilityLOD } from './labels.js';
+import { updateLabelZoom, updateLabelVisibility, updateLabelVisibilityWithOptions, updateLabelVisibilityByTier, updateOverlayOceanLabel, clearDebugOverlays, clearScreenLabels, updateOceanLabelScreenPosition, _updateCullRaf, tierForZoom, applyTierVisibility, currentTier, setCurrentTier, applyLabelTransforms, updateLabelVisibilityLOD, updateLabelLOD } from './labels.js';
 import { filterByZoom } from './labels.js';
 import { showLODHUD } from './labelsDebug.js';
 
@@ -92,14 +92,15 @@ export function attachInteraction({
     // NEW: recalc viewport culling every zoom (throttled)
     if (typeof _updateCullRaf === "function") _updateCullRaf();
 
-    // Apply world transforms (both world + labels containers follow the same transform)
+    // Only transform #world - labels inherit this transform and counter-scale themselves
     d3.select('#world')
       .attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
-    d3.select('#labels')
-      .attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
 
-    // Apply per-label transforms with zoom (positions each label at right screen position, keeps font size constant)
-    applyLabelTransforms(svgSel);
+    // Labels counter-scale themselves via applyLabelTransforms
+    applyLabelTransforms(svgSel, t.k);
+    
+    // Update LOD opacity on every zoom (so things don't get "stuck" invisible)
+    updateLabelLOD(svgSel, t.k);
     
     // Update label visibility based on zoom level and tier (robust tier extraction)
     updateLabelVisibility(svgSel);

@@ -6,8 +6,8 @@ const DEFAULT_TOKENS = {
   tracking_em: { area_wide:0.08, area_medium:0.05, normal:0 },
   lod: {
     fade_width_zoom: 0.25,
-    tiers: { t0:{min_zoom:0.0,max_zoom:2.0}, t1:{min_zoom:0.8,max_zoom:3.2},
-             t2:{min_zoom:1.8,max_zoom:4.4}, t3:{min_zoom:3.0,max_zoom:6.0}, t4:{min_zoom:4.0,max_zoom:7.0} }
+    tiers: { t0:{min_zoom:0.0,max_zoom:2.0}, t1:{min_zoom:0.8,max_zoom:99.0},
+             t2:{min_zoom:1.5,max_zoom:8.0}, t3:{min_zoom:2.5,max_zoom:10.0}, t4:{min_zoom:3.5,max_zoom:12.0} }
   },
   budgets: { t0:{areas:2,ocean:1}, t1:{areas:6,water:4,settlements:6,linear:3}, t2:{settlements:10,linear:6,water:4}, t3:{settlements:14,linear:8} },
   priority_ladder: ['OCEAN','CONTINENT','CAPITAL','SEA','RANGE','MAJOR_CITY','LAKE','PRINCIPAL_RIVER','TOWN','STRAIT','ROAD','VILLAGE'],

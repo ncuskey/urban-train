@@ -174,10 +174,32 @@ OCEAN ≥ CONTINENT/REALM ≥ CAPITAL ≥ SEA/RANGE ≥ MAJOR_CITY ≥ LAKE ≥ 
 - **collision:** class-aware spacing; stable anchors; jitter minimization.
 - **interaction:** hover, tooltips, toggles; label uprightness under rotation.
 
+## 10) Performance optimizations
+
+### SAT Caching
+- **Purpose**: Avoid rebuilding water mask when geometry hasn't changed
+- **Key**: Seed + viewport size + water component count + step + sea level
+- **Management**: Automatic cleanup (10 entry limit), smart invalidation
+- **Debug**: `window.getSATCacheSize()`, `window.clearSATCache()`
+
+### Deferred Placement
+- **Purpose**: Avoid blocking `requestAnimationFrame` during ocean placement
+- **Strategy**: Use `requestIdleCallback` when safe, fallback to `setTimeout(16ms)`
+- **Detection**: User interaction tracking (mouse, touch, scroll within 100ms)
+- **Override**: Critical phases force immediate placement
+- **Debug**: `window.forceImmediateOceanPlacement()`, `window.forceDeferredOceanPlacement()`
+
+### Raster Scaling
+- **Purpose**: Reduce SAT computation cost with minimal quality loss
+- **Scale**: Configurable factor (default: 0.6x) for rasterization canvas
+- **Mapping**: Results mapped back to original coordinate space
+- **Performance**: ~40% reduction in computation time
+
 ---
 
-## 10) Versioning & governance
+## 11) Versioning & governance
 
 - Keep this spec in the repo root as `LABELING_SPEC.md`.
 - All PRs that change label behavior must reference which section(s) they modify.
 - Token changes should land with screenshots/gifs at 3–4 canonical zooms.
+- Performance optimizations should include benchmark data and fallback strategies.
