@@ -41,7 +41,7 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction, getVisibleWorldBounds, padBounds, zoom } from "./modules/interaction.js";
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
-import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, logProbe, LABEL_DEBUG, clampToKeepRect, getZoomK, textWidthPx, labelFontFamily, placeOceanLabelInScreenSpace, renderOceanInWorld, renderNonOceanLabels, renderWorldLabels, renderOverlayLabels, ensureLabelLayers, applyFontCaps } from "./modules/labels.js";
+import { buildFeatureLabels, placeLabelsAvoidingCollisions, renderLabels, filterByZoom, updateLabelVisibility, updateLabelVisibilityByTier, debugLabels, findOceanLabelSpot, measureTextWidth, ensureMetrics, findOceanLabelRect, maybePanToFitOceanLabel, placeOceanLabelInRect, getVisibleWorldBounds as getVisibleWorldBoundsFromLabels, findOceanLabelRectAfterAutofit, drawDebugOceanRect, clearExistingOceanLabels, placeOceanLabelCentered, toPxRect, logProbe, LABEL_DEBUG, clampToKeepRect, getZoomK, textWidthPx, labelFontFamily, placeOceanLabelInScreenSpace, renderOceanInWorld, renderNonOceanLabels, renderWorldLabels, renderOverlayLabels, ensureLabelLayers, applyFontCaps } from "./modules/labels.js";
 import { loadLabelTokens } from "./modules/labelTokens.js";
 
 // === Minimal Perf HUD ==========================================
@@ -966,6 +966,9 @@ async function generate(count) {
   console.group('Urban Train - Generation Complete');
   console.table(timers.summary());
   console.groupEnd();
+
+  // Update label visibility after generation completes
+  updateLabelVisibilityByTier(d3.select('svg'));
 
   // redraw all polygons on SeaInput change 
   document.getElementById("seaInput").addEventListener("change", function() {

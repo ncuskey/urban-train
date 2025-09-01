@@ -88,8 +88,14 @@ A new feature flag system has been implemented to enable experimental label styl
 
 #### **Feature Flags Implementation**
 - **Global flag object**: `window.labelFlags` with all flags off by default
-- **URL parameter support**: `?flags=styleTokensOnly,waterItalicEverywhere,areaCapsTracking`
+- **URL parameter support**: `?flags=styleTokensOnly,waterItalicEverywhere,areaCapsTracking,fadeBands`
 - **Safe fallbacks**: All flags default to false, ensuring no breaking changes
+
+**Available Flags:**
+- **`styleTokensOnly`**: Apply token-driven font sizes and styling
+- **`waterItalicEverywhere`**: Make water labels italic
+- **`areaCapsTracking`**: Use ALL CAPS + letter spacing for area features
+- **`fadeBands`**: Enable tier-based opacity ramps for smooth LOD transitions
 
 #### **Label Tokens Configuration**
 - **Centralized configuration**: `src/modules/labelTokens.js` with sensible defaults
@@ -548,6 +554,117 @@ updateLabelVisibility({ placed: window.__labelsPlaced.features, visible });
 
 **Quantile-Based Classification**
 ```javascript
+
+## Tier-Based Fade System (Latest)
+
+A new tier-based fade system has been implemented to provide smooth opacity transitions based on zoom level and feature tier, creating a natural Level of Detail (LOD) system.
+
+### Core Implementation
+
+**Opacity Calculation**
+The `opacityForZoom` function in `labelTokens.js` calculates opacity based on zoom level and tier:
+
+```javascript
+export function opacityForZoom(k, tier, fadeWidth = getLabelTokens().lod.fade_width_zoom) {
+  const tiers = getLabelTokens().lod.tiers;
+  // map numeric tier → key (t1..t4); be defensive
+  const key = tier <= 1 ? 't1' : tier === 2 ? 't2' : tier === 3 ? 't3' : 't4';
+  const band = tiers[key] || { min_zoom: 0, max_zoom: Infinity };
+  const enterStart = band.min_zoom - fadeWidth;
+  const exitEnd    = band.max_zoom + fadeWidth;
+
+  if (k <= enterStart || k >= exitEnd) return 0;
+  if (k < band.min_zoom) return (k - enterStart) / (band.min_zoom - enterStart);
+  if (k > band.max_zoom) return (exitEnd - k) / (exitEnd - band.max_zoom);
+  return 1;
+}
+```
+
+**Token-Driven Configuration**
+Fade bands are configured via the label tokens system:
+
+```javascript
+const DEFAULT_TOKENS = {
+  lod: {
+    fade_width_zoom: 0.25,  // Width of fade transition
+    tiers: { 
+      t0: {min_zoom: 0.0, max_zoom: 2.0}, 
+      t1: {min_zoom: 0.8, max_zoom: 3.2},
+      t2: {min_zoom: 1.8, max_zoom: 4.4}, 
+      t3: {min_zoom: 3.0, max_zoom: 6.0}, 
+      t4: {min_zoom: 4.0, max_zoom: 7.0} 
+    }
+  }
+};
+```
+
+### Zoom Behavior
+
+**Progressive Disclosure by Tier**
+- **Tier 1 (Oceans)**: Visible from zoom 0.8x to 3.2x
+- **Tier 2 (Major Islands)**: Visible from zoom 1.8x to 4.4x  
+- **Tier 3 (Lakes/Minor Islands)**: Visible from zoom 3.0x to 6.0x
+- **Tier 4 (Tiny Features)**: Visible from zoom 4.0x to 7.0x
+
+**Smooth Fade Transitions**
+- **Fade-in**: Labels gradually appear over 0.25 zoom units before their min_zoom
+- **Fade-out**: Labels gradually disappear over 0.25 zoom units after their max_zoom
+- **Linear interpolation**: Smooth opacity ramps between 0 and 1
+
+### Integration Points
+
+**Zoom Handler Integration**
+The fade system is integrated into the zoom handler in `interaction.js`:
+
+```javascript
+// Update label visibility based on zoom level and tier
+updateLabelVisibilityByTier(svgSel);
+```
+
+**Post-Generation Application**
+Fade visibility is applied after generation completes in `main.js`:
+
+```javascript
+// Update label visibility after generation completes
+updateLabelVisibilityByTier(d3.select('svg'));
+```
+
+### Feature Flag Control
+
+**Flag: `fadeBands`**
+- **Enabled**: `?flags=fadeBands` - Activates tier-based opacity ramps
+- **Disabled**: Default behavior - All labels visible with full opacity
+- **Fallback**: When disabled, shows all labels with `is-visible` class
+
+**URL Examples**
+```
+http://localhost:8000/index.html?flags=fadeBands
+http://localhost:8000/index.html?flags=fadeBands,styleTokensOnly,waterItalicEverywhere,areaCapsTracking
+```
+
+### Benefits
+
+1. **Natural LOD**: Important features (oceans) appear first, details emerge progressively
+2. **Smooth Transitions**: No jarring pop-in/pop-out effects
+3. **Performance**: Reduces visual clutter at low zoom levels
+4. **Configurable**: Easy to adjust fade bands via tokens
+5. **Non-Destructive**: Labels remain in DOM, just fade in/out
+
+### Technical Details
+
+**Function Separation**
+- **`updateLabelVisibility`** (existing): Handles LOD visibility based on placed/visible arrays
+- **`updateLabelVisibilityByTier`** (new): Handles tier-based fade bands with opacity ramps
+
+**DOM Updates**
+- Sets both `is-visible` class and `opacity` style
+- No CSS transitions - pure computed opacity for performance
+- Works with both world labels (lakes/islands) and ocean labels
+
+**Performance Considerations**
+- Efficient per-label opacity calculation
+- No additional DOM queries beyond existing selections
+- Minimal overhead during zoom operations
 function quantilesOf(arr, qs=[0.5, 0.7, 0.85]) {
   if (!arr.length) return { q50: Infinity, q70: Infinity, q85: Infinity };
   const a = [...arr].sort((x,y)=>x-y);

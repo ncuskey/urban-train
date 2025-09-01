@@ -50,6 +50,7 @@ export function labelAnchorWorld(d) {
  */
 
 import {getZoomState} from './interaction.js';
+import { fontPxFor, getLabelTokens, opacityForZoom } from './labelTokens.js';
 
 // --- Tiering helper functions ---
 
@@ -2766,8 +2767,8 @@ export function renderWorldLabels(svg, features) {
   }
 
   // Build world dataset explicitly
-  const WORLD_KINDS = new Set(['ocean','lake','island']);
-  const worldData = features.filter(d => d && WORLD_KINDS.has(d.kind));
+  const WORLD_KINDS = new Set(['lake','island']);
+const worldData = features.filter(d => d && WORLD_KINDS.has(d.kind));
 
   if (window.DEBUG) {
     const wc = worldData.reduce((m,d)=> (m[d.kind]=(m[d.kind]||0)+1, m), {});
@@ -2800,6 +2801,7 @@ export function renderWorldLabels(svg, features) {
 
   // Apply positioning and text content
   worldMerged
+    .style('font-size', d => `${fontPxFor(d)}px`)  // screen-space sizing
     .text(d => d.text)
     // Only assign x/y for features that rely on a point anchor (lakes/islands).
     .attr('x', d => {
@@ -2814,7 +2816,6 @@ export function renderWorldLabels(svg, features) {
     // Optional, improves centering for area names:
     .attr('text-anchor', d => (d.kind === 'lake' || d.kind === 'island') ? 'middle' : null)
     .attr('dominant-baseline', d => (d.kind === 'lake' || d.kind === 'island') ? 'middle' : null)
-    .style('font-size', d => (d.font_world_px ?? (d.baseFontPx || 24)) + 'px')
     .classed('is-visible', true)
     .classed('ocean', d => d.kind === 'ocean')
     .classed('lake', d => d.kind === 'lake')
@@ -4033,7 +4034,7 @@ export function placeOceanLabelAt(cx, cy, maxWidth, oceanLabel, svg, opts = {}) 
     .attr('dominant-baseline', 'middle')
     .attr('vector-effect', 'non-scaling-stroke')
     .style('paint-order', 'stroke')
-    .style('font-size', `${fs}px`)
+    .style('font-size', `${getLabelTokens().sizes_px.t1_major}px`)  // token-driven sizing
     .text(oceanLabel.text)
     .classed('ocean', true)
     .attr('data-ocean', '1')
@@ -4471,5 +4472,29 @@ export function __debugCountLabels() {
     world_visible: on(world),
     overlay_nodes: overlay.size(),
     overlay_visible: on(overlay)
+  });
+}
+
+/**
+ * Update label visibility based on zoom level and tier
+ * @param {Object} svg - D3 selection of the SVG element
+ */
+export function updateLabelVisibilityByTier(svg) {
+  if (!window.labelFlags?.fadeBands) {
+    // fallback: show all by class
+    svg.selectAll('#labels-world text.label, #labels-world text.label--ocean')
+       .classed('is-visible', true)
+       .style('opacity', null);
+    return;
+  }
+  const k = getZoomState().k;
+
+  const sel = svg.selectAll('#labels-world text.label, #labels-world text.label--ocean');
+  sel.each(function(d) {
+    const tier = d?.tier ?? 3;
+    const o = opacityForZoom(k, tier);
+    d3.select(this)
+      .classed('is-visible', o > 0)
+      .style('opacity', o);
   });
 }

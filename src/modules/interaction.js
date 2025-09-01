@@ -1,5 +1,5 @@
 // d3 is global; do not import it.
-import { updateLabelZoom, updateLabelVisibility, updateOverlayOceanLabel, clearDebugOverlays, clearScreenLabels, updateOceanLabelScreenPosition, _updateCullRaf, tierForZoom, applyTierVisibility, currentTier, setCurrentTier } from './labels.js';
+import { updateLabelZoom, updateLabelVisibility, updateLabelVisibilityByTier, updateOverlayOceanLabel, clearDebugOverlays, clearScreenLabels, updateOceanLabelScreenPosition, _updateCullRaf, tierForZoom, applyTierVisibility, currentTier, setCurrentTier } from './labels.js';
 import { filterByZoom } from './labels.js';
 
 // Add a tiny accessor so other modules can safely read current zoom.
@@ -96,6 +96,9 @@ export function attachInteraction({
       .attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
     d3.select('#labels-world')
       .attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
+
+    // Update label visibility based on zoom level and tier
+    updateLabelVisibilityByTier(svgSel);
 
     // NEW: counter-scale label groups so their screen size stays constant
     // Guard against extreme zoom levels to prevent extreme inverse scale values

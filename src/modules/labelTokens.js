@@ -41,3 +41,52 @@ export async function loadLabelTokens() {
   
   return TOKENS;
 }
+
+/**
+ * Get font size in pixels for a feature based on its tier and kind
+ * @param {Object} feature - The feature object with tier and kind properties
+ * @returns {number} Font size in pixels
+ */
+export function fontPxFor(feature) {
+  const t = getLabelTokens();
+  const tier = feature?.tier ?? 3;
+
+  // Map tier → base size token
+  const tierSize =
+    tier <= 1 ? t.sizes_px.t1_major :
+    tier === 2 ? t.sizes_px.t2_standard :
+    tier === 3 ? t.sizes_px.t3_small :
+                 t.sizes_px.t4_tiny;
+
+  // Class tweaks
+  if (feature.kind === 'lake') {
+    return tier <= 2 ? tierSize : Math.max(tierSize - 1, t.sizes_px.t4_tiny);
+  }
+  if (feature.kind === 'island') {
+    const big = (feature.area ?? 0) > 15000;
+    return big ? Math.max(tierSize, t.sizes_px.t1_major) : tierSize;
+  }
+  // Fallback
+  return tierSize;
+}
+
+/**
+ * Calculate opacity for a label based on zoom level and tier
+ * @param {number} k - Current zoom level
+ * @param {number} tier - Label tier (1-4)
+ * @param {number} fadeWidth - Width of fade transition (defaults to token value)
+ * @returns {number} Opacity value between 0 and 1
+ */
+export function opacityForZoom(k, tier, fadeWidth = getLabelTokens().lod.fade_width_zoom) {
+  const tiers = getLabelTokens().lod.tiers;
+  // map numeric tier → key (t1..t4); be defensive
+  const key = tier <= 1 ? 't1' : tier === 2 ? 't2' : tier === 3 ? 't3' : 't4';
+  const band = tiers[key] || { min_zoom: 0, max_zoom: Infinity };
+  const enterStart = band.min_zoom - fadeWidth;
+  const exitEnd    = band.max_zoom + fadeWidth;
+
+  if (k <= enterStart || k >= exitEnd) return 0;
+  if (k < band.min_zoom) return (k - enterStart) / (band.min_zoom - enterStart);
+  if (k > band.max_zoom) return (exitEnd - k) / (exitEnd - band.max_zoom);
+  return 1;
+}
