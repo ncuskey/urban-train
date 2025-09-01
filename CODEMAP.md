@@ -81,6 +81,7 @@ urban-train/
 * **World vs screen**: Oceans in world space; other labels in screen overlay.
 * **Counter‑scaling**: fontSizePx is divided by zoom `k` so screen size stays constant.
 * **Viewport culling**: Off-screen labels are hidden for performance with ocean sticky visibility.
+* **Performance optimizations**: SAT caching, raster scaling, and deferred placement.
 * **Key exports**:
 
   * `computeLabelMetrics` (≈ 486): DOM/canvas text metrics w/ CSS variables.
@@ -92,6 +93,9 @@ urban-train/
   * `initLabelCulling` (≈ 212): Initialize culling system.
   * `ensureLabelLayers` / `ensureScreenLabelLayer` (≈ 39/52)
   * `updateOceanLabelScreenPosition` (≈ 3575), `clearScreenLabels` (≈ 3567).
+  * **Performance functions**:
+    * `getOrBuildSAT()`: SAT caching with automatic cleanup (10 entry limit)
+    * `findOceanLabelRectAfterAutofit()`: Raster scaling for faster water mask computation
 
 ### `src/modules/interaction.js`
 
@@ -105,6 +109,7 @@ urban-train/
 * `fitToLand` (≈ 89): Compute land bbox and pad; zoom to it.
 * `autoFitToWorld` (≈ 141): Variant for broader framing.
 * Also exposes `clampRectToBounds`, `computeLandBBox`.
+* **Ocean placement**: Integrated with deferred placement system to avoid blocking `requestAnimationFrame`.
 
 ### `src/render/layers.js`
 
@@ -162,3 +167,5 @@ urban-train/
 * Use `window.DEBUG` and the Perf HUD for local profiling.
 * Keep the naming pools in `names.js` de‑duplicated; the generator enforces uniqueness but clean inputs reduce retries.
 * If you remove jQuery, replace `$.grep` and simple selectors with vanilla equivalents.
+* **Performance**: Use SAT caching and deferred placement for heavy operations; monitor cache size with `window.getSATCacheSize()`.
+* **Debugging**: Control ocean placement timing with `window.forceImmediateOceanPlacement()` and `window.forceDeferredOceanPlacement()`.
