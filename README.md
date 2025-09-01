@@ -114,6 +114,8 @@ npm test
 * `fitOceanToRectPx` (≈ line 437): fit ocean label to a screen‑space rect.
 * `annealLabels` (≈ line 716): SA for non‑ocean labels.
 * `fitFontToRect` (≈ line 3314): pick max font size that fits rect (supports 2‑line).
+* `updateViewportCull` (≈ line 181): viewport culling with performance optimization.
+* `ensureOceanStickyVisibility` (≈ line 197): ocean label sticky behavior.
 * `ensureLabelLayers` / `ensureScreenLabelLayer` (≈ lines 39/52): set up label layers.
 * `updateOceanLabelScreenPosition` (≈ line 3575) & `clearScreenLabels` (≈ line 3567).
 
@@ -136,7 +138,7 @@ npm test
 
 * Self tests (`src/selftest.js`) validate graph neighbor reciprocity, height ranges, and layer setup; a small badge is rendered if checks pass.
 * A **Perf HUD** logs timings for generate/zoom/paint; toggle `window.DEBUG` in `src/main.js`.
-* Dev sandboxes live in `/dev` (e.g., `test-label-zoom.html`, `test-anneal-labels.html`, `test-sat-ocean-placement.html`).
+* Dev sandboxes live in `/dev` (e.g., `test-label-zoom.html`, `test-anneal-labels.html`, `test-sat-ocean-placement.html`, `test-viewport-culling.html`, `verify-culling.html`).
 
 ---
 

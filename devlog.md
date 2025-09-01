@@ -714,6 +714,8 @@ updateViewportCull(d3.select('svg').node());
 **Test Files**
 - `dev/test-viewport-culling.html` - Comprehensive test suite
 - `dev/verify-culling.html` - Interactive verification page
+- `dev/test-font-caps.html` - Font caps system testing
+- `dev/test-lod-labels.html` - LOD system testing
 
 **Test Scenarios**
 1. Zoom in until labels scroll off screen
@@ -1056,6 +1058,35 @@ function setFontTheme(fontName) {
   document.documentElement.style.setProperty('--label-font-family', fontName);
 }
 ```
+
+**Font Caps System**
+The font caps system ensures that ocean labels are always the largest, with other labels scaled proportionally:
+
+```javascript
+// Apply caps to all non-ocean labels AFTER they exist in the DOM
+export function applyFontCaps() {
+  const oceanPx = getOceanFontPx();
+  const caps = computeTierCaps(oceanPx);
+
+  d3.selectAll("text.label:not(.label--ocean)")
+    .each(function(d) {
+      const sel = d3.select(this);
+      const basePx = parseFloat(sel.style("font-size")) || 
+                     parseFloat(getComputedStyle(this).fontSize) || 
+                     MIN_LABEL_PX;
+      const tier = d?.tier ?? 4;
+      const finalPx = clampByTierPx(basePx, tier, caps);
+      sel.style("font-size", finalPx + "px");
+    });
+}
+```
+
+**Tier Caps**
+- Tier 1 (Ocean): Always largest (no cap)
+- Tier 2: 86% of ocean size
+- Tier 3: 74% of ocean size  
+- Tier 4: 64% of ocean size
+- Minimum: 11px for legibility
 
 ---
 
