@@ -115,6 +115,7 @@ export function attachInteraction({
     
     // keep QA dots glued and LOD-filtered as you zoom
     if (window.syncQADotsLOD) window.syncQADotsLOD(t.k);
+    if (window.syncQACandidates) window.syncQACandidates(t.k);
     
     console.debug('[zoom svg identity]', {
       anchor: (window.state && window.state.ocean) ? window.state.ocean.anchor : svgSel.node().__oceanWorldAnchor,

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Candidates - Urban Train</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: monospace; }
+    .test-info { background: #f0f0f0; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+    .test-info h2 { margin-top: 0; }
+    .test-info code { background: #e0e0e0; padding: 2px 4px; border-radius: 3px; }
+    .controls { margin: 20px 0; }
+    button { margin: 5px; padding: 8px 12px; }
+    .log { background: #000; color: #0f0; padding: 10px; border-radius: 5px; font-family: monospace; height: 200px; overflow-y: auto; }
+    .flag-info { background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; border-radius: 5px; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <div class="test-info">
+    <h2>Test Candidates Functionality</h2>
+    <p>This page tests the new candidates system with the <code>qaCandidates</code> flag.</p>
+    <p><strong>Expected behavior:</strong></p>
+    <ul>
+      <li>Orange rectangles should appear around visible anchors</li>
+      <li>Rectangles should follow zoom transforms</li>
+      <li>Console should show candidate counts</li>
+    </ul>
+  </div>
+
+  <div class="flag-info">
+    <strong>To test candidates:</strong> 
+    <a href="index.html?flags=qaCandidates" target="_blank">Open main app with qaCandidates flag</a>
+    <br>
+    Or manually add <code>?flags=qaCandidates</code> to the main app URL.
+  </div>
+
+  <div class="controls">
+    <button onclick="testCandidates()">Test Candidates</button>
+    <button onclick="clearCandidates()">Clear Candidates</button>
+    <button onclick="testZoom()">Test Zoom (2x)</button>
+    <button onclick="testZoom(0.5)">Test Zoom (0.5x)</button>
+    <button onclick="checkGlobals()">Check Global Variables</button>
+    <button onclick="openMainApp()">Open Main App with Flag</button>
+  </div>
+
+  <div class="log" id="log"></div>
+
+  <script>
+    function log(message, type = 'info') {
+      const logEl = document.getElementById('log');
+      const timestamp = new Date().toLocaleTimeString();
+      const color = type === 'error' ? '#ff6b6b' : type === 'success' ? '#51cf66' : '#339af0';
+      logEl.innerHTML += `<div style="color: ${color}">[${timestamp}] ${message}</div>`;
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(`[test] ${message}`);
+    }
+
+    function openMainApp() {
+      const url = 'index.html?flags=qaCandidates';
+      log(`Opening main app with flag: ${url}`, 'info');
+      window.open(url, '_blank');
+    }
+
+    function testCandidates() {
+      log('Testing candidates functionality...');
+      
+      if (typeof window.syncQACandidates === 'function') {
+        log('✅ syncQACandidates function available', 'success');
+        window.syncQACandidates(1.0);
+        log(`✅ Called syncQACandidates(1.0)`, 'success');
+        
+        if (window.__candidates) {
+          log(`✅ Candidates generated: ${window.__candidates.length}`, 'success');
+          log(`Sample candidate: ${JSON.stringify(window.__candidates[0], null, 2)}`, 'info');
+        } else {
+          log('❌ No candidates generated', 'error');
+        }
+      } else {
+        log('❌ syncQACandidates function not available', 'error');
+        log('💡 Try opening the main app with ?flags=qaCandidates first', 'info');
+      }
+    }
+
+    function clearCandidates() {
+      log('Clearing candidates...');
+      if (typeof window.clearQACandidates === 'function') {
+        window.clearQACandidates();
+        log('✅ Candidates cleared', 'success');
+      } else {
+        log('❌ clearQACandidates function not available', 'error');
+        log('💡 Try opening the main app with ?flags=qaCandidates first', 'info');
+      }
+    }
+
+    function testZoom(k = 2.0) {
+      log(`Testing zoom at k=${k}...`);
+      if (typeof window.syncQACandidates === 'function') {
+        window.syncQACandidates(k);
+        log(`✅ Called syncQACandidates(${k})`, 'success');
+        
+        if (window.__candidates) {
+          log(`✅ Candidates at k=${k}: ${window.__candidates.length}`, 'success');
+        }
+      } else {
+        log('❌ syncQACandidates function not available', 'error');
+        log('💡 Try opening the main app with ?flags=qaCandidates first', 'info');
+      }
+    }
+
+    function checkGlobals() {
+      log('Checking global variables...');
+      
+      const globals = [
+        'syncQACandidates',
+        '__candidates',
+        '__anchorsLOD',
+        'makeCandidates',
+        'renderQACandidates'
+      ];
+      
+      globals.forEach(name => {
+        if (window[name] !== undefined) {
+          log(`✅ ${name}: ${typeof window[name]}`, 'success');
+        } else {
+          log(`❌ ${name}: undefined`, 'error');
+        }
+      });
+    }
+
+    // Auto-test on load
+    window.addEventListener('load', () => {
+      log('Page loaded, checking candidates system...');
+      log('💡 This test page runs independently. Use the buttons above to test functionality.', 'info');
+      setTimeout(() => {
+        checkGlobals();
+      }, 500);
+    });
+  </script>
+</body>
+</html>

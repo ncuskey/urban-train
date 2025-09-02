@@ -67,3 +67,29 @@ export function syncQAWaterRadius(svg, k, baseR = 3) {
 export function clearQAWaterAnchors(svg) {
   sel(svg).select('#qa-water-anchors').remove();
 }
+
+export function renderQACandidates(svg, candidates) {
+  const parent = findWorldLayer(svg);
+  let g = parent.select('#qa-candidates');
+  if (g.empty()) g = parent.append('g').attr('id','qa-candidates');
+
+  const seln = g.selectAll('rect.qa-cand').data(candidates || [], d => d.id);
+  seln.enter()
+    .append('rect')
+    .attr('class', 'qa-cand')
+    .attr('fill', 'none')
+    .attr('stroke', '#f39c12')
+    .attr('stroke-width', 1)
+    .style('vector-effect', 'non-scaling-stroke')
+    .merge(seln)
+    .attr('x', d => d.x0)
+    .attr('y', d => d.y0)
+    .attr('width',  d => Math.max(1, d.x1 - d.x0))
+    .attr('height', d => Math.max(1, d.y1 - d.y0));
+
+  seln.exit().remove();
+}
+
+export function clearQACandidates(svg) {
+  sel(svg).select('#qa-candidates').remove();
+}

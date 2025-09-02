@@ -59,8 +59,9 @@ import { enrichAnchors } from "./labels/enrich.js";
 import { attachStyles } from "./labels/style-apply.js";
 import { computeWaterComponentsTopo, applyWaterKindsToAnchors } from "./labels/water-split.js";
 import { buildWaterComponentAnchors } from "./labels/anchors-water.js";
-import { renderQAWaterAnchors, syncQAWaterRadius } from "./labels/debug-markers.js";
+import { renderQAWaterAnchors, syncQAWaterRadius, renderQACandidates, clearQACandidates } from "./labels/debug-markers.js";
 import { computeLOD, visibleAtK } from "./labels/lod.js";
+import { makeCandidates } from "./labels/placement/candidates.js";
 // Null shim for old labeling functions (temporary until new modules arrive)
 import {
   ensureLabelContainers,
@@ -749,6 +750,25 @@ async function generate(count) {
         (visibleAtK(anchorsLOD.filter(a=>a.kind==='sea'||a.kind==='lake'), 1.0)).length
       );
     }
+
+    // Step 5: candidates + QA rectangles (optional)
+    // Expose a sync used by zoom handler
+    window.syncQACandidates = (k = 1.0) => {
+      if (!hasFlag('qaCandidates')) return;
+      const cands = makeCandidates({ anchorsLOD: window.__anchorsLOD, k });
+      window.__candidates = cands; // for console poking
+      const svgNode = (typeof svg !== 'undefined' && svg.node) ? svg : d3.select('svg');
+      renderQACandidates(svgNode, cands);
+    };
+
+    // initial draw (pre-zoom) – matches your QA dots flow
+    if (hasFlag('qaCandidates')) {
+      window.syncQACandidates(1.0);
+      console.log("[qa] candidate rects @k=1.0:", (window.__candidates || []).length);
+    }
+
+    // Expose clear function globally for QA testing
+    window.clearQACandidates = clearQACandidates;
 
     console.log("[anchors:enrich] metrics", enrichMetrics);
     console.log("[anchors:style] sample",

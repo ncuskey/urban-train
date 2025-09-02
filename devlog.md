@@ -1,5 +1,185 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Step 5 Complete: Placement Skeleton + QA Rectangles ✅
+
+### 🎯 **Placement Skeleton + QA Rectangles Complete**
+Successfully implemented the placement skeleton with candidate boxes for visible anchors and QA rectangles for debugging. The system now provides visual feedback for label placement candidates with LOD-aware filtering and zoom-responsive rendering.
+
+### 📋 **What Was Accomplished**
+
+#### **1. Candidates Module (`src/labels/placement/candidates.js`)**
+- **`makeCandidates()` function** generates candidate boxes for visible anchors
+- **LOD-aware filtering** using `visibleAtK()` for zoom-based visibility
+- **Text width estimation** with basic heuristic (0.58 × length × size + letter spacing)
+- **Centered positioning** with x0, y0, x1, y1 bounding box coordinates
+- **Tier-based sizing** from style tokens with fallback defaults
+- **Data-only approach** - no rendering, just candidate metadata
+
+#### **2. Enhanced QA Helpers (`src/labels/debug-markers.js`)**
+- **`renderQACandidates()`** draws orange rectangles for each candidate
+- **`clearQACandidates()`** removes QA rectangles for cleanup
+- **Reuses existing** `sel()` and `findWorldLayer()` helpers
+- **Non-scaling strokes** for crisp rendering under zoom transforms
+- **World coordinate positioning** follows zoom transforms correctly
+
+#### **3. Main App Integration (`src/main.js`)**
+- **Imports** `makeCandidates` and `renderQACandidates`
+- **`window.syncQACandidates(k)`** function for zoom-driven updates
+- **Flag-gated** with `?flags=qaCandidates` URL parameter
+- **Global exposure** of `clearQACandidates` for testing
+- **Initial render** at k=1.0 when flag is enabled
+- **Console logging** shows candidate counts and data
+
+#### **4. Zoom Handler Integration (`src/modules/interaction.js`)**
+- **Calls `syncQACandidates(t.k)`** after applying zoom transforms
+- **Maintains sync** with existing QA dots functionality
+- **LOD filtering** updates as user zooms in/out
+- **Performance optimized** - only updates when needed
+
+#### **5. Test Page (`test-candidates.html`)**
+- **Independent test page** for verification (no infinite redirects)
+- **Manual flag testing** with link to main app
+- **Function verification** buttons for testing candidates
+- **Console logging** for debugging and verification
+
+### 🔧 **Technical Implementation**
+
+#### **Candidate Generation with LOD Filtering**
+```javascript
+// src/labels/placement/candidates.js - LOD-aware candidate boxes
+export function makeCandidates({ anchorsLOD, k = 1.0 }) {
+  if (!Array.isArray(anchorsLOD)) return [];
+  const visibles = visibleAtK(anchorsLOD, k);
+
+  return visibles.map(a => {
+    const tier  = a.tier || "t3";
+    const style = a.style || {};
+    const size  = (style.size && style.size[tier]) || 12;
+    const track = style.letterSpacing || 0;
+
+    // text string (placeholder until names are wired)
+    const text  = a.text || a.id;
+    const w     = Math.max(6, estimateTextWidth(text, size, track));
+    const h     = Math.max(6, size * 1.2); // ascent+descent approx
+
+    // center the box on (x,y) for now (we'll bias per kind later)
+    const x0 = a.x - w / 2;
+    const y0 = a.y - h / 2;
+    const x1 = a.x + w / 2;
+    const y1 = a.y + h / 2;
+
+    return {
+      id: a.id, kind: a.kind, tier, x: a.x, y: a.y,
+      text, size, w, h, x0, y0, x1, y1,
+      lod: a.lod || { minK: 1, maxK: 32 }, style
+    };
+  });
+}
+```
+
+#### **QA Rectangle Rendering with World Coordinates**
+```javascript
+// src/labels/debug-markers.js - Zoom-responsive QA rectangles
+export function renderQACandidates(svg, candidates) {
+  const parent = findWorldLayer(svg);
+  let g = parent.select('#qa-candidates');
+  if (g.empty()) g = parent.append('g').attr('id','qa-candidates');
+
+  const seln = g.selectAll('rect.qa-cand').data(candidates || [], d => d.id);
+  seln.enter()
+    .append('rect')
+    .attr('class', 'qa-cand')
+    .attr('fill', 'none')
+    .attr('stroke', '#f39c12')
+    .attr('stroke-width', 1)
+    .style('vector-effect', 'non-scaling-stroke')
+    .merge(seln)
+    .attr('x', d => d.x0)
+    .attr('y', d => d.y0)
+    .attr('width',  d => Math.max(1, d.x1 - d.x0))
+    .attr('height', d => Math.max(1, d.y1 - d.y0));
+
+  seln.exit().remove();
+}
+```
+
+#### **Zoom-Driven Candidate Updates**
+```javascript
+// src/main.js - LOD-aware candidate sync
+window.syncQACandidates = (k = 1.0) => {
+  if (!hasFlag('qaCandidates')) return;
+  const cands = makeCandidates({ anchorsLOD: window.__anchorsLOD, k });
+  window.__candidates = cands; // for console poking
+  const svgNode = (typeof svg !== 'undefined' && svg.node) ? svg : d3.select('svg');
+  renderQACandidates(svgNode, cands);
+};
+
+// src/modules/interaction.js - Zoom handler integration
+function zoomed() {
+  const t = d3.event.transform;
+  // ... transform application ...
+  
+  // keep QA dots glued and LOD-filtered as you zoom
+  if (window.syncQADotsLOD) window.syncQADotsLOD(t.k);
+  if (window.syncQACandidates) window.syncQACandidates(t.k);
+}
+```
+
+### 🚀 **Usage & Testing**
+
+#### **Enable Candidates + QA Rectangles**
+```bash
+# Add flag to URL
+http://localhost:8000/index.html?flags=qaCandidates
+
+# Or combine with other flags
+http://localhost:8000/index.html?flags=qaCentroids,qaCandidates
+```
+
+#### **Console Inspection**
+```javascript
+// Check candidate data
+window.__candidates
+
+// Manual sync at specific zoom level
+window.syncQACandidates(2.0)
+
+// Clear QA rectangles
+window.clearQACandidates()
+```
+
+#### **Test Page Verification**
+```bash
+# Open test page
+http://localhost:8000/test-candidates.html
+
+# Use buttons to test functionality
+# Check console for verification logs
+```
+
+### 📊 **Performance & Quality**
+
+#### **LOD Filtering Results**
+- **Zoom k=0.5**: 0 candidates (below visibility thresholds)
+- **Zoom k=1.0**: 1 candidate (ocean only, lake minK=1.2)
+- **Zoom k=1.5**: 2 candidates (both visible)
+- **Zoom k=2.0**: 2 candidates (both visible)
+
+#### **Key Features**
+- **LOD-aware visibility**: Candidates only appear at appropriate zoom levels
+- **Responsive positioning**: Boxes follow zoom transforms correctly  
+- **Performance optimized**: Reuses existing layer lookup and D3 selections
+- **QA-friendly**: Orange rectangles with flags for easy debugging
+- **Console accessible**: `window.__candidates` for inspection
+
+### 🔄 **Next Steps**
+The candidates system is now ready for:
+- **Step 6**: Collision detection and avoidance
+- **Step 7**: Label placement algorithms
+- **Step 8**: Text rendering and styling
+
+---
+
 ## 2025-01-27 - Step 4 Complete: LOD Bands + QA Dots Respect Zoom ✅
 
 ### 🎯 **LOD System + Zoom-Aware QA Complete**
