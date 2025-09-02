@@ -2,12 +2,7 @@
 // Minimal candidate boxes for visible anchors (no collision yet).
 
 import { visibleAtK } from "../lod.js";
-
-// very light text width heuristic; we'll replace later
-function estimateTextWidth(text, px = 12, letterSpacing = 0) {
-  const L = (text?.length ?? 0);
-  return L * px * 0.58 + L * (letterSpacing || 0) * px; // add tracking
-}
+import { measureLabel } from "../metrics/text-metrics.js";
 
 export function makeCandidates({ anchorsLOD, k = 1.0 }) {
   if (!Array.isArray(anchorsLOD)) return [];
@@ -20,9 +15,11 @@ export function makeCandidates({ anchorsLOD, k = 1.0 }) {
     const track = style.letterSpacing || 0;
 
     // text string (placeholder until names are wired)
-    const text  = a.text || a.id;
-    const w     = Math.max(6, estimateTextWidth(text, size, track));
-    const h     = Math.max(6, size * 1.2); // ascent+descent approx
+    const rawText = a.text || a.id;
+    const m = measureLabel({ text: rawText, style, tier });
+    const text = m.text;           // with caps applied for measurement
+    const w = Math.max(6, m.w);
+    const h = Math.max(6, (m.asc + m.desc));
 
     // center the box on (x,y) for now (we'll bias per kind later)
     const x0 = a.x - w / 2;

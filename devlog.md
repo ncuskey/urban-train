@@ -1,5 +1,131 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Step 7 Complete: Real Text Metrics (Canvas) + Reliable Zoom Utils ✅
+
+### 🎯 **Real Text Metrics + Reliable Zoom Utils Complete**
+Successfully implemented Canvas-based text measurement for precise label box sizing and reliable zoom utilities for consistent zoom state access throughout the application. The system now provides accurate text dimensions and robust zoom state management.
+
+### 📋 **What Was Accomplished**
+
+#### **1. Canvas-Based Text Metrics (`src/labels/metrics/text-metrics.js`)**
+- **`measureLabel()` function** uses Canvas `measureText()` for precise dimensions
+- **Font property handling** supports family, weight, italic, size per tier
+- **Caps transformation** with smart title case (small words remain lowercase)
+- **Letter spacing calculation** for accurate width measurements
+- **Performance caching** prevents repeated Canvas operations
+- **Fallback metrics** when Canvas metrics aren't available
+
+#### **2. Enhanced Candidate Generation (`src/labels/placement/candidates.js`)**
+- **Replaced heuristic text width estimation** with real Canvas measurements
+- **Integrated `measureLabel()` function** for accurate text box sizing
+- **Applied caps transformation** during measurement (text is shaped before measuring)
+- **Precise width/height calculations** using actual font metrics (ascent + descent)
+- **No more guesswork** - candidate boxes now match actual text dimensions exactly
+
+#### **3. Reliable Zoom Utilities (`src/core/zoom-utils.js`)**
+- **`getZoomScale()`** returns current zoom scale factor reliably
+- **`getZoomTransform()`** returns full zoom transform object {k, x, y}
+- **`getZoomState()`** returns convenient zoom state with human-readable level
+- **Fallback system** uses `window.currentTransform` when D3 zoom is unavailable
+- **Global setup** automatically provides `window.getZoomScale`, `window.getZoomTransform`, `window.getZoomState`
+
+#### **4. QA Seeding After Autofit (`src/main.js`)**
+- **Updated all autofit success locations** to use `getZoomScale()`
+- **Immediate QA seeding** right after autofit completes (not at zoom 0)
+- **Consistent zoom access** across all three autofit methods
+- **Eliminated repetitive** zoom extraction logic
+- **Better user experience** - QA elements appear at correct zoom level immediately
+
+#### **5. Comprehensive Test Suite**
+- **`dev/test-text-metrics.html`** - Tests all text metrics functionality
+- **`dev/test-zoom-utils.html`** - Tests zoom utilities and fallback behavior
+- **Visual feedback** with Canvas previews and zoom state displays
+- **Performance testing** for caching effectiveness
+- **Fallback testing** when D3 zoom is unavailable
+
+### 🔧 **Technical Implementation**
+
+#### **Canvas-Based Text Measurement**
+```javascript
+// src/labels/metrics/text-metrics.js - Precise text dimensions
+export function measureLabel({ text, style={}, tier="t3" }) {
+  const size = (style.size && style.size[tier]) || 12;
+  const family = style.fontFamily || "serif";
+  const weight = style.weight || 400;
+  const italic = !!style.italic;
+  const letterSpacing = style.letterSpacing || 0;
+  const caps = style.caps || "none";
+
+  const shaped = applyCaps(text || "", caps);
+  const key = JSON.stringify({ shaped, size, family, weight, italic, letterSpacing });
+
+  if (_cache.has(key)) return { ..._cache.get(key), text: shaped };
+
+  const c = ctx();
+  c.font = cssFont({ size, weight, italic, family });
+  const m = c.measureText(shaped);
+  const trackExtra = Math.max(0, shaped.length - 1) * letterSpacing * size;
+  const w = m.width + trackExtra;
+  const asc = (m.actualBoundingBoxAscent ?? size * 0.8);
+  const desc = (m.actualBoundingBoxDescent ?? size * 0.2);
+
+  const out = { w, asc, desc, em: size };
+  _cache.set(key, out);
+  return { ...out, text: shaped };
+}
+```
+
+#### **Reliable Zoom State Access**
+```javascript
+// src/core/zoom-utils.js - Consistent zoom state management
+export function getZoomScale() {
+  try {
+    const svg = d3.select('svg').node();
+    if (svg) {
+      return d3.zoomTransform(svg).k;
+    }
+  } catch (e) {
+    // Fallback if D3 or SVG not available
+  }
+  return window.currentTransform?.k ?? 1;
+}
+
+export function getZoomState() {
+  const transform = getZoomTransform();
+  return {
+    scale: transform.k,
+    x: transform.x,
+    y: transform.y,
+    level: getZoomLevel(transform.k)
+  };
+}
+```
+
+#### **QA Seeding After Autofit**
+```javascript
+// src/main.js - Immediate QA seeding after autofit success
+// after autofit success:
+if (window.syncQADotsLOD)    window.syncQADotsLOD(getZoomScale());
+if (window.syncQACandidates) window.syncQACandidates(getZoomScale());
+if (window.syncQACollision)  window.syncQACollision(getZoomScale());
+```
+
+### 🎯 **Key Benefits**
+
+1. **Precise Text Boxes**: Candidate boxes now match actual text dimensions exactly
+2. **Font-Aware Measurements**: Handles different fonts, weights, and styles correctly
+3. **Performance Optimized**: Caching prevents repeated Canvas operations
+4. **Typography Support**: Proper caps transformation and letter spacing
+5. **Reliable Zoom Access**: Consistent zoom state from anywhere in the application
+6. **Immediate QA Feedback**: Users see QA elements at correct zoom level after autofit
+7. **Fallback Safety**: Graceful degradation when Canvas metrics aren't available
+
+### 🚀 **Next Steps**
+
+The text metrics and zoom utilities are now ready for **Step 8** where we'll implement the actual text rendering using these precise metrics. The candidate boxes will fit the text exactly, eliminating the need for manual adjustments or guesswork in label placement.
+
+---
+
 ## 2025-01-27 - Step 6 Complete: Greedy Collision Pruning + QA Visualization ✅
 
 ### 🎯 **Greedy Collision Pruning + QA Visualization Complete**

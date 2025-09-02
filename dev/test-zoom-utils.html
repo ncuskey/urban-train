@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Zoom Utils - Urban Train</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+    .test-info { background: #f0f0f0; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+    .test-info h2 { margin-top: 0; }
+    .test-info code { background: #e0e0e0; padding: 2px 4px; border-radius: 3px; }
+    .controls { margin: 20px 0; }
+    button { margin: 5px; padding: 8px 12px; }
+    .log { background: #000; color: #0f0; padding: 10px; border-radius: 5px; font-family: monospace; height: 300px; overflow-y: auto; }
+    .zoom-display { background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0; font-family: monospace; font-size: 12px; }
+    .zoom-canvas { border: 1px solid #ccc; margin: 10px 0; background: #f5f5f5; }
+    .zoom-info { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .zoom-info > div { background: #fff; padding: 10px; border-radius: 3px; border: 1px solid #ddd; }
+  </style>
+</head>
+<body>
+  <div class="test-info">
+    <h2>Test Zoom Utilities Functionality</h2>
+    <p>This page tests the new zoom utilities that provide reliable access to zoom state.</p>
+    <p><strong>Expected behavior:</strong></p>
+    <ul>
+      <li>Zoom utilities should be available globally (window.getZoomScale, etc.)</li>
+      <li>Functions should return consistent zoom state</li>
+      <li>Fallback should work when D3 zoom is unavailable</li>
+      <li>Zoom state should update in real-time</li>
+    </ul>
+  </div>
+
+  <div class="controls">
+    <button onclick="testZoomUtils()">Test Zoom Utils</button>
+    <button onclick="testGlobalFunctions()">Test Global Functions</button>
+    <button onclick="testFallback()">Test Fallback</button>
+    <button onclick="startLiveUpdate()">Start Live Update</button>
+    <button onclick="stopLiveUpdate()">Stop Live Update</button>
+    <button onclick="clearLog()">Clear Log</button>
+  </div>
+
+  <div class="zoom-display">
+    <h4>Current Zoom State</h4>
+    <div class="zoom-info">
+      <div>
+        <strong>Direct D3:</strong><br>
+        <span id="d3-zoom">-</span>
+      </div>
+      <div>
+        <strong>Zoom Utils:</strong><br>
+        <span id="utils-zoom">-</span>
+      </div>
+    </div>
+    <div class="zoom-info">
+      <div>
+        <strong>Global Functions:</strong><br>
+        <span id="global-zoom">-</span>
+      </div>
+      <div>
+        <strong>Fallback State:</strong><br>
+        <span id="fallback-zoom">-</span>
+      </div>
+    </div>
+  </div>
+
+  <canvas id="zoom-canvas" class="zoom-canvas" width="600" height="200"></canvas>
+  <div class="log" id="log"></div>
+
+  <script src="https://d3js.org/d3.v5.min.js"></script>
+  <script type="module">
+    import { getZoomScale, getZoomTransform, getZoomState } from '../src/core/zoom-utils.js';
+    
+    let liveUpdateInterval = null;
+    
+    function log(message, type = 'info') {
+      const logEl = document.getElementById('log');
+      const timestamp = new Date().toLocaleTimeString();
+      const color = type === 'error' ? '#ff6b6b' : type === 'success' ? '#51cf66' : '#339af0';
+      logEl.innerHTML += `<div style="color: ${color}">[${timestamp}] ${message}</div>`;
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(`[test] ${message}`);
+    }
+
+    function updateZoomDisplay() {
+      try {
+        // Direct D3 access
+        const svg = d3.select('svg');
+        let d3Zoom = 'No SVG found';
+        if (!svg.empty()) {
+          const transform = d3.zoomTransform(svg.node());
+          d3Zoom = `k: ${transform.k.toFixed(3)}, x: ${transform.x.toFixed(1)}, y: ${transform.y.toFixed(1)}`;
+        }
+        document.getElementById('d3-zoom').textContent = d3Zoom;
+
+        // Zoom utils access
+        const utilsZoom = getZoomState();
+        document.getElementById('utils-zoom').textContent = 
+          `k: ${utilsZoom.scale.toFixed(3)}, x: ${utilsZoom.x.toFixed(1)}, y: ${utilsZoom.y.toFixed(1)}, level: ${utilsZoom.level}`;
+
+        // Global functions
+        let globalZoom = 'Not available';
+        if (window.getZoomScale && window.getZoomState) {
+          const scale = window.getZoomScale();
+          const state = window.getZoomState();
+          globalZoom = `k: ${scale.toFixed(3)}, level: ${state.level}`;
+        }
+        document.getElementById('global-zoom').textContent = globalZoom;
+
+        // Fallback state
+        const fallbackZoom = `window.currentTransform: ${window.currentTransform ? 'Available' : 'Not set'}`;
+        document.getElementById('fallback-zoom').textContent = fallbackZoom;
+
+      } catch (e) {
+        log(`Error updating zoom display: ${e.message}`, 'error');
+      }
+    }
+
+    function drawZoomVisualization() {
+      const canvas = document.getElementById('zoom-canvas');
+      const ctx = canvas.getContext('2d');
+      
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      try {
+        const state = getZoomState();
+        
+        // Draw zoom level indicator
+        ctx.fillStyle = '#333';
+        ctx.font = '16px monospace';
+        ctx.fillText(`Zoom Scale: ${state.scale.toFixed(3)}x`, 20, 30);
+        ctx.fillText(`Level: ${state.level}`, 20, 55);
+        ctx.fillText(`Position: (${state.x.toFixed(1)}, ${state.y.toFixed(1)})`, 20, 80);
+        
+        // Draw zoom bar
+        const barWidth = 400;
+        const barHeight = 20;
+        const barX = 20;
+        const barY = 120;
+        
+        // Background bar
+        ctx.fillStyle = '#ddd';
+        ctx.fillRect(barX, barY, barWidth, barHeight);
+        
+        // Zoom indicator
+        const zoomPosition = Math.log2(state.scale) / 5; // Normalize to 0-1 range
+        const indicatorX = barX + (zoomPosition * barWidth);
+        ctx.fillStyle = '#007acc';
+        ctx.fillRect(indicatorX - 2, barY - 2, 4, barHeight + 4);
+        
+        // Zoom labels
+        ctx.fillStyle = '#666';
+        ctx.font = '12px monospace';
+        ctx.fillText('0.5x', barX, barY + 35);
+        ctx.fillText('1x', barX + barWidth/2, barY + 35);
+        ctx.fillText('2x', barX + barWidth, barY + 35);
+        
+      } catch (e) {
+        ctx.fillStyle = '#f00';
+        ctx.font = '16px monospace';
+        ctx.fillText(`Error: ${e.message}`, 20, 30);
+      }
+    }
+
+    window.testZoomUtils = function() {
+      log('=== Testing Zoom Utils Functions ===');
+      
+      try {
+        const scale = getZoomScale();
+        const transform = getZoomTransform();
+        const state = getZoomState();
+        
+        log(`✅ getZoomScale(): ${scale}`, 'success');
+        log(`✅ getZoomTransform(): k=${transform.k}, x=${transform.x}, y=${transform.y}`, 'success');
+        log(`✅ getZoomState(): scale=${state.scale}, level=${state.level}`, 'success');
+        
+        log('All zoom utility functions working correctly', 'success');
+        
+      } catch (e) {
+        log(`❌ Error testing zoom utils: ${e.message}`, 'error');
+      }
+    };
+
+    window.testGlobalFunctions = function() {
+      log('=== Testing Global Functions ===');
+      
+      const functions = ['getZoomScale', 'getZoomTransform', 'getZoomState'];
+      
+      functions.forEach(funcName => {
+        if (typeof window[funcName] === 'function') {
+          try {
+            const result = window[funcName]();
+            log(`✅ ${funcName}(): Available and working`, 'success');
+            if (funcName === 'getZoomState') {
+              log(`   Result: scale=${result.scale}, level=${result.level}`, 'info');
+            } else if (funcName === 'getZoomScale') {
+              log(`   Result: ${result}`, 'info');
+            } else {
+              log(`   Result: k=${result.k}, x=${result.x}, y=${result.y}`, 'info');
+            }
+          } catch (e) {
+            log(`⚠️ ${funcName}(): Available but error: ${e.message}`, 'error');
+          }
+        } else {
+          log(`❌ ${funcName}(): Not available`, 'error');
+        }
+      });
+    };
+
+    window.testFallback = function() {
+      log('=== Testing Fallback Behavior ===');
+      
+      // Test what happens when D3 zoom is not available
+      const originalD3Select = d3.select;
+      d3.select = () => ({ node: () => null, empty: () => true });
+      
+      try {
+        const scale = getZoomScale();
+        const transform = getZoomTransform();
+        const state = getZoomState();
+        
+        log(`Fallback getZoomScale(): ${scale}`, 'info');
+        log(`Fallback getZoomTransform(): k=${transform.k}, x=${transform.x}, y=${transform.y}`, 'info');
+        log(`Fallback getZoomState(): scale=${state.scale}, level=${state.level}`, 'info');
+        
+        if (scale === 1 && transform.k === 1) {
+          log('✅ Fallback working correctly (defaulting to k=1)', 'success');
+        } else {
+          log('⚠️ Fallback may not be working as expected', 'error');
+        }
+        
+      } catch (e) {
+        log(`❌ Error testing fallback: ${e.message}`, 'error');
+      } finally {
+        // Restore D3
+        d3.select = originalD3Select;
+      }
+    };
+
+    window.startLiveUpdate = function() {
+      if (liveUpdateInterval) {
+        log('Live update already running', 'info');
+        return;
+      }
+      
+      log('Starting live zoom state updates...', 'info');
+      liveUpdateInterval = setInterval(() => {
+        updateZoomDisplay();
+        drawZoomVisualization();
+      }, 100);
+      
+      log('✅ Live update started (100ms interval)', 'success');
+    };
+
+    window.stopLiveUpdate = function() {
+      if (liveUpdateInterval) {
+        clearInterval(liveUpdateInterval);
+        liveUpdateInterval = null;
+        log('✅ Live update stopped', 'success');
+      } else {
+        log('No live update running', 'info');
+      }
+    };
+
+    window.clearLog = function() {
+      document.getElementById('log').innerHTML = '';
+    };
+
+    // Auto-test on load
+    window.addEventListener('load', () => {
+      log('Page loaded, zoom utilities ready for testing', 'info');
+      log('💡 Use the buttons above to test different aspects of the zoom utilities', 'info');
+      
+      // Initial display update
+      updateZoomDisplay();
+      drawZoomVisualization();
+      
+      // Test basic functionality
+      setTimeout(() => {
+        testZoomUtils();
+        testGlobalFunctions();
+      }, 500);
+    });
+  </script>
+</body>
+</html>

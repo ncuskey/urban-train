@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Text Metrics - Urban Train</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+    .test-info { background: #f0f0f0; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+    .test-info h2 { margin-top: 0; }
+    .test-info code { background: #e0e0e0; padding: 2px 4px; border-radius: 3px; }
+    .controls { margin: 20px 0; }
+    button { margin: 5px; padding: 8px 12px; }
+    .log { background: #000; color: #0f0; padding: 10px; border-radius: 5px; font-family: monospace; height: 300px; overflow-y: auto; }
+    .metrics-display { background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0; font-family: monospace; font-size: 12px; }
+    .canvas-preview { border: 1px solid #ccc; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <div class="test-info">
+    <h2>Test Text Metrics Functionality</h2>
+    <p>This page tests the new Canvas-based text metrics system that replaces heuristic text width estimation.</p>
+    <p><strong>Expected behavior:</strong></p>
+    <ul>
+      <li>Text measurements should be accurate for different fonts, sizes, and styles</li>
+      <li>Caps transformation should work (upper, title, none)</li>
+      <li>Letter spacing should be applied correctly</li>
+      <li>Canvas measurements should match actual text rendering</li>
+    </ul>
+  </div>
+
+  <div class="controls">
+    <button onclick="testBasicMetrics()">Test Basic Metrics</button>
+    <button onclick="testCaps()">Test Caps Transformation</button>
+    <button onclick="testLetterSpacing()">Test Letter Spacing</button>
+    <button onclick="testFontVariations()">Test Font Variations</button>
+    <button onclick="testCaching()">Test Caching</button>
+    <button onclick="clearLog()">Clear Log</button>
+  </div>
+
+  <div class="metrics-display" id="metrics-display"></div>
+  <canvas id="preview-canvas" class="canvas-preview" width="600" height="200"></canvas>
+  <div class="log" id="log"></div>
+
+  <script type="module">
+    import { measureLabel } from '../src/labels/metrics/text-metrics.js';
+    
+    function log(message, type = 'info') {
+      const logEl = document.getElementById('log');
+      const timestamp = new Date().toLocaleTimeString();
+      const color = type === 'error' ? '#ff6b6b' : type === 'success' ? '#51cf66' : '#339af0';
+      logEl.innerHTML += `<div style="color: ${color}">[${timestamp}] ${message}</div>`;
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(`[test] ${message}`);
+    }
+
+    function displayMetrics(title, metrics) {
+      const display = document.getElementById('metrics-display');
+      const html = `
+        <h4>${title}</h4>
+        <pre>${JSON.stringify(metrics, null, 2)}</pre>
+      `;
+      display.innerHTML += html;
+    }
+
+    function renderTextPreview(text, style, tier) {
+      const canvas = document.getElementById('preview-canvas');
+      const ctx = canvas.getContext('2d');
+      
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Apply style
+      const size = (style.size && style.size[tier]) || 12;
+      const family = style.fontFamily || "serif";
+      const weight = style.weight || 400;
+      const italic = !!style.italic;
+      const letterSpacing = style.letterSpacing || 0;
+      const caps = style.caps || "none";
+      
+      // Apply caps
+      let displayText = text;
+      if (caps === "upper") displayText = text.toUpperCase();
+      if (caps === "title") {
+        displayText = text.replace(/\w[\w'-]*/g, (w) => {
+          if (/^(and|or|of|the|a|an|in|on|at|to|for|by|vs\.?)$/i.test(w)) return w.toLowerCase();
+          return w[0].toUpperCase() + w.slice(1).toLowerCase();
+        });
+      }
+      
+      ctx.font = `${italic ? "italic " : ""}${weight} ${size}px ${family}`;
+      ctx.fillStyle = '#333';
+      ctx.fillText(displayText, 20, 50);
+      
+      // Draw bounding box
+      const metrics = measureLabel({ text, style, tier });
+      ctx.strokeStyle = '#f00';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(20, 50 - metrics.asc, metrics.w, metrics.asc + metrics.desc);
+      
+      // Add metrics info
+      ctx.fillStyle = '#666';
+      ctx.font = '12px monospace';
+      ctx.fillText(`Width: ${Math.round(metrics.w)}px, Height: ${Math.round(metrics.asc + metrics.desc)}px`, 20, 80);
+      ctx.fillText(`Ascent: ${Math.round(metrics.asc)}px, Descent: ${Math.round(metrics.desc)}px`, 20, 100);
+    }
+
+    window.testBasicMetrics = function() {
+      log('=== Testing Basic Text Metrics ===');
+      
+      const testCases = [
+        { text: "Hello World", style: {}, tier: "t3" },
+        { text: "Pacific Ocean", style: { size: { t1: 24, t2: 18, t3: 14 } }, tier: "t1" },
+        { text: "Crystal Lake", style: { size: { t1: 20, t2: 16, t3: 12 } }, tier: "t2" },
+        { text: "Tropical Isle", style: { size: { t1: 18, t2: 14, t3: 10 } }, tier: "t3" }
+      ];
+      
+      testCases.forEach((testCase, i) => {
+        const metrics = measureLabel(testCase);
+        log(`Test ${i + 1}: "${testCase.text}" (${testCase.tier})`, 'info');
+        log(`  Width: ${Math.round(metrics.w)}px, Height: ${Math.round(metrics.asc + metrics.desc)}px`, 'info');
+        log(`  Ascent: ${Math.round(metrics.asc)}px, Descent: ${Math.round(metrics.desc)}px`, 'info');
+        
+        displayMetrics(`Test ${i + 1}: ${testCase.text}`, metrics);
+      });
+      
+      // Render preview for first test case
+      renderTextPreview(testCases[0].text, testCases[0].style, testCases[0].tier);
+      
+      log('✅ Basic metrics test completed', 'success');
+    };
+
+    window.testCaps = function() {
+      log('=== Testing Caps Transformation ===');
+      
+      const testCases = [
+        { text: "pacific ocean", caps: "none" },
+        { text: "pacific ocean", caps: "upper" },
+        { text: "pacific ocean", caps: "title" },
+        { text: "crystal lake of the mountains", caps: "title" }
+      ];
+      
+      testCases.forEach((testCase, i) => {
+        const style = { caps: testCase.caps, size: { t3: 16 } };
+        const metrics = measureLabel({ text: testCase.text, style, tier: "t3" });
+        log(`Test ${i + 1}: "${testCase.text}" → "${testCase.caps}"`, 'info');
+        log(`  Result: "${metrics.text}"`, 'info');
+        log(`  Width: ${Math.round(metrics.w)}px`, 'info');
+        
+        displayMetrics(`Caps Test ${i + 1}: ${testCase.caps}`, metrics);
+      });
+      
+      log('✅ Caps transformation test completed', 'success');
+    };
+
+    window.testLetterSpacing = function() {
+      log('=== Testing Letter Spacing ===');
+      
+      const testCases = [
+        { text: "Hello", letterSpacing: 0 },
+        { text: "Hello", letterSpacing: 0.1 },
+        { text: "Hello", letterSpacing: 0.2 },
+        { text: "World", letterSpacing: 0.15 }
+      ];
+      
+      testCases.forEach((testCase, i) => {
+        const style = { letterSpacing: testCase.letterSpacing, size: { t3: 16 } };
+        const metrics = measureLabel({ text: testCase.text, style, tier: "t3" });
+        log(`Test ${i + 1}: "${testCase.text}" (spacing: ${testCase.letterSpacing})`, 'info');
+        log(`  Width: ${Math.round(metrics.w)}px`, 'info');
+        
+        displayMetrics(`Letter Spacing Test ${i + 1}: ${testCase.letterSpacing}`, metrics);
+      });
+      
+      log('✅ Letter spacing test completed', 'success');
+    };
+
+    window.testFontVariations = function() {
+      log('=== Testing Font Variations ===');
+      
+      const testCases = [
+        { text: "Pacific Ocean", style: { fontFamily: "serif", weight: 400, italic: false } },
+        { text: "Pacific Ocean", style: { fontFamily: "sans-serif", weight: 700, italic: false } },
+        { text: "Pacific Ocean", style: { fontFamily: "monospace", weight: 400, italic: true } },
+        { text: "Crystal Lake", style: { fontFamily: "serif", weight: 600, italic: true } }
+      ];
+      
+      testCases.forEach((testCase, i) => {
+        const style = { ...testCase.style, size: { t3: 18 } };
+        const metrics = measureLabel({ text: testCase.text, style, tier: "t3" });
+        log(`Test ${i + 1}: "${testCase.text}" (${style.fontFamily}, ${style.weight}, ${style.italic ? 'italic' : 'normal'})`, 'info');
+        log(`  Width: ${Math.round(metrics.w)}px`, 'info');
+        
+        displayMetrics(`Font Variation Test ${i + 1}`, metrics);
+      });
+      
+      log('✅ Font variations test completed', 'success');
+    };
+
+    window.testCaching = function() {
+      log('=== Testing Caching ===');
+      
+      const style = { size: { t3: 16 } };
+      const text = "Test Caching";
+      
+      // First call
+      const start1 = performance.now();
+      const metrics1 = measureLabel({ text, style, tier: "t3" });
+      const time1 = performance.now() - start1;
+      
+      // Second call (should be cached)
+      const start2 = performance.now();
+      const metrics2 = measureLabel({ text, style, tier: "t3" });
+      const time2 = performance.now() - start2;
+      
+      log(`First call: ${time1.toFixed(3)}ms`, 'info');
+      log(`Second call: ${time2.toFixed(3)}ms`, 'info');
+      log(`Cache speedup: ${(time1 / time2).toFixed(1)}x`, 'info');
+      
+      if (time2 < time1) {
+        log('✅ Caching is working (second call faster)', 'success');
+      } else {
+        log('⚠️ Caching may not be working as expected', 'error');
+      }
+      
+      displayMetrics('Caching Test', { metrics1, metrics2, time1, time2 });
+    };
+
+    window.clearLog = function() {
+      document.getElementById('log').innerHTML = '';
+      document.getElementById('metrics-display').innerHTML = '';
+      const canvas = document.getElementById('preview-canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    };
+
+    // Auto-test on load
+    window.addEventListener('load', () => {
+      log('Page loaded, text metrics system ready for testing', 'info');
+      log('💡 Use the buttons above to test different aspects of the text metrics system', 'info');
+    });
+  </script>
+</body>
+</html>

@@ -41,6 +41,7 @@ function safeInsertBefore(parentSel, enterSel, tag, beforeSelector) {
 import { RNG } from "./core/rng.js";
 import { Timers } from "./core/timers.js";
 import { ensureLayers } from "./render/layers.js";
+import "./core/zoom-utils.js";
 // ensureLabelSubgroups temporarily disabled until new labeling system arrives
 import { runSelfTests, renderSelfTestBadge, clamp01, ensureReciprocalNeighbors } from "./selftest.js";
 import { initLabelingStyle } from "./labels/index.js";
@@ -904,26 +905,10 @@ async function generate(count) {
       await window.fitLand();
       console.log('[autofit] ✅ Promise-based autofit completed successfully');
       
-      // Update QA dots after autofit with current zoom level
-      if (window.syncQADotsLOD) {
-        const currentZoomK = d3.zoomTransform(svgSel.node()).k;
-        window.syncQADotsLOD(currentZoomK);
-        console.log(`[qa] Updated QA dots after autofit (k=${currentZoomK.toFixed(2)})`);
-      }
-      
-      // Update QA candidates after autofit with current zoom level
-      if (window.syncQACandidates) {
-        const currentZoomK = d3.zoomTransform(svgSel.node()).k;
-        window.syncQACandidates(currentZoomK);
-        console.log(`[qa] Updated QA candidates after autofit (k=${currentZoomK.toFixed(2)})`);
-      }
-      
-      // Update QA collision after autofit with current zoom level
-      if (window.syncQACollision) {
-        const currentZoomK = d3.zoomTransform(svgSel.node()).k;
-        window.syncQACollision(currentZoomK);
-        console.log(`[qa] Updated QA collide after autofit (k=${currentZoomK.toFixed(2)})`);
-      }
+      // after autofit success:
+      if (window.syncQADotsLOD)    window.syncQADotsLOD(getZoomScale());
+      if (window.syncQACandidates) window.syncQACandidates(getZoomScale());
+      if (window.syncQACollision)  window.syncQACollision(getZoomScale());
       
       // Set flag to prevent re-fitting after autofit
       state.didAutofitToLand = true;
@@ -955,26 +940,10 @@ async function generate(count) {
         // Start the autofit
         await window.fitLand();
         
-        // Update QA dots after autofit with current zoom level
-        if (window.syncQADotsLOD) {
-          const currentZoomK = d3.zoomTransform(svgSel.node()).k;
-          window.syncQADotsLOD(currentZoomK);
-          console.log(`[qa] Updated QA dots after autofit (k=${currentZoomK.toFixed(2)})`);
-        }
-        
-        // Update QA candidates after autofit with current zoom level
-        if (window.syncQACandidates) {
-          const currentZoomK = d3.zoomTransform(svgSel.node()).k;
-          window.syncQACandidates(currentZoomK);
-          console.log(`[qa] Updated QA candidates after autofit (k=${currentZoomK.toFixed(2)})`);
-        }
-        
-        // Update QA collision after autofit with current zoom level
-        if (window.syncQACollision) {
-          const currentZoomK = d3.zoomTransform(svgSel.node()).k;
-          window.syncQACollision(currentZoomK);
-          console.log(`[qa] Updated QA collide after autofit (k=${currentZoomK.toFixed(2)})`);
-        }
+        // after autofit success:
+        if (window.syncQADotsLOD)    window.syncQADotsLOD(getZoomScale());
+        if (window.syncQACandidates) window.syncQACandidates(getZoomScale());
+        if (window.syncQACollision)  window.syncQACollision(getZoomScale());
         
         // Mark zoom as locked to enable LOD filtering
         d3.select("svg").attr("data-zoom-locked", "1");
@@ -989,26 +958,10 @@ async function generate(count) {
         console.log('[autofit] 🔄 Method 3: Using afterLayout fallback...');
         await window.fitLand();
         
-        // Update QA dots after autofit with current zoom level
-        if (window.syncQADotsLOD) {
-          const currentZoomK = d3.zoomTransform(svgSel.node()).k;
-          window.syncQADotsLOD(currentZoomK);
-          console.log(`[qa] Updated QA dots after autofit (k=${currentZoomK.toFixed(2)})`);
-        }
-        
-        // Update QA candidates after autofit with current zoom level
-        if (window.syncQACandidates) {
-          const currentZoomK = d3.zoomTransform(svgSel.node()).k;
-          window.syncQACandidates(currentZoomK);
-          console.log(`[qa] Updated QA candidates after autofit (k=${currentZoomK.toFixed(2)})`);
-        }
-        
-        // Update QA collision after autofit with current zoom level
-        if (window.syncQACollision) {
-          const currentZoomK = d3.zoomTransform(svgSel.node()).k;
-          window.syncQACollision(currentZoomK);
-          console.log(`[qa] Updated QA collide after autofit (k=${currentZoomK.toFixed(2)})`);
-        }
+        // after autofit success:
+        if (window.syncQADotsLOD)    window.syncQADotsLOD(getZoomScale());
+        if (window.syncQACandidates) window.syncQACandidates(getZoomScale());
+        if (window.syncQACollision)  window.syncQACollision(getZoomScale());
         
         // Mark zoom as locked to enable LOD filtering
         d3.select("svg").attr("data-zoom-locked", "1");
