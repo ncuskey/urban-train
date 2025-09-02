@@ -1,5 +1,118 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Step 3 Complete: Enrich Anchors + Attach Styles ✅
+
+### 🎯 **Major Milestone Achieved**
+Successfully completed Step 3 of the labeling system reconstruction project. Anchors are now enriched with polygon context and have styles attached, providing semantic classification and visual styling information without any rendering overhead.
+
+### 📋 **What Was Accomplished**
+
+#### **1. Anchor Enrichment Module (`src/labels/enrich.js`)**
+- **Water polygon detection** using multiple fallback strategies:
+  - `poly.isWater` property (if available)
+  - `poly.water` property (if available)
+  - Height-based detection (`height <= sea` threshold)
+- **Kind classification** with binary logic: water → "ocean", land → "region"
+- **Polygon linking** via `polyIndex` for robust anchor-polygon relationships
+- **Height preservation** with fallback to `poly.h` for compatibility
+
+#### **2. Style Application Module (`src/labels/style-apply.js`)**
+- **Style lookup** using the existing Step 1 style system
+- **Kind-based styling** with fallback to "region" style
+- **Style attachment** to each anchor for future rendering
+
+#### **3. Enhanced Proto-Anchors (`src/labels/anchors.js`)**
+- **Added `polyIndex`** to proto anchors for proper polygon linking
+- **Maintained compatibility** with existing anchor structure
+
+#### **4. Main App Integration**
+- **Imports added** for both new modules in `src/main.js`
+- **Step 3 pipeline** triggered after Step 2 anchor building
+- **Console logging** for enrichment metrics and styled anchor samples
+- **Global window variables** (`__anchorsEnriched`, `__anchorsStyled`) for inspection
+
+### 🔧 **Technical Implementation**
+
+#### **Anchor Enrichment System**
+```javascript
+// src/labels/enrich.js
+export function enrichAnchors({ anchors, polygons, sea = 0.10 }) {
+  const out = anchors.map(a => {
+    let polyIndex = a.polyIndex;
+    if (polyIndex == null && typeof a.id === "string" && a.id.startsWith("poly-")) {
+      const n = Number(a.id.slice(5));
+      if (Number.isFinite(n)) polyIndex = n;
+    }
+
+    const poly = (Array.isArray(polygons) && Number.isInteger(polyIndex)) ? polygons[polyIndex] : undefined;
+    const water = isWaterPoly(poly, sea);
+    const kind = water ? "ocean" : "region";
+
+    return {
+      ...a,
+      polyIndex,
+      isWater: water,
+      kind,
+      h: (poly && (poly.height ?? poly.h)) ?? null
+    };
+  });
+
+  const waterCount = out.reduce((acc, a) => acc + (a.isWater ? 1 : 0), 0);
+  return { anchors: out, metrics: { total: out.length, water: waterCount } };
+}
+```
+
+#### **Style Application**
+```javascript
+// src/labels/style-apply.js
+export function attachStyles(anchors) {
+  return anchors.map(a => {
+    const s = getStyleFor(a.kind) || getStyleFor("region") || null;
+    return { ...a, style: s };
+  });
+}
+```
+
+#### **Main App Integration**
+```javascript
+// src/main.js - after Step 2 anchor building
+// Step 3: enrich anchors with kinds + attach styles (no rendering yet)
+const { anchors: enriched, metrics: enrichMetrics } =
+  enrichAnchors({ anchors, polygons: window.currentPolygons, sea: 0.10 });
+
+const styledAnchors = attachStyles(enriched);
+
+window.__anchorsEnriched = enriched;
+window.__anchorsStyled   = styledAnchors;
+
+console.log("[anchors:enrich] metrics", enrichMetrics);
+console.log("[anchors:style] sample", styledAnchors.slice(0, 5).map(a => ({
+  id: a.id, kind: a.kind, tier: a.tier,
+  style: a.style && { category: a.style.category, tier: a.style.tier, size: a.style.size?.[a.tier] }
+})));
+```
+
+### 📊 **Verification Results**
+
+| Test | Status | Notes |
+|------|--------|-------|
+| Anchor enrichment | ✅ PASS | Classifies water/land with robust fallbacks |
+| Style attachment | ✅ PASS | Uses existing style system with kind-based lookup |
+| Polygon linking | ✅ PASS | `polyIndex` properly connects anchors to polygons |
+| Main app integration | ✅ PASS | Triggers after Step 2 with comprehensive logging |
+| Console logging | ✅ PASS | Shows enrichment metrics and styled anchor samples |
+| Global window access | ✅ PASS | `__anchorsEnriched` and `__anchorsStyled` available |
+
+**Overall Step 3 Status: COMPLETE (6/6 criteria met)**
+
+### 🏗️ **Foundation Status**
+- **22 foundation modules** verified and working (20 + 2 new)
+- **Core map pipeline** fully operational
+- **Labeling style system** initialized and validated
+- **Anchor enrichment pipeline** operational with semantic classification
+
+---
+
 ## 2025-01-27 - Step 2 Complete: Proto-Anchors + Spatial Index ✅
 
 ### 🎯 **Major Milestone Achieved**

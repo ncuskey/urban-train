@@ -19,12 +19,18 @@ urban-train/
 │   │   ├── coastline.js    # Coastline tracing/paths
 │   │   ├── features.js     # Flood-fill oceans/lakes/islands
 │   │   ├── names.js        # Fantasy naming; inflection rules; uniqueness
-│   │   ├── labels.js       # Build & place labels; annealing; ocean rect fit
+│   │   ├── labels-null-shim.js # Temporary null implementations (Step 0)
 │   │   ├── interaction.js  # D3 zoom/pan; counter-scaling; LOD visibility
 │   │   ├── autofit.js      # Fit view to land/world; post-layout hooks
 │   │   ├── rendering.js    # Polygon rendering
 │   │   ├── fonts.js        # Font theme helpers
 │   │   └── refine.js       # Coastline refinement + rebuild cycle
+│   ├── labels/              # NEW: Labeling system (Step 1+)
+│   │   ├── schema.js       # Runtime validation + style lookup builder
+│   │   ├── style-tokens.js # Style definitions (tiers, categories, rules)
+│   │   ├── index.js        # Initialization + getters
+│   │   ├── anchors.js      # Proto-anchors from polygons (Step 2)
+│   │   └── spatial-index.js # Quadtree spatial indexing (Step 2)
 │   ├── render/
 │   │   └── layers.js       # SVG layer creation/ordering/cleanup
 │   └── selftest.js         # Sanity checks + badge
@@ -39,13 +45,16 @@ urban-train/
 
 ## Module notes & key entry points
 
-### `src/main.js` (≈1350 lines)
+### `src/main.js` (≈1577 lines)
 
-* **`generate(count)`** (≈ line 344): Master pipeline. Creates layers, samples sites, builds Voronoi, assigns heights, draws coastline, classifies features, builds labels, runs SA, and wires zoom.
+* **`generate(count)`** (≈ line 361): Master pipeline. Creates layers, samples sites, builds Voronoi, assigns heights, draws coastline, classifies features, initializes labeling style system, builds proto-anchors with spatial indexing, and wires zoom.
 * **Calls**:
 
+  * `initLabelingStyle()` (≈ 365): Initialize Step 1 labeling style system
   * `attachInteraction(...)` (≈ 441)
-  * `buildFeatureLabels(...)` (≈ 541) and `placeLabelsAvoidingCollisions(...)` (≈ 567/846/887)
+  * `buildProtoAnchors()` (≈ 553): Build Step 2 proto-anchors from largest polygons
+  * `makeAnchorIndex()` (≈ 554): Create spatial index for collision detection
+  * `buildFeatureLabels(...)` (≈ 541) and `placeLabelsAvoidingCollisions(...)` (≈ 567/846/887) - via null shim
   * `fitToLand` / `autoFitToWorld` usage appears via helpers and menu actions.
 * **Utilities**: `timeit` for coarse timings; `window.DEBUG` toggle.
 
@@ -76,26 +85,34 @@ urban-train/
   * size‑aware terms (e.g., *Mere/Tarn/Pool* for lakes, *Sea/Ocean/Deep* for oceans),
   * uniqueness guard and grammar fixes (e.g., "Lake of the Winds").
 
-### `src/modules/labels.js`
+### `src/labels/` (NEW: Step 1+ Labeling System)
 
-* **World vs screen**: Oceans in world space; other labels in screen overlay.
-* **Counter‑scaling**: fontSizePx is divided by zoom `k` so screen size stays constant.
-* **Viewport culling**: Off-screen labels are hidden for performance with ocean sticky visibility.
-* **Performance optimizations**: SAT caching, raster scaling, and deferred placement.
-* **Key exports**:
+* **`schema.js`**: Runtime validation for style tokens and style lookup builder
+  * `validateStyleTokens(tokens)`: Validates tier format, category references, rule completeness
+  * `buildStyleLookup(tokens)`: Creates kind→style Map by merging category base + rule overrides
+* **`style-tokens.js`**: Style definitions with 4 tiers (t1-t4) and 3 categories
+  * `landArea`: UPPERCASE serif fonts with loose letter spacing
+  * `waterArea`: Italic Title Case with blue colors
+  * `settlement`: Mixed case sans-serif styling
+* **`index.js`**: Main module with initialization and getters
+  * `initLabelingStyle(tokens)`: Validates and initializes the style system
+  * `getStyleFor(kind)`: Returns merged style for a specific feature kind
+  * `getStyleTokens()`: Returns the complete token configuration
+* **`anchors.js`** (NEW: Step 2): Proto-anchors from polygons for label placement
+  * `buildProtoAnchors({ polygons, max = 200 })`: Creates up to 200 anchors from largest polygons
+  * `centroid(poly)`: Calculates polygon centroid with D3 fallback
+  * `areaAbs(poly)`: Calculates polygon area with D3 fallback
+  * `estimateTextWidth(text, px)`: Heuristic text width estimation
+* **`spatial-index.js`** (NEW: Step 2): Quadtree spatial indexing for collision detection
+  * `makeAnchorIndex(anchors)`: Creates D3 quadtree with query interface
+  * `query(bbox)`: Efficient bounding box queries for collision detection
+  * `size()`: Reports total anchors in index
 
-  * `computeLabelMetrics` (≈ 486): DOM/canvas text metrics w/ CSS variables.
-  * `fitOceanToRectPx` (≈ 437): Rectangle fitting in screen px.
-  * `fitFontToRect` (≈ 3314): Max font that fits rect; 2‑line support.
-  * `annealLabels` (≈ 716): Collision‑free placement (non‑ocean).
-  * `updateViewportCull` (≈ 181): Viewport culling with RAF throttling.
-  * `ensureOceanStickyVisibility` (≈ 197): Ocean label sticky behavior.
-  * `initLabelCulling` (≈ 212): Initialize culling system.
-  * `ensureLabelLayers` / `ensureScreenLabelLayer` (≈ 39/52)
-  * `updateOceanLabelScreenPosition` (≈ 3575), `clearScreenLabels` (≈ 3567).
-  * **Performance functions**:
-    * `getOrBuildSAT()`: SAT caching with automatic cleanup (10 entry limit)
-    * `findOceanLabelRectAfterAutofit()`: Raster scaling for faster water mask computation
+### `src/modules/labels-null-shim.js` (Temporary: Step 0)
+
+* **Temporary null implementations** of all old labeling functions
+* **Prevents crashes** during Step 0 while new system is being built
+* **Will be replaced** by new modules as they're implemented
 
 ### `src/modules/interaction.js`
 

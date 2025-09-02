@@ -50,6 +50,8 @@ import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './mod
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
 import { buildProtoAnchors } from "./labels/anchors.js";
 import { makeAnchorIndex } from "./labels/spatial-index.js";
+import { enrichAnchors } from "./labels/enrich.js";
+import { attachStyles } from "./labels/style-apply.js";
 // Null shim for old labeling functions (temporary until new modules arrive)
 import {
   ensureLabelContainers,
@@ -557,6 +559,23 @@ async function generate(count) {
     window.__anchorIndex = anchorIndex;
     console.log("[anchors] built", metrics, { sample: anchors.slice(0, 5) });
     console.log("[anchors:index] size", anchorIndex.size());
+    
+    // Step 3: enrich anchors with kinds + attach styles (no rendering yet)
+    const { anchors: enriched, metrics: enrichMetrics } =
+      enrichAnchors({ anchors, polygons: window.currentPolygons, sea: 0.10 });
+
+    const styledAnchors = attachStyles(enriched);
+
+    window.__anchorsEnriched = enriched;
+    window.__anchorsStyled   = styledAnchors;
+
+    console.log("[anchors:enrich] metrics", enrichMetrics);
+    console.log("[anchors:style] sample",
+      styledAnchors.slice(0, 5).map(a => ({
+        id: a.id, kind: a.kind, tier: a.tier,
+        style: a.style && { category: a.style.category, tier: a.style.tier, size: a.style.size?.[a.tier] }
+      }))
+    );
     
     // Build robust XY accessor after refine/Voronoi (when cells have x,y,height,featureType)
     state.getCellAtXY = buildXYAccessor(polygons);

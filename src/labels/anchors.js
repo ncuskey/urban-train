@@ -42,6 +42,7 @@ export function buildProtoAnchors({ polygons, max = 200 }) {
     const [x, y] = centroid(poly);
     return {
       id: `poly-${i}`,
+      polyIndex: i,
       kind: "proto",          // semantic kind comes later (land/water/region/etc.)
       tier: "t3",             // placeholder until we wire style/logic
       x, y,

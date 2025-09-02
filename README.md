@@ -103,6 +103,18 @@ npm test
 
 ## Label system details
 
+### Current Labeling System Status
+
+The labeling system is currently being reconstructed with a new modular architecture:
+
+* **✅ Step 1 (COMPLETE)**: Style system with validation, tokens, and lookup
+* **✅ Step 2 (COMPLETE)**: Proto-anchors with spatial indexing for collision detection  
+* **✅ Step 3 (COMPLETE)**: Anchor enrichment with polygon context and style attachment
+* **🔄 Step 4 (NEXT)**: Label text generation and placement algorithms
+* **🔄 Step 5 (PLANNED)**: Rendering and interaction integration
+
+**New modules**: `src/labels/` directory contains the reconstructed system with ES modules, comprehensive validation, and performance optimizations.
+
 **Coordinate spaces**
 
 * Ocean labels: **world space** (x/y do not move relative to geography); font size counter‑scales with zoom.
