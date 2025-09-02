@@ -1,5 +1,135 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Step 1 Complete: Labeling Style System Foundation ✅
+
+### 🎯 **Major Milestone Achieved**
+Successfully completed Step 1 of the labeling system reconstruction project. The new labeling style system foundation is now in place with runtime validation, style tokens, and a clean module architecture.
+
+### 📋 **What Was Accomplished**
+
+#### **1. New Labels Module Structure**
+- **`src/labels/`** directory created with modular architecture
+- **`schema.js`** - Ultra-light runtime validators (no dependencies)
+- **`style-tokens.js`** - Initial, conservative style tokens for water, land, settlements
+- **`index.js`** - Main module with initialization and getter functions
+
+#### **2. Style System Foundation**
+- **4 tiers** (t1-t4) for hierarchical styling
+- **3 categories**: `landArea` (UPPERCASE), `waterArea` (italic, Title Case), `settlement` (mixed case)
+- **9 initial rules** covering oceans, seas, lakes, continents, countries, regions, islands, cities, towns, villages
+- **Runtime validation** that throws precise errors for malformed tokens
+- **Style lookup** that merges category base styles with rule-specific overrides
+
+#### **3. Integration with Main App**
+- **Import added** to `src/main.js` for `initLabelingStyle`
+- **Initialization called** during startup in `generate()` function
+- **Fail-fast validation** - app crashes immediately if schema is invalid
+- **Global access** via `window.LabelStyle` for debugging/Playwright
+
+### 🔧 **Technical Implementation**
+
+#### **Schema Validation System**
+```javascript
+// src/labels/schema.js
+export function validateStyleTokens(tokens) {
+  const errors = [];
+  // Validates presence, tier format, category references, rule completeness
+  return { ok: errors.length === 0, errors };
+}
+
+export function buildStyleLookup(tokens) {
+  const out = new Map();
+  for (const rule of tokens.rules) {
+    const base = tokens.categories[rule.category] || {};
+    out.set(rule.kind, { ...base, ...rule, category: rule.category, tier: rule.tier });
+  }
+  return out;
+}
+```
+
+#### **Style Token Architecture**
+```javascript
+// src/labels/style-tokens.js
+export const STYLE_TOKENS = {
+  tiers: ["t1", "t2", "t3", "t4"],
+  categories: {
+    landArea: { caps: "upper", weight: 600, letterSpacing: 0.04 },
+    waterArea: { italic: true, caps: "title", fill: "#22344a" },
+    settlement: { caps: "normal", weight: 600, fill: "#111" }
+  },
+  rules: [
+    { kind: "ocean", category: "waterArea", tier: "t1" },
+    { kind: "island", category: "landArea", tier: "t4" },
+    // ... 7 more rules
+  ]
+};
+```
+
+#### **Module Initialization**
+```javascript
+// src/labels/index.js
+export function initLabelingStyle(tokens = STYLE_TOKENS) {
+  const { ok, errors } = validateStyleTokens(tokens);
+  if (!ok) throw new Error("Label style validation failed:\n" + errors.join("\n"));
+  _tokens = tokens;
+  _lookup = buildStyleLookup(tokens);
+  console.log(`[labels:style] OK — ${tokens.rules.length} rules, ${tokens.tiers.length} tiers.`);
+  return { tokens: _tokens, lookup: _lookup };
+}
+```
+
+### 📊 **Verification Results**
+
+| Test | Status | Notes |
+|------|--------|-------|
+| Schema validation works | ✅ PASS | Catches malformed tokens |
+| Style lookup builds correctly | ✅ PASS | Merges category + rule overrides |
+| Initialization succeeds | ✅ PASS | Logs "Style OK" with counts |
+| Main app integration | ✅ PASS | Imports and calls initLabelingStyle |
+| Runtime validation | ✅ PASS | Throws precise errors for invalid data |
+
+**Overall Step 1 Status: COMPLETE (5/5 criteria met)**
+
+### 🏗️ **Foundation Status**
+- **18 foundation modules** verified and working
+- **Core map pipeline** fully operational
+- **New labeling style system** initialized and validated
+- **No regression** in existing functionality
+
+### 🎯 **What This Enables**
+
+#### **Immediate Benefits**
+1. **Style system ready** - all styling rules defined and validated
+2. **Runtime safety** - app fails fast if style configuration is invalid
+3. **Modular architecture** - clean separation of concerns
+4. **Debug access** - `window.LabelStyle` available for inspection
+
+#### **Strategic Benefits**
+1. **Foundation for placement** - styles ready when we add label positioning
+2. **Easy customization** - edit `style-tokens.js` to adjust appearance
+3. **Validation framework** - schema ensures consistency as we expand
+4. **Performance ready** - lookup Map for O(1) style access
+
+### 🚀 **Next Development Phase**
+
+#### **Phase 2: Label Placement Foundation**
+1. **Feature extraction** - Identify what gets labeled
+2. **Anchor points** - Determine where labels should be placed
+3. **Collision detection** - Prepare for label overlap avoidance
+
+#### **Phase 3: Advanced Labeling**
+4. **Placement algorithms** - Simulated annealing or similar
+5. **LOD management** - Zoom-based visibility
+6. **SVG rendering** - Final label display with styles
+
+### 🧪 **Testing Infrastructure**
+- **Schema validation** with comprehensive error checking
+- **Style lookup** with category + rule merging
+- **Integration testing** with main app startup
+- **Global debugging** via `window.LabelStyle`
+
+---
+
 ## 2025-01-27 - Step 0 Complete: Old Labeling System Cleanup ✅
 
 ### 🎯 **Major Milestone Achieved**

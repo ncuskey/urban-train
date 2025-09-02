@@ -38,6 +38,7 @@ import { Timers } from "./core/timers.js";
 import { ensureLayers } from "./render/layers.js";
 // ensureLabelSubgroups temporarily disabled until new labeling system arrives
 import { runSelfTests, renderSelfTestBadge, clamp01, ensureReciprocalNeighbors } from "./selftest.js";
+import { initLabelingStyle } from "./labels/index.js";
 import { poissonDiscSampler, buildVoronoi, detectNeighbors } from "./modules/geometry.js";
 import { randomMap } from "./modules/heightmap.js";
 import { markFeatures } from "./modules/features.js";
@@ -362,6 +363,14 @@ console.groupEnd();
 async function generate(count) {
   timers.clear();
   timers.mark('generate');
+
+  // Initialize Step-1 style system (no placement/render yet)
+  try {
+    initLabelingStyle();
+  } catch (e) {
+    console.error(e);
+    throw e; // fail fast so we see schema errors
+  }
 
   // STEP 0: no labels — stub arrays so legacy calls don't explode
   let featureLabels = [];
