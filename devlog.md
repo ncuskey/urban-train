@@ -5,6 +5,91 @@
 ### 🎯 **Major Milestone Achieved**
 Successfully completed Step 3 of the labeling system reconstruction project. Anchors are now enriched with polygon context and have styles attached, providing semantic classification and visual styling information without any rendering overhead.
 
+## 2025-01-27 - QA Overlay: Water Component Centroids ✅
+
+### 🎯 **QA Visualization System Complete**
+Successfully implemented a QA overlay system that renders tiny colored dots at water component centroids for visual debugging and validation. The overlay automatically attaches to the zoomed world layer and follows all transforms.
+
+### 📋 **What Was Accomplished**
+
+#### **1. Debug Markers Module (`src/labels/debug-markers.js`)**
+- **Smart world layer detection** that finds the zoomed group automatically
+- **Water component visualization** with color-coded dots:
+  - Ocean: Blue (`#1f77b4`)
+  - Sea: Teal (`#17becf`) 
+  - Lake: Light cyan (`#9edae5`)
+- **Crisp stroke rendering** using `vector-effect: non-scaling-stroke`
+- **Constant-size option** via `syncQAWaterRadius()` for zoom-independent dot size
+- **Robust fallbacks** for different SVG layer structures
+
+#### **2. Main App Integration (`src/main.js`)**
+- **URL flag system** with `?flags=qaCentroids` parameter
+- **Automatic rendering** after water component anchors are built and styled
+- **Console logging** for QA overlay status and marker counts
+- **Global accessibility** via `window.__waterAnchors` and `window.__waterAnchorsStyled`
+
+#### **3. Zoom-Aware Rendering**
+- **Automatic world layer attachment** for proper transform following
+- **Pan/zoom compatibility** with dots moving and scaling correctly
+- **Autofit transform support** for automatic centering and scaling
+
+### 🔧 **Technical Implementation**
+
+#### **Smart Layer Detection**
+```javascript
+// src/labels/debug-markers.js - Intelligent world layer finding
+function findWorldLayer(svg) {
+  const root = sel(svg);
+  const candidates = [
+    '#world',
+    '[data-zoom-layer="world"]',
+    '#viewport',
+    '#map',
+    '#layers',
+  ];
+  for (const c of candidates) {
+    const g = root.select(c);
+    if (!g.empty()) return g;
+  }
+  // Fallback: first <g> with transform attribute
+  const transformed = root.selectAll('g').filter(function () {
+    return this.hasAttribute('transform');
+  });
+  if (!transformed.empty()) return transformed.nodes ? d3.select(transformed.nodes()[0]) : transformed;
+  return root; // Last resort
+}
+```
+
+#### **QA Overlay Rendering**
+```javascript
+// src/main.js - Flag-gated QA overlay
+if (hasFlag('qaCentroids')) {
+  const svgNode = (typeof svg !== 'undefined' && svg.node) ? svg : d3.select('svg');
+  renderQAWaterAnchors(svgNode, window.__waterAnchorsStyled || window.__waterAnchors || []);
+  console.log("[qa] water centroid markers rendered:", (window.__waterAnchors || []).length);
+}
+```
+
+### 🚀 **Usage**
+
+#### **Enable QA Overlay**
+Load the app with the QA flag: `http://localhost:8000/?flags=qaCentroids`
+
+#### **Expected Behavior**
+- Tiny colored circles appear at water component centroids
+- Dots automatically follow pan/zoom transforms
+- Colors indicate water type classification
+- Console shows marker count and rendering status
+
+#### **Optional: Constant-Size Dots**
+```javascript
+// In zoom handler for constant on-screen dot size
+import { syncQAWaterRadius } from "./labels/debug-markers.js";
+syncQAWaterRadius(svg, k, 3); // Keep radius ~3px regardless of zoom
+```
+
+---
+
 ## 2025-01-27 - Step 3b Complete: Topology-Based Water Components + Component Anchors ✅
 
 ### 🎯 **Water Classification System Complete**

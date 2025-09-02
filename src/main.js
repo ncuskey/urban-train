@@ -4,6 +4,11 @@ window.DEBUG = false;
 // Label system temporarily disabled - flags removed until new modules arrive
 window.labelFlags = {};
 
+// URL flag helper for QA overlays and feature toggles
+const urlFlags = (new URLSearchParams(location.search).get('flags') || "")
+  .split(",").filter(Boolean);
+const hasFlag = f => urlFlags.includes(f);
+
 // Performance timing function
 function timeit(tag, fn) {
   const t0 = performance.now();
@@ -54,6 +59,7 @@ import { enrichAnchors } from "./labels/enrich.js";
 import { attachStyles } from "./labels/style-apply.js";
 import { computeWaterComponentsTopo, applyWaterKindsToAnchors } from "./labels/water-split.js";
 import { buildWaterComponentAnchors } from "./labels/anchors-water.js";
+import { renderQAWaterAnchors } from "./labels/debug-markers.js";
 // Null shim for old labeling functions (temporary until new modules arrive)
 import {
   ensureLabelContainers,
@@ -673,6 +679,13 @@ async function generate(count) {
 
     window.__waterAnchors = waterAnchors;
     window.__waterAnchorsStyled = waterAnchorsStyled;
+
+    // QA overlay: render water component centroids if flag is present
+    if (hasFlag('qaCentroids')) {
+      const svgNode = (typeof svg !== 'undefined' && svg.node) ? svg : d3.select('svg');
+      renderQAWaterAnchors(svgNode, window.__waterAnchorsStyled || window.__waterAnchors || []);
+      console.log("[qa] water centroid markers rendered:", (window.__waterAnchors || []).length);
+    }
 
     console.log("[water:anchors] built", waterAnchorBuild.metrics,
       { sample: waterAnchorsStyled.slice(0, 5).map(a => ({ id:a.id, kind:a.kind })) });
