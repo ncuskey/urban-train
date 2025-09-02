@@ -10,11 +10,13 @@ A web‑based fantasy map generator that builds Voronoi‑based worlds with real
 * **Fantasy naming**: Size‑aware hydronyms with grammar/inflection guards and uniqueness.
 * **Label system**:
 
-  * Simulated‑annealing placement with collision avoidance for non‑ocean labels.
-  * Ocean labels placed in **world space** and fitted into the largest valid rectangle; supports **two‑line** breaks and **counter‑scales** with zoom to keep readable on screen.
+  * **Step 1-3**: Style system with 4 tiers (t1-t4) and 3 categories (landArea, waterArea, settlement)
+  * **Step 4**: LOD bands with zoom-based visibility filtering and per-kind overrides
+  * **Step 5**: LOD-aware candidate boxes for visible anchors with text width estimation
+  * **Step 6**: Greedy collision pruning with grid-based spatial indexing and priority ranking
+  * **Ocean labels**: Placed in **world space** and fitted into the largest valid rectangle; supports **two‑line** breaks and **counter‑scales** with zoom to keep readable on screen.
   * **SAT caching**: Water mask computation cached between runs when geometry hasn't changed (keyed on seed + viewport + water components).
   * **Deferred placement**: Ocean labels deferred to idle time when possible to avoid blocking `requestAnimationFrame`.
-  * Zoom‑level LOD: small features fade in as you zoom.
   * **Viewport culling**: Off-screen labels are hidden for performance, with ocean label sticky visibility.
 * **Interaction**: Smooth pan/zoom (D3 v5), HUD readouts, and a lightweight performance HUD.
 * **Performance**: Intelligent deferral of heavy operations to idle time, SAT caching, and raster scaling optimizations.
@@ -83,10 +85,12 @@ npm test
 
 5. **Label build & placement**
 
-   * Build label data per feature, including area, centroid, and style hints.
-   * **Non‑ocean labels**: Simulated‑annealing to avoid overlaps; stored in **screen space** overlay for crisp text.
+   * **Step 1-3**: Build proto-anchors from largest polygons, enrich with context, attach styles
+   * **Step 4**: Compute LOD bands with zoom-based visibility thresholds
+   * **Step 5**: Generate candidate boxes for visible anchors with text width estimation
+   * **Step 6**: Greedy collision pruning with spatial indexing and priority ranking
    * **Ocean labels**: Compute a maximal fitting rect in **world space**, then fit text (possibly 2 lines). Font size is stored as *screen pixels* and applied as `fontSizePx / k` so labels stay the same on‑screen size as you zoom (`k` = current zoom).
-     Sources: `src/modules/labels.js` (see functions below), `src/modules/interaction.js`.
+     Sources: `src/labels/` modules, `src/modules/interaction.js`.
 
 6. **Auto‑fit & view**
    Auto‑frame the map to land bounds; re‑flow labels post‑layout.

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Greedy Collision QA</title>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 8px; }
+        .success { color: #2ecc71; }
+        .error { color: #e74c3c; }
+        .info { color: #3498db; }
+        button { padding: 8px 16px; margin: 5px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #f0f0f0; }
+        .log { background: #f8f9fa; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 12px; max-height: 200px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>Test: Greedy Collision QA System</h1>
+    
+    <div class="test-section">
+        <h3>Setup</h3>
+        <p>This test verifies the greedy collision pruning system with QA visualization.</p>
+        <button onclick="generateMap()">Generate Map</button>
+        <button onclick="testCollision()">Test Collision QA</button>
+        <button onclick="clearQA()">Clear QA</button>
+        <div id="status"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Console Output</h3>
+        <div id="console" class="log"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Instructions</h3>
+        <ol>
+            <li>Generate a map first</li>
+            <li>Test the collision QA system</li>
+            <li>Check the console for collision metrics</li>
+            <li>Look for green (accepted) and red (rejected) rectangles on the map</li>
+            <li>Zoom in/out to see how collision detection changes</li>
+        </ol>
+    </div>
+
+    <script type="module">
+        // Intercept console.log to display in our UI
+        const originalLog = console.log;
+        const consoleDiv = document.getElementById('console');
+        
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            const line = document.createElement('div');
+            line.textContent = args.join(' ');
+            consoleDiv.appendChild(line);
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        };
+
+        function log(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = `<span class="${type}">${message}</span>`;
+        }
+
+        // Test functions
+        window.generateMap = () => {
+            log('Generating map...', 'info');
+            if (window.generateMap) {
+                window.generateMap();
+                log('Map generated successfully', 'success');
+            } else {
+                log('Map generation not available', 'error');
+            }
+        };
+
+        window.testCollision = () => {
+            log('Testing collision QA...', 'info');
+            if (window.syncQACollision) {
+                window.syncQACollision(1.0);
+                log('Collision QA test completed', 'success');
+            } else {
+                log('Collision QA not available', 'error');
+            }
+        };
+
+        window.clearQA = () => {
+            log('Clearing QA overlays...', 'info');
+            // Clear all QA elements
+            const svg = d3.select('svg');
+            if (!svg.empty()) {
+                svg.selectAll('#qa-cand-ok, #qa-cand-bad').remove();
+                log('QA overlays cleared', 'success');
+            } else {
+                log('No SVG found', 'error');
+            }
+        };
+
+        // Check if required functions are available
+        function checkAvailability() {
+            const checks = [
+                { name: 'generateMap', fn: window.generateMap },
+                { name: 'syncQACollision', fn: window.syncQACollision },
+                { name: 'greedyPlace', fn: window.greedyPlace }
+            ];
+
+            checks.forEach(check => {
+                if (check.fn) {
+                    log(`✅ ${check.name} available`, 'success');
+                } else {
+                    log(`❌ ${check.name} not available`, 'error');
+                }
+            });
+        }
+
+        // Wait for the main app to load
+        window.addEventListener('load', () => {
+            setTimeout(checkAvailability, 1000);
+        });
+    </script>
+
+    <!-- Load D3 v5 -->
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    
+    <!-- Load the main app -->
+    <script type="module" src="src/main.js"></script>
+</body>
+</html>

@@ -93,3 +93,49 @@ export function renderQACandidates(svg, candidates) {
 export function clearQACandidates(svg) {
   sel(svg).select('#qa-candidates').remove();
 }
+
+// --- QA: accepted vs rejected candidate rectangles ---
+export function renderQACollision(svg, placed, rejected) {
+  const parent = (svg && svg.select) ? svg : d3.select(svg);
+  // Find the zoomed "world" layer as before
+  const findWorldLayer = root => {
+    const candidates = ['#world','[data-zoom-layer="world"]','#viewport','#map','#layers'];
+    for (const c of candidates) { const g = root.select(c); if (!g.empty()) return g; }
+    const transformed = root.selectAll('g').filter(function(){ return this.hasAttribute('transform'); });
+    if (!transformed.empty()) return d3.select(transformed.nodes()[0]);
+    return root;
+  };
+  const layer = findWorldLayer(parent);
+
+  // Accepted (green)
+  let gOk = layer.select('#qa-cand-ok');
+  if (gOk.empty()) gOk = layer.append('g').attr('id','qa-cand-ok');
+  const ok = gOk.selectAll('rect.qa-ok').data(placed || [], d => d.id);
+  ok.enter().append('rect')
+    .attr('class','qa-ok')
+    .attr('fill','none')
+    .attr('stroke','#2ecc71')
+    .attr('stroke-width',1.2)
+    .style('vector-effect','non-scaling-stroke')
+    .merge(ok)
+    .attr('x', d => d.x0).attr('y', d => d.y0)
+    .attr('width', d => Math.max(1, d.x1 - d.x0))
+    .attr('height', d => Math.max(1, d.y1 - d.y0));
+  ok.exit().remove();
+
+  // Rejected (red, translucent)
+  let gBad = layer.select('#qa-cand-bad');
+  if (gBad.empty()) gBad = layer.append('g').attr('id','qa-cand-bad');
+  const bad = gBad.selectAll('rect.qa-bad').data(rejected || [], d => d.id);
+  bad.enter().append('rect')
+    .attr('class','qa-bad')
+    .attr('fill','rgba(231, 76, 60, 0.10)')
+    .attr('stroke','#e74c3c')
+    .attr('stroke-width',1)
+    .style('vector-effect','non-scaling-stroke')
+    .merge(bad)
+    .attr('x', d => d.x0).attr('y', d => d.y0)
+    .attr('width', d => Math.max(1, d.x1 - d.x0))
+    .attr('height', d => Math.max(1, d.y1 - d.y0));
+  bad.exit().remove();
+}

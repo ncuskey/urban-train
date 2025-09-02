@@ -1,6 +1,10 @@
 // d3 is global; do not import it.
 // Old labeling system removed - no imports needed
 
+// URL flag helper for quieting zoom spam
+const noisyZoom = (new URLSearchParams(location.search).get('flags') || "")
+  .split(",").includes("debugZoomIdentity");
+
 // Temporary no-op stubs to keep the app running
 // These will be replaced by the new modular labeling system
 function noopStub(...args) {
@@ -116,8 +120,9 @@ export function attachInteraction({
     // keep QA dots glued and LOD-filtered as you zoom
     if (window.syncQADotsLOD) window.syncQADotsLOD(t.k);
     if (window.syncQACandidates) window.syncQACandidates(t.k);
+    if (window.syncQACollision) window.syncQACollision(t.k);
     
-    console.debug('[zoom svg identity]', {
+    if (noisyZoom) console.debug('[zoom svg identity]', {
       anchor: (window.state && window.state.ocean) ? window.state.ocean.anchor : svgSel.node().__oceanWorldAnchor,
       svgId: svgSel.node().id || 'no-id',
       svgNode: svgSel.node()

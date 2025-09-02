@@ -59,9 +59,10 @@ import { enrichAnchors } from "./labels/enrich.js";
 import { attachStyles } from "./labels/style-apply.js";
 import { computeWaterComponentsTopo, applyWaterKindsToAnchors } from "./labels/water-split.js";
 import { buildWaterComponentAnchors } from "./labels/anchors-water.js";
-import { renderQAWaterAnchors, syncQAWaterRadius, renderQACandidates, clearQACandidates } from "./labels/debug-markers.js";
+import { renderQAWaterAnchors, syncQAWaterRadius, renderQACandidates, clearQACandidates, renderQACollision } from "./labels/debug-markers.js";
 import { computeLOD, visibleAtK } from "./labels/lod.js";
 import { makeCandidates } from "./labels/placement/candidates.js";
+import { greedyPlace } from "./labels/placement/collide.js";
 // Null shim for old labeling functions (temporary until new modules arrive)
 import {
   ensureLabelContainers,
@@ -770,6 +771,27 @@ async function generate(count) {
     // Expose clear function globally for QA testing
     window.clearQACandidates = clearQACandidates;
 
+    // Step 6: Greedy collision pruning + QA visualization
+    // Expose a sync used by zoom handler
+    window.syncQACollision = (k = 1.0) => {
+      if (!hasFlag('qaCollide')) return;
+      const cands = makeCandidates({ anchorsLOD: window.__anchorsLOD, k });
+      const { placed, rejected } = greedyPlace(cands, { cell: 64 });
+      window.__candidates = cands;
+      window.__placed = placed;
+      window.__rejected = rejected;
+
+      const svgNode = (typeof svg !== 'undefined' && svg.node) ? svg : d3.select('svg');
+      renderQACollision(svgNode, placed, rejected);
+
+      console.log("[qa:collide] k=%s placed=%d rejected=%d", k.toFixed(2), placed.length, rejected.length);
+    };
+
+    // initial draw (optional)
+    if (hasFlag('qaCollide')) {
+      window.syncQACollision(1.0);
+    }
+
     console.log("[anchors:enrich] metrics", enrichMetrics);
     console.log("[anchors:style] sample",
       styledAnchors.slice(0, 5).map(a => ({
@@ -889,6 +911,20 @@ async function generate(count) {
         console.log(`[qa] Updated QA dots after autofit (k=${currentZoomK.toFixed(2)})`);
       }
       
+      // Update QA candidates after autofit with current zoom level
+      if (window.syncQACandidates) {
+        const currentZoomK = d3.zoomTransform(svgSel.node()).k;
+        window.syncQACandidates(currentZoomK);
+        console.log(`[qa] Updated QA candidates after autofit (k=${currentZoomK.toFixed(2)})`);
+      }
+      
+      // Update QA collision after autofit with current zoom level
+      if (window.syncQACollision) {
+        const currentZoomK = d3.zoomTransform(svgSel.node()).k;
+        window.syncQACollision(currentZoomK);
+        console.log(`[qa] Updated QA collide after autofit (k=${currentZoomK.toFixed(2)})`);
+      }
+      
       // Set flag to prevent re-fitting after autofit
       state.didAutofitToLand = true;
       
@@ -926,6 +962,20 @@ async function generate(count) {
           console.log(`[qa] Updated QA dots after autofit (k=${currentZoomK.toFixed(2)})`);
         }
         
+        // Update QA candidates after autofit with current zoom level
+        if (window.syncQACandidates) {
+          const currentZoomK = d3.zoomTransform(svgSel.node()).k;
+          window.syncQACandidates(currentZoomK);
+          console.log(`[qa] Updated QA candidates after autofit (k=${currentZoomK.toFixed(2)})`);
+        }
+        
+        // Update QA collision after autofit with current zoom level
+        if (window.syncQACollision) {
+          const currentZoomK = d3.zoomTransform(svgSel.node()).k;
+          window.syncQACollision(currentZoomK);
+          console.log(`[qa] Updated QA collide after autofit (k=${currentZoomK.toFixed(2)})`);
+        }
+        
         // Mark zoom as locked to enable LOD filtering
         d3.select("svg").attr("data-zoom-locked", "1");
         
@@ -944,6 +994,20 @@ async function generate(count) {
           const currentZoomK = d3.zoomTransform(svgSel.node()).k;
           window.syncQADotsLOD(currentZoomK);
           console.log(`[qa] Updated QA dots after autofit (k=${currentZoomK.toFixed(2)})`);
+        }
+        
+        // Update QA candidates after autofit with current zoom level
+        if (window.syncQACandidates) {
+          const currentZoomK = d3.zoomTransform(svgSel.node()).k;
+          window.syncQACandidates(currentZoomK);
+          console.log(`[qa] Updated QA candidates after autofit (k=${currentZoomK.toFixed(2)})`);
+        }
+        
+        // Update QA collision after autofit with current zoom level
+        if (window.syncQACollision) {
+          const currentZoomK = d3.zoomTransform(svgSel.node()).k;
+          window.syncQACollision(currentZoomK);
+          console.log(`[qa] Updated QA collide after autofit (k=${currentZoomK.toFixed(2)})`);
         }
         
         // Mark zoom as locked to enable LOD filtering

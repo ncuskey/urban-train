@@ -1,5 +1,178 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Step 6 Complete: Greedy Collision Pruning + QA Visualization ✅
+
+### 🎯 **Greedy Collision Pruning + QA Visualization Complete**
+Successfully implemented a greedy collision detection system with spatial grid indexing for performance, plus comprehensive QA visualization showing accepted vs rejected label candidates. The system now provides real-time collision pruning with visual feedback for debugging label placement conflicts.
+
+### 📋 **What Was Accomplished**
+
+#### **1. Collision Detection Module (`src/labels/placement/collide.js`)**
+- **`greedyPlace()` function** implements greedy placement algorithm
+- **AABB intersection testing** with efficient `intersects()` helper
+- **Priority-based ranking** using tier scores + kind boosts + area penalties
+- **GridIndex spatial indexing** with configurable cell size (default 64px)
+- **Performance optimized** neighborhood queries for collision detection
+- **Returns structured results** with `{ placed, rejected }` arrays
+
+#### **2. Enhanced QA Visualization (`src/labels/debug-markers.js`)**
+- **`renderQACollision()`** shows accepted (green) vs rejected (red) rectangles
+- **Reuses existing** `findWorldLayer()` helpers for zoom-aware positioning
+- **Non-scaling strokes** maintain crisp rendering under zoom transforms
+- **Visual distinction** between successful and failed placements
+- **Automatic cleanup** with D3 data binding for dynamic updates
+
+#### **3. Main App Integration (`src/main.js`)**
+- **Imports** `greedyPlace` and `renderQACollision` functions
+- **`window.syncQACollision(k)`** function for zoom-driven collision updates
+- **Flag-gated** with `?flags=qaCollide` URL parameter
+- **Global exposure** of collision results for debugging
+- **Initial collision test** at k=1.0 when flag is enabled
+- **Console logging** shows placed/rejected counts and zoom level
+
+#### **4. Zoom Handler Integration (`src/modules/interaction.js`)**
+- **Calls `syncQACollision(t.k)`** after applying zoom transforms
+- **Maintains sync** with existing QA dots and candidates functionality
+- **Real-time updates** as user zooms in/out
+- **Performance optimized** - only updates when collision flag is enabled
+
+#### **5. Test Page (`test-collision-qa.html`)**
+- **Independent test page** for collision system verification
+- **Manual testing** of collision QA functionality
+- **Function verification** buttons for testing collision detection
+- **Console logging** for debugging collision metrics
+
+### 🔧 **Technical Implementation**
+
+#### **Greedy Placement Algorithm with Spatial Indexing**
+```javascript
+// src/labels/placement/collide.js - Efficient collision detection
+export function greedyPlace(candidates, { cell = 64 } = {}) {
+  const placed = [];
+  const rejected = [];
+  const grid = new GridIndex(cell);
+
+  const sorted = [...(candidates || [])].sort((a, b) => rank(b) - rank(a));
+  for (const c of sorted) {
+    const neighbors = grid.query(c);
+    let hit = false;
+    for (const n of neighbors) {
+      if (intersects(c, n)) { hit = true; break; }
+    }
+    if (!hit) {
+      placed.push(c);
+      grid.insert(c);
+    } else {
+      rejected.push({ ...c, _reason: "overlap" });
+    }
+  }
+  return { placed, rejected };
+}
+```
+
+#### **Priority-Based Ranking System**
+```javascript
+// src/labels/placement/collide.js - Smart candidate prioritization
+function rank(c) {
+  const tierScore = { t1: 400, t2: 300, t3: 200, t4: 100 }[c.tier || "t3"] || 0;
+  const kindBoost = { ocean: 40, sea: 30, lake: 20, region: 10 }[c.kind || ""] || 0;
+  // Larger boxes later (prefer concise labels in tight spaces): negative area
+  const area = Math.max(1, (c.x1 - c.x0) * (c.y1 - c.y0));
+  return tierScore + kindBoost - area * 0.001; // very small area penalty
+}
+```
+
+#### **Grid-Based Spatial Indexing**
+```javascript
+// src/labels/placement/collide.js - Fast neighborhood queries
+class GridIndex {
+  constructor(cell = 64) {
+    this.cell = cell;
+    this.cells = new Map(); // "ix,iy" -> Set of items
+  }
+  
+  query(box) {
+    const out = new Set();
+    for (const k of this._rangeKeys(box)) {
+      const bin = this.cells.get(k);
+      if (!bin) continue;
+      for (const it of bin) out.add(it);
+    }
+    return [...out];
+  }
+}
+```
+
+#### **QA Collision Visualization**
+```javascript
+// src/labels/debug-markers.js - Visual collision feedback
+export function renderQACollision(svg, placed, rejected) {
+  const layer = findWorldLayer(parent);
+
+  // Accepted (green)
+  let gOk = layer.select('#qa-cand-ok');
+  if (gOk.empty()) gOk = layer.append('g').attr('id','qa-cand-ok');
+  const ok = gOk.selectAll('rect.qa-ok').data(placed || [], d => d.id);
+  ok.enter().append('rect')
+    .attr('class','qa-ok')
+    .attr('fill','none')
+    .attr('stroke','#2ecc71')
+    .attr('stroke-width',1.2)
+    .style('vector-effect','non-scaling-stroke')
+    .merge(ok)
+    .attr('x', d => d.x0).attr('y', d => d.y0)
+    .attr('width', d => Math.max(1, d.x1 - d.x0))
+    .attr('height', d => Math.max(1, d.y1 - d.y0));
+
+  // Rejected (red, translucent)
+  let gBad = layer.select('#qa-cand-bad');
+  if (gBad.empty()) gBad = layer.append('g').attr('id','qa-cand-bad');
+  const bad = gBad.selectAll('rect.qa-bad').data(rejected || [], d => d.id);
+  bad.enter().append('rect')
+    .attr('class','qa-bad')
+    .attr('fill','rgba(231, 76, 60, 0.10)')
+    .attr('stroke','#e74c3c')
+    .attr('stroke-width',1)
+    .style('vector-effect','non-scaling-stroke')
+    .merge(bad)
+    .attr('x', d => d.x0).attr('y', d => d.y0)
+    .attr('width', d => Math.max(1, d.x1 - d.x0))
+    .attr('height', d => Math.max(1, d.y1 - d.y0));
+}
+```
+
+### 🧪 **Testing & Verification**
+
+#### **URL Flags for QA Testing**
+- **`?flags=qaCollide`** enables collision visualization
+- **Combines with existing** `?flags=qaCentroids,qaCandidates,qaCollide`
+- **Real-time updates** during zoom operations
+- **Console logging** shows collision metrics at each zoom level
+
+#### **Performance Characteristics**
+- **Grid cell size**: 64px (configurable via `{ cell: 64 }`)
+- **Spatial indexing**: O(1) neighborhood queries for collision detection
+- **Greedy algorithm**: O(n log n) sorting + O(n × neighbors) collision checks
+- **Memory efficient**: Map-based grid with Set storage per cell
+
+#### **Visual Feedback**
+- **Green rectangles**: Successfully placed labels (no collisions)
+- **Red rectangles**: Rejected labels due to overlaps
+- **Zoom responsive**: All QA elements follow world coordinate transforms
+- **Non-scaling strokes**: Maintain crisp appearance at all zoom levels
+
+### 🚀 **Next Steps**
+
+The collision detection system is now complete and provides:
+1. **Efficient spatial indexing** for fast collision queries
+2. **Smart prioritization** based on tier, kind, and area
+3. **Real-time QA visualization** for debugging placement conflicts
+4. **Zoom-responsive updates** that maintain sync with the map view
+
+This foundation enables the next phase of label placement optimization and provides the debugging tools needed for fine-tuning the collision detection parameters.
+
+---
+
 ## 2025-01-27 - Step 5 Complete: Placement Skeleton + QA Rectangles ✅
 
 ### 🎯 **Placement Skeleton + QA Rectangles Complete**

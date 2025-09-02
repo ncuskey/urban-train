@@ -32,7 +32,13 @@ urban-train/
 │   │   ├── anchors.js      # Proto-anchors from polygons (Step 2)
 │   │   ├── spatial-index.js # Quadtree spatial indexing (Step 2)
 │   │   ├── enrich.js       # Anchor enrichment with polygon context (Step 3)
-│   │   └── style-apply.js  # Style attachment to anchors (Step 3)
+│   │   ├── style-apply.js  # Style attachment to anchors (Step 3)
+│   │   ├── placement/      # NEW: Label placement pipeline (Step 5+)
+│   │   │   └── candidates.js # Candidate boxes for visible anchors (Step 5)
+│   │   ├── lod.js          # LOD bands + zoom filtering (Step 4)
+│   │   ├── water-split.js  # Water component topology + kind assignment (Step 3b)
+│   │   ├── anchors-water.js # Water-specific anchor building (Step 3b)
+│   │   └── debug-markers.js # QA dots + rectangles for debugging
 │   ├── render/
 │   │   └── layers.js       # SVG layer creation/ordering/cleanup
 │   └── selftest.js         # Sanity checks + badge
@@ -60,6 +66,18 @@ urban-train/
   * `attachStyles()` (≈ 567): Attach styles to anchors based on kind (Step 3)
   * `buildFeatureLabels(...)` (≈ 541) and `placeLabelsAvoidingCollisions(...)` (≈ 567/846/887) - via null shim
   * `fitToLand` / `autoFitToWorld` usage appears via helpers and menu actions.
+* **Candidates System** (Step 5): LOD-aware candidate boxes for label placement
+  * `window.syncQACandidates(k)`: Zoom-driven candidate updates with LOD filtering
+  * `window.__candidates`: Global access to current candidate data
+  * `window.clearQACandidates()`: Remove QA rectangles for testing
+  * Flag-gated with `?flags=qaCandidates` URL parameter
+* **Collision System** (Step 6): Greedy collision pruning with spatial indexing
+  * `window.syncQACollision(k)`: Zoom-driven collision updates with LOD filtering
+  * `window.__placed` / `window.__rejected`: Global access to collision results
+  * `greedyPlace(candidates, { cell = 64 })`: Efficient collision detection algorithm
+  * Grid-based spatial indexing for O(1) neighborhood queries
+  * Priority-based ranking with tier scores + kind boosts + area penalties
+  * Flag-gated with `?flags=qaCollide` URL parameter
 * **Utilities**: `timeit` for coarse timings; `window.DEBUG` toggle.
 
 ### `src/modules/geometry.js`
@@ -112,6 +130,28 @@ urban-train/
   * `isWaterPoly(poly, sea)`: Water detection with multiple fallback strategies
 * **`style-apply.js`**: Style attachment to anchors (Step 3)
   * `attachStyles(anchors)`: Attaches styles to anchors based on kind classification
+* **`placement/candidates.js`**: Candidate boxes for visible anchors (Step 5)
+  * `makeCandidates({ anchorsLOD, k })`: Generates candidate boxes with LOD filtering
+  * Text width estimation with basic heuristic (0.58 × length × size + letter spacing)
+  * Centered positioning with x0, y0, x1, y1 bounding box coordinates
+  * LOD-aware visibility using `visibleAtK()` for zoom-based filtering
+* **`placement/collide.js`**: Greedy collision detection with spatial indexing (Step 6)
+  * `greedyPlace(candidates, { cell = 64 })`: Efficient collision pruning algorithm
+  * `GridIndex` class with configurable cell size for fast neighborhood queries
+  * Priority-based ranking using tier scores, kind boosts, and area penalties
+  * AABB intersection testing with `intersects(a, b)` helper
+  * Returns structured results: `{ placed, rejected }` arrays
+* **`lod.js`**: Level-of-Detail bands and zoom filtering (Step 4)
+  * `computeLOD(anchors, options)`: Attaches min/max zoom bands by tier
+  * `visibleAtK(anchors, k)`: Filters anchors visible at zoom scale k
+  * Per-kind overrides for QA-friendly visibility (sea: 1.1, lake: 1.2)
+* **`debug-markers.js`**: QA debugging helpers
+  * `renderQACandidates(svg, candidates)`: Draws orange rectangles for candidates
+  * `renderQAWaterAnchors(svg, anchors)`: Draws colored dots for water anchors
+  * `renderQACollision(svg, placed, rejected)`: Shows accepted (green) vs rejected (red) rectangles
+  * `clearQACandidates(svg)`: Removes QA rectangles
+  * World coordinate positioning with zoom transform support
+  * Non-scaling strokes for crisp rendering under zoom transforms
 
 ### `src/modules/labels-null-shim.js` (Temporary: Step 0)
 
@@ -124,6 +164,11 @@ urban-train/
 * `getZoomState` (≈ 6) / `getVisibleWorldBounds` (≈ 17) / `padBounds` (≈ 25)
 * `attachInteraction` (≈ 33): D3 zoom; on zoom → update overlay positions, visibility thresholds, and viewport culling.
 * `getCurrentTransform` (≈ 305): Get current zoom transform state.
+* **Zoom-driven QA updates**: Automatic LOD filtering for QA dots, candidates, and collision detection
+  * `syncQADotsLOD(t.k)`: Updates water anchor dots based on zoom level
+  * `syncQACandidates(t.k)`: Updates candidate rectangles based on zoom level
+  * `syncQACollision(t.k)`: Updates collision visualization based on zoom level
+  * **Quiet zoom spam**: Console logging gated behind `?flags=debugZoomIdentity` URL parameter
 
 ### `src/modules/autofit.js`
 
@@ -179,6 +224,10 @@ urban-train/
 ## Dev sandboxes (`/dev`)
 
 * `test-label-zoom.html`, `test-anneal-labels.html`, `test-sat-ocean-placement.html`, `test-names.html`, `test-viewport-culling.html`, `verify-culling.html`, etc., each mount a reduced harness to exercise a specific subsystem.
+* **`test-candidates.html`**: Standalone test page for candidates system (Step 5)
+  * Tests `syncQACandidates()`, `clearQACandidates()`, and zoom integration
+  * Provides manual flag testing and console verification
+  * Independent operation (no infinite redirects)
 
 ---
 
