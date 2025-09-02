@@ -59,7 +59,8 @@ import { enrichAnchors } from "./labels/enrich.js";
 import { attachStyles } from "./labels/style-apply.js";
 import { computeWaterComponentsTopo, applyWaterKindsToAnchors } from "./labels/water-split.js";
 import { buildWaterComponentAnchors } from "./labels/anchors-water.js";
-import { renderQAWaterAnchors } from "./labels/debug-markers.js";
+import { renderQAWaterAnchors, syncQAWaterRadius } from "./labels/debug-markers.js";
+import { computeLOD, visibleAtK } from "./labels/lod.js";
 // Null shim for old labeling functions (temporary until new modules arrive)
 import {
   ensureLabelContainers,
@@ -698,6 +699,57 @@ async function generate(count) {
     window.__anchorsRefined  = refined;
     window.__anchorsStyled   = styledAnchors;
 
+    // Step 4: LOD bands (data-only)
+    // Combine general proto anchors + inland water anchors (both already styled)
+    const combinedStyled = [
+      ...(window.__anchorsStyled || []),
+      ...(window.__waterAnchorsStyled || []),
+    ];
+
+    const anchorsLOD = computeLOD({
+      anchors: combinedStyled,
+      // QA-friendly visibility: show seas/lakes early
+      minKByKind: {
+        sea:  1.1,
+        lake: 1.2,
+      },
+    });
+    window.__anchorsLOD = anchorsLOD;
+    
+    // Expose visibleAtK for console debugging
+    window.visibleAtK = (arr, k) => visibleAtK(arr, k);
+
+    console.log("[lod] sample",
+      anchorsLOD.slice(0, 5).map(a => ({ id:a.id, kind:a.kind, tier:a.tier, minK:a.lod.minK }))
+    );
+    console.log("[lod] counts", {
+      total: anchorsLOD.length,
+      at_k1: visibleAtK(anchorsLOD, 1.0).length,
+      at_k8: visibleAtK(anchorsLOD, 8.0).length,
+    });
+
+    // ---- QA dots (respect LOD) ----
+    // Expose an updater used by the zoom handler
+    window.syncQADotsLOD = (k = 1.0) => {
+      if (!hasFlag('qaCentroids')) return;
+      const svgNode = (typeof svg !== 'undefined' && svg.node) ? svg : d3.select('svg');
+
+      // show only sea/lake dots that are visible at k
+      const waterOnly = anchorsLOD.filter(a => a.kind === 'sea' || a.kind === 'lake');
+      const visible = visibleAtK(waterOnly, k);
+
+      renderQAWaterAnchors(svgNode, visible);
+      syncQAWaterRadius(svgNode, k, 3); // keep ~constant screen size
+    };
+
+    // initial render (before the first zoom event fires)
+    if (hasFlag('qaCentroids')) {
+      window.syncQADotsLOD(1.0);
+      console.log("[qa] water centroid markers rendered (LOD @k=1.0):",
+        (visibleAtK(anchorsLOD.filter(a=>a.kind==='sea'||a.kind==='lake'), 1.0)).length
+      );
+    }
+
     console.log("[anchors:enrich] metrics", enrichMetrics);
     console.log("[anchors:style] sample",
       styledAnchors.slice(0, 5).map(a => ({
@@ -810,6 +862,13 @@ async function generate(count) {
       await window.fitLand();
       console.log('[autofit] ✅ Promise-based autofit completed successfully');
       
+      // Update QA dots after autofit with current zoom level
+      if (window.syncQADotsLOD) {
+        const currentZoomK = d3.zoomTransform(svgSel.node()).k;
+        window.syncQADotsLOD(currentZoomK);
+        console.log(`[qa] Updated QA dots after autofit (k=${currentZoomK.toFixed(2)})`);
+      }
+      
       // Set flag to prevent re-fitting after autofit
       state.didAutofitToLand = true;
       
@@ -840,6 +899,13 @@ async function generate(count) {
         // Start the autofit
         await window.fitLand();
         
+        // Update QA dots after autofit with current zoom level
+        if (window.syncQADotsLOD) {
+          const currentZoomK = d3.zoomTransform(svgSel.node()).k;
+          window.syncQADotsLOD(currentZoomK);
+          console.log(`[qa] Updated QA dots after autofit (k=${currentZoomK.toFixed(2)})`);
+        }
+        
         // Mark zoom as locked to enable LOD filtering
         d3.select("svg").attr("data-zoom-locked", "1");
         
@@ -849,9 +915,16 @@ async function generate(count) {
       } catch (error2) {
         console.warn('[autofit] Method 2 failed, falling back to Method 3:', error2);
         
-        // Method 3: Direct call with afterLayout safety
+        // Method 3: Direct call with afterLayout fallback
         console.log('[autofit] 🔄 Method 3: Using afterLayout fallback...');
         await window.fitLand();
+        
+        // Update QA dots after autofit with current zoom level
+        if (window.syncQADotsLOD) {
+          const currentZoomK = d3.zoomTransform(svgSel.node()).k;
+          window.syncQADotsLOD(currentZoomK);
+          console.log(`[qa] Updated QA dots after autofit (k=${currentZoomK.toFixed(2)})`);
+        }
         
         // Mark zoom as locked to enable LOD filtering
         d3.select("svg").attr("data-zoom-locked", "1");

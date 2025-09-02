@@ -113,6 +113,9 @@ export function attachInteraction({
     d3.select('#world')
       .attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
     
+    // keep QA dots glued and LOD-filtered as you zoom
+    if (window.syncQADotsLOD) window.syncQADotsLOD(t.k);
+    
     console.debug('[zoom svg identity]', {
       anchor: (window.state && window.state.ocean) ? window.state.ocean.anchor : svgSel.node().__oceanWorldAnchor,
       svgId: svgSel.node().id || 'no-id',

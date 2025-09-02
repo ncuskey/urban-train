@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test LOD Bands & QA Dots</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: monospace; }
+    .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+    .controls { margin: 10px 0; }
+    button { margin: 5px; padding: 8px 12px; }
+    .info { background: #f0f0f0; padding: 10px; margin: 10px 0; }
+    .error { background: #ffe6e6; color: #c00; padding: 10px; margin: 10px 0; }
+    .success { background: #e6ffe6; color: #060; padding: 10px; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h1>Test LOD Bands & QA Dots</h1>
+  
+  <div class="test-section">
+    <h3>Test Instructions</h3>
+    <ol>
+      <li>Load the main app with <code>?flags=qaCentroids</code> to see QA dots</li>
+      <li>Zoom in/out to see dots appear/disappear based on LOD bands</li>
+      <li>Check console for LOD sample data and counts</li>
+      <li>Verify QA dots respect zoom level and maintain constant screen size</li>
+    </ol>
+  </div>
+
+  <div class="test-section">
+    <h3>LOD Band Configuration</h3>
+    <div class="info">
+      <strong>Tier 1 (t1):</strong> minK = 1.0 (always visible)<br>
+      <strong>Tier 2 (t2):</strong> minK = 1.8 (visible at 1.8x zoom+)<br>
+      <strong>Tier 3 (t3):</strong> minK = 3.2 (visible at 3.2x zoom+)<br>
+      <strong>Tier 4 (t4):</strong> minK = 6.4 (visible at 6.4x zoom+)<br>
+      <strong>Clamp:</strong> [1.0, 32.0] (zoom range)<br>
+      <strong>QA Overrides:</strong> sea: 1.1, lake: 1.2 (visible early for debugging)
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h3>Expected Behavior</h3>
+    <ul>
+      <li>QA dots should only show water features (sea/lake) visible at current zoom</li>
+      <li>Dots should maintain constant screen size (counter-scaled by 1/k)</li>
+      <li>Console should show LOD sample data with minK values</li>
+      <li>Console should show counts at different zoom levels</li>
+    </ul>
+  </div>
+
+  <div class="test-section">
+    <h3>Test Commands</h3>
+    <div class="controls">
+      <button onclick="testLODFunctions()">Test LOD Functions</button>
+      <button onclick="checkWindowGlobals()">Check Window Globals</button>
+      <button onclick="simulateZoom()">Simulate Zoom (k=2.0)</button>
+      <button onclick="simulateZoomHigh()">Simulate Zoom (k=8.0)</button>
+    </div>
+    <div id="test-output"></div>
+  </div>
+
+  <div class="test-section">
+    <h3>Console Output</h3>
+    <p>Check the browser console for:</p>
+    <ul>
+      <li><code>[lod] sample</code> - Sample anchors with LOD data</li>
+      <li><code>[lod] counts</code> - Total counts at different zoom levels</li>
+      <li><code>[qa] water centroid markers rendered (LOD @k=1.0)</code> - Initial QA render</li>
+    </ul>
+  </div>
+
+  <script>
+    function log(message, type = 'info') {
+      const output = document.getElementById('test-output');
+      const div = document.createElement('div');
+      div.className = type;
+      div.textContent = message;
+      output.appendChild(div);
+    }
+
+    function testLODFunctions() {
+      try {
+        // Test if LOD module is available
+        if (typeof window.computeLOD === 'function') {
+          log('✅ computeLOD function available', 'success');
+        } else {
+          log('❌ computeLOD function not available', 'error');
+        }
+
+        if (typeof window.visibleAtK === 'function') {
+          log('✅ visibleAtK function available', 'success');
+        } else {
+          log('❌ visibleAtK function not available', 'error');
+        }
+
+        if (typeof window.syncQADotsLOD === 'function') {
+          log('✅ syncQADotsLOD function available', 'success');
+        } else {
+          log('❌ syncQADotsLOD function not available', 'error');
+        }
+      } catch (e) {
+        log(`❌ Error testing LOD functions: ${e.message}`, 'error');
+      }
+    }
+
+    function checkWindowGlobals() {
+      const globals = [
+        '__anchorsLOD',
+        '__anchorsStyled', 
+        '__waterAnchorsStyled'
+      ];
+
+      globals.forEach(name => {
+        if (window[name]) {
+          log(`✅ ${name}: ${Array.isArray(window[name]) ? window[name].length + ' items' : 'available'}`, 'success');
+        } else {
+          log(`❌ ${name}: not available`, 'error');
+        }
+      });
+    }
+
+    function simulateZoom() {
+      if (typeof window.syncQADotsLOD === 'function') {
+        window.syncQADotsLOD(2.0);
+        log('✅ Called syncQADotsLOD(2.0)', 'success');
+      } else {
+        log('❌ syncQADotsLOD function not available', 'error');
+      }
+    }
+
+    function simulateZoomHigh() {
+      if (typeof window.syncQADotsLOD === 'function') {
+        window.syncQADotsLOD(8.0);
+        log('✅ Called syncQADotsLOD(8.0)', 'success');
+      } else {
+        log('❌ syncQADotsLOD function not available', 'error');
+      }
+    }
+
+    // Auto-test on load
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        log('🔍 Auto-checking LOD setup...', 'info');
+        testLODFunctions();
+        checkWindowGlobals();
+      }, 1000);
+    });
+  </script>
+</body>
+</html>

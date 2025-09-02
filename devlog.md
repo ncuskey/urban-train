@@ -1,5 +1,135 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Step 4 Complete: LOD Bands + QA Dots Respect Zoom ✅
+
+### 🎯 **LOD System + Zoom-Aware QA Complete**
+Successfully implemented Level-of-Detail (LOD) bands for anchors and made QA dots respect zoom levels. The system now provides intelligent feature visibility based on zoom scale while maintaining smooth performance.
+
+### 📋 **What Was Accomplished**
+
+#### **1. LOD Module (`src/labels/lod.js`)**
+- **Zoom-based visibility bands** with configurable tier thresholds:
+  - Tier 1 (t1): minK = 1.0 (always visible)
+  - Tier 2 (t2): minK = 1.8 (visible at 1.8x zoom+)
+  - Tier 3 (t3): minK = 3.2 (visible at 3.2x zoom+)
+  - Tier 4 (t4): minK = 6.4 (visible at 6.4x zoom+)
+- **Clamp range** [1.0, 32.0] for zoom boundaries
+- **Per-kind overrides** for QA-friendly visibility (sea: 1.1, lake: 1.2)
+- **Filtering helper** `visibleAtK()` for runtime visibility checks
+- **Data-only approach** - no rendering overhead, just metadata
+
+#### **2. Main App Integration (`src/main.js`)**
+- **Combined anchor processing** merges general + water anchors for unified LOD
+- **LOD computation** runs after styling, before any rendering
+- **QA-friendly overrides** for early water feature visibility (sea: 1.1, lake: 1.2)
+- **Global LOD data** accessible via `window.__anchorsLOD`
+- **Console helper** `window.visibleAtK()` exposed for debugging
+- **Console logging** shows sample data and zoom-level counts
+- **QA dots updater** `window.syncQADotsLOD(k)` for zoom-driven updates
+- **Post-autofit updates** ensure QA dots appear after initial centering
+
+#### **3. Zoom Handler Integration (`src/modules/interaction.js`)**
+- **Automatic LOD updates** on every zoom event
+- **QA dots filtering** based on current zoom scale
+- **Constant screen size** maintained via `syncQAWaterRadius()`
+- **Performance optimized** - only updates when needed
+
+### 🔧 **Technical Implementation**
+
+#### **LOD Band Computation with QA Overrides**
+```javascript
+// src/labels/lod.js - Zoom-based visibility tiers + per-kind overrides
+export function computeLOD({
+  anchors,
+  tokens = getStyleTokens(),
+  baseMinK = { t1: 1.0, t2: 1.8, t3: 3.2, t4: 6.4 },
+  clamp = [1.0, 32.0],
+  minKByKind = null,     // Optional overrides per kind (e.g., { lake: 1.2, sea: 1.1 })
+}) {
+  if (!Array.isArray(anchors)) return [];
+  const [minClamp, maxClamp] = clamp;
+  return anchors.map(a => {
+    const tier = a.tier || "t3";
+    let minK = Math.max(baseMinK[tier] ?? baseMinK.t3, minClamp);
+    if (minKByKind && a.kind in minKByKind) {
+      minK = Math.max(minKByKind[a.kind], minClamp);
+    }
+    const maxK = maxClamp;
+    return { ...a, lod: { minK, maxK } };
+  });
+}
+```
+
+#### **Zoom-Driven QA Updates with Post-Autofit Support**
+```javascript
+// src/main.js - LOD-aware QA dots updater
+window.syncQADotsLOD = (k = 1.0) => {
+  if (!hasFlag('qaCentroids')) return;
+  const svgNode = (typeof svg !== 'undefined' && svg.node) ? svg : d3.select('svg');
+
+  // show only sea/lake dots that are visible at k
+  const waterOnly = anchorsLOD.filter(a => a.kind === 'sea' || a.kind === 'lake');
+  const visible = visibleAtK(waterOnly, k);
+
+  renderQAWaterAnchors(svgNode, visible);
+  syncQAWaterRadius(svgNode, k, 3); // keep ~constant screen size
+};
+
+// Post-autofit QA update (all three autofit paths)
+if (window.syncQADotsLOD) {
+  const currentZoomK = d3.zoomTransform(svgSel.node()).k;
+  window.syncQADotsLOD(currentZoomK);
+  console.log(`[qa] Updated QA dots after autofit (k=${currentZoomK.toFixed(2)})`);
+}
+```
+
+#### **Zoom Handler Integration**
+```javascript
+// src/modules/interaction.js - Automatic LOD updates
+function zoomed() {
+  const t = d3.event.transform;
+  // ... transform application ...
+  
+  // keep QA dots glued and LOD-filtered as you zoom
+  if (window.syncQADotsLOD) window.syncQADotsLOD(t.k);
+}
+```
+
+### 🚀 **Usage & Testing**
+
+#### **Enable LOD + QA**
+Load the app with: `http://localhost:8000/?flags=qaCentroids`
+
+#### **Expected Behavior**
+- QA dots appear/disappear based on zoom level and LOD bands
+- Dots maintain constant screen size (counter-scaled by 1/k)
+- Console shows LOD sample data with minK values
+- Console shows counts at different zoom levels (k=1.0, k=8.0)
+
+#### **Test Page**
+Use `test-lod-qa.html` to verify LOD functions and test zoom simulation.
+
+#### **Console Output**
+```
+[lod] sample [{ id: "...", kind: "sea", tier: "t2", minK: 1.1 }, ...]
+[lod] counts { total: 45, at_k1: 12, at_k8: 45 }
+[qa] water centroid markers rendered (LOD @k=1.0): 12
+[qa] Updated QA dots after autofit (k=1.63)
+```
+
+#### **Console Helper Functions**
+```javascript
+// Test LOD filtering at different zoom levels
+visibleAtK(__anchorsLOD, 1.0).length    // Features visible at k=1.0
+visibleAtK(__anchorsLOD, 8.0).length    // Features visible at k=8.0
+
+// Check specific feature types
+__anchorsLOD.filter(a => a.kind === 'sea').length
+__anchorsLOD.filter(a => a.kind === 'lake').length
+```
+
+---
+
 ## 2025-01-27 - Step 3 Complete: Enrich Anchors + Attach Styles ✅
 
 ### 🎯 **Major Milestone Achieved**
