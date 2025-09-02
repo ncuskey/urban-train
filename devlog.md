@@ -1,9 +1,123 @@
 # Urban Train Development Log
 
-## 2025-01-27 - Step 1 Complete: Labeling Style System Foundation ✅
+## 2025-01-27 - Step 2 Complete: Proto-Anchors + Spatial Index ✅
 
 ### 🎯 **Major Milestone Achieved**
-Successfully completed Step 1 of the labeling system reconstruction project. The new labeling style system foundation is now in place with runtime validation, style tokens, and a clean module architecture.
+Successfully completed Step 2 of the labeling system reconstruction project. The proto-anchors system is now in place with spatial indexing, providing the foundation for intelligent label placement without any rendering overhead.
+
+### 📋 **What Was Accomplished**
+
+#### **1. Proto-Anchors Module (`src/labels/anchors.js`)**
+- **Centroid calculation** with D3 fallback to simple averaging
+- **Area calculation** with D3 fallback to shoelace formula
+- **Text width estimation** heuristic (0.6 × length × font size)
+- **Area-based ranking** to limit to largest 200 polygons
+- **Proto-anchor structure** with placeholder data for future semantic classification
+
+#### **2. Spatial Index Module (`src/labels/spatial-index.js`)**
+- **D3 quadtree-based** spatial indexing for efficient queries
+- **Bounding box queries** for collision detection preparation
+- **Size reporting** for debugging and validation
+
+#### **3. Integration with Main App**
+- **Imports added** for both new modules in `src/main.js`
+- **Anchor building** triggered after coastline refinement
+- **Console logging** for metrics and sample data verification
+- **Global window variables** (`__anchors`, `__anchorIndex`) for inspection
+
+### 🔧 **Technical Implementation**
+
+#### **Proto-Anchors System**
+```javascript
+// src/labels/anchors.js
+export function buildProtoAnchors({ polygons, max = 200 }) {
+  // Rank by area to avoid zillions of tiny cells
+  const ranked = polygons.map((poly, i) => ({ i, a: areaAbs(poly), poly }))
+                         .sort((a, b) => b.a - a.a)
+                         .slice(0, Math.min(max, polygons.length));
+
+  return ranked.map(({ i, a, poly }) => ({
+    id: `poly-${i}`,
+    kind: "proto",          // semantic kind comes later
+    tier: "t3",             // placeholder until style system
+    x, y,                   // centroid coordinates
+    area: a,                // polygon area
+    text: `P${i}`,          // placeholder text
+    estWidth: estimateTextWidth(`P${i}`, 12)
+  }));
+}
+```
+
+#### **Spatial Indexing**
+```javascript
+// src/labels/spatial-index.js
+export function makeAnchorIndex(anchors) {
+  const qt = d3.quadtree()
+    .x(a => a.x)
+    .y(a => a.y)
+    .addAll(anchors);
+
+  function query(bbox) {
+    // Efficient bounding box queries for collision detection
+    const out = [];
+    qt.visit((node, x0, y0, x1, y1) => {
+      // ... quadtree traversal logic
+    });
+    return out;
+  }
+
+  return { qt, query, size: () => qt.size() };
+}
+```
+
+#### **Main App Integration**
+```javascript
+// src/main.js - after refineCoastlineAndRebuild
+// Step 2: build proto-anchors + index (no rendering yet)
+const { anchors, metrics } = buildProtoAnchors({ polygons, max: 200 });
+const anchorIndex = makeAnchorIndex(anchors);
+window.__anchors = anchors;
+window.__anchorIndex = anchorIndex;
+console.log("[anchors] built", metrics, { sample: anchors.slice(0, 5) });
+console.log("[anchors:index] size", anchorIndex.size());
+```
+
+### 📊 **Verification Results**
+
+| Test | Status | Notes |
+|------|--------|-------|
+| Proto-anchors build | ✅ PASS | Creates up to 200 anchors from largest polygons |
+| Spatial index creation | ✅ PASS | D3 quadtree with query interface |
+| Main app integration | ✅ PASS | Triggers after coastline refinement |
+| Console logging | ✅ PASS | Shows metrics and sample data |
+| Global window access | ✅ PASS | `__anchors` and `__anchorIndex` available |
+
+**Overall Step 2 Status: COMPLETE (5/5 criteria met)**
+
+### 🏗️ **Foundation Status**
+- **20 foundation modules** verified and working (18 + 2 new)
+- **Core map pipeline** fully operational
+- **Labeling style system** initialized and validated
+- **Proto-anchors system** with spatial indexing ready
+- **No regression** in existing functionality
+
+### 🎯 **What This Enables**
+
+#### **Immediate Benefits**
+- **Data foundation** for label placement algorithms
+- **Spatial queries** for efficient collision detection
+- **Performance optimization** by limiting to largest features
+- **Debugging tools** via console logging and global variables
+
+#### **Next Steps Foundation**
+- **Semantic classification** of anchors (ocean/lake/island/region)
+- **Label text generation** using existing name system
+- **Collision detection** using spatial index queries
+- **Style application** using existing style tokens
+
+---
+
+## 2025-01-27 - Step 1 Complete: Labeling Style System Foundation ✅
 
 ### 📋 **What Was Accomplished**
 

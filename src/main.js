@@ -48,6 +48,8 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction, getVisibleWorldBounds, padBounds, zoom } from "./modules/interaction.js";
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
+import { buildProtoAnchors } from "./labels/anchors.js";
+import { makeAnchorIndex } from "./labels/spatial-index.js";
 // Null shim for old labeling functions (temporary until new modules arrive)
 import {
   ensureLabelContainers,
@@ -547,6 +549,14 @@ async function generate(count) {
       }
     }
     // =====================================================================
+    
+    // Step 2: build proto-anchors + index (no rendering yet)
+    const { anchors, metrics } = buildProtoAnchors({ polygons, max: 200 });
+    const anchorIndex = makeAnchorIndex(anchors);
+    window.__anchors = anchors;
+    window.__anchorIndex = anchorIndex;
+    console.log("[anchors] built", metrics, { sample: anchors.slice(0, 5) });
+    console.log("[anchors:index] size", anchorIndex.size());
     
     // Build robust XY accessor after refine/Voronoi (when cells have x,y,height,featureType)
     state.getCellAtXY = buildXYAccessor(polygons);
