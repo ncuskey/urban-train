@@ -52,6 +52,8 @@ import { buildProtoAnchors } from "./labels/anchors.js";
 import { makeAnchorIndex } from "./labels/spatial-index.js";
 import { enrichAnchors } from "./labels/enrich.js";
 import { attachStyles } from "./labels/style-apply.js";
+import { computeWaterComponentsTopo, applyWaterKindsToAnchors } from "./labels/water-split.js";
+import { buildWaterComponentAnchors } from "./labels/anchors-water.js";
 // Null shim for old labeling functions (temporary until new modules arrive)
 import {
   ensureLabelContainers,
@@ -83,6 +85,67 @@ import {
   debugLabels,
   placeOceanLabelsAfterAutofit
 } from "./modules/labels-null-shim.js";
+
+// === Water Reclassification Helper ==========================================
+// Live reclassification helper (tune Step 3b without reloads)
+window.reclassWater = (opts = {}) => {
+  // Check if we have the necessary data
+  if (!window.currentPolygons || !window.__anchorsEnriched) {
+    console.warn('[reclassWater] No map data available. Generate a map first.');
+    return null;
+  }
+
+  // Get map dimensions from various sources
+  const svg = d3.select('svg');
+  const mapW = svg.attr('width') ? +svg.attr('width') : (svg.node()?.clientWidth || 1024);
+  const mapH = svg.attr('height') ? +svg.attr('height') : (svg.node()?.clientHeight || 768);
+
+  const {
+    seaLevel  = 0.20,   // height <= seaLevel -> water
+    seaAreaPx = Math.max(900, 0.004 * mapW * mapH), // absolute threshold in px²
+    seaFrac   = 0.004,  // fallback: 0.4% of map area if seaAreaPx is null
+    quant     = 1       // vertex rounding decimals for adjacency
+  } = opts;
+
+      // Import the water-split functions dynamically
+    import('./labels/water-split.js').then(({ computeWaterComponentsTopo, applyWaterKindsToAnchors }) => {
+    import('./labels/style-apply.js').then(({ attachStyles }) => {
+      const water = computeWaterComponentsTopo({
+        polygons: window.currentPolygons,
+        width: mapW,
+        height: mapH,
+        seaLevel,
+        seaFrac,
+        seaAreaPx,
+        quant
+      });
+
+      const refined = applyWaterKindsToAnchors(window.__anchorsEnriched, water.classByPoly);
+      const styled  = attachStyles(refined);
+
+      window.__waterComponents = water.components;
+      window.__waterMetrics    = water.metrics;
+      window.__anchorsRefined  = refined;
+      window.__anchorsStyled   = styled;
+
+      const count = k => refined.filter(a => a.kind === k).length;
+      console.log("[water:tune]", {
+        params: { seaLevel, seaAreaPx, seaFrac, quant },
+        components: {
+          total: water.components.length,
+          oceans: water.components.filter(c => c.kind === "ocean").length,
+          seas:   water.components.filter(c => c.kind === "sea").length,
+          lakes:  water.components.filter(c => c.kind === "lake").length
+        },
+        anchors: { ocean: count("ocean"), sea: count("sea"), lake: count("lake") }
+      });
+
+      return { water, refined, styled };
+    });
+  }).catch(error => {
+    console.error('[reclassWater] Failed to import water-split module:', error);
+  });
+};
 
 // === Minimal Perf HUD ==========================================
 const Perf = (() => {
@@ -564,9 +627,62 @@ async function generate(count) {
     const { anchors: enriched, metrics: enrichMetrics } =
       enrichAnchors({ anchors, polygons: window.currentPolygons, sea: 0.10 });
 
-    const styledAnchors = attachStyles(enriched);
+    // Step 3b: split water into ocean/sea/lake (data-only)
+    const mapW = mapWidth || 1024;
+    const mapH = mapHeight || 768;
+
+    console.log("[water:debug]", {
+      polygonsCount: window.currentPolygons?.length || 0,
+      mapW, mapH,
+      seaLevel: 0.20
+    });
+
+    const water = computeWaterComponentsTopo({
+      polygons: window.currentPolygons,
+      width: mapW,
+      height: mapH,
+      seaLevel: 0.20,
+      seaAreaPx: Math.max(900, 0.004 * mapW * mapH), // ≈ "big lake → sea"
+      // seaFrac: 0.004, // (fallback if you prefer fraction)
+      quant: 1
+    });
+
+    const refined = applyWaterKindsToAnchors(enriched, water.classByPoly);
+
+    // logs + window handles for QA
+    window.__waterComponents = water.components;
+    window.__waterMetrics    = water.metrics;
+    window.__anchorsRefined  = refined;
+
+    console.log("[water:components]", {
+      comps: water.components.length,
+      oceans: water.components.filter(c => c.kind === "ocean").length,
+      seas:   water.components.filter(c => c.kind === "sea").length,
+      lakes:  water.components.filter(c => c.kind === "lake").length
+    }, water.metrics);
+
+    // Build one anchor per inland water component (no rendering yet)
+    const waterAnchorBuild = buildWaterComponentAnchors({
+      components: water.components,
+      polygons: window.currentPolygons,
+      includeOcean: false
+    });
+
+    const waterAnchors = waterAnchorBuild.anchors;
+    const waterAnchorsStyled = attachStyles(waterAnchors);
+
+    window.__waterAnchors = waterAnchors;
+    window.__waterAnchorsStyled = waterAnchorsStyled;
+
+    console.log("[water:anchors] built", waterAnchorBuild.metrics,
+      { sample: waterAnchorsStyled.slice(0, 5).map(a => ({ id:a.id, kind:a.kind })) });
+
+    // Live reclassification helper moved to global scope
+
+    const styledAnchors = attachStyles(refined);
 
     window.__anchorsEnriched = enriched;
+    window.__anchorsRefined  = refined;
     window.__anchorsStyled   = styledAnchors;
 
     console.log("[anchors:enrich] metrics", enrichMetrics);

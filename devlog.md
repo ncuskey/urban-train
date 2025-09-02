@@ -5,6 +5,38 @@
 ### 🎯 **Major Milestone Achieved**
 Successfully completed Step 3 of the labeling system reconstruction project. Anchors are now enriched with polygon context and have styles attached, providing semantic classification and visual styling information without any rendering overhead.
 
+## 2025-01-27 - Step 3b Complete: Topology-Based Water Components + Component Anchors ✅
+
+### 🎯 **Water Classification System Complete**
+Successfully implemented robust topology-based water component detection and created component-based anchors for inland water features. This provides stable, intuitive water classification without arbitrary distance thresholds.
+
+### 📋 **What Was Accomplished**
+
+#### **1. Topology-Based Water Components (`src/labels/water-split.js`)**
+- **Edge-based adjacency detection** using shared polygon edges instead of arbitrary radius
+- **Stable component boundaries** that follow actual water body shapes
+- **Ocean detection** via border-touching water polygons
+- **Sea vs Lake classification** using absolute area thresholds (900px² default)
+- **Quantization control** for handling floating-point precision issues
+
+#### **2. Water Component Anchors (`src/labels/anchors-water.js`)**
+- **One anchor per inland component** (sea/lake) at area-weighted centroids
+- **Component-based positioning** using true center of mass
+- **Provisional tier assignment** (sea = t2, lake = t3)
+- **Data-only approach** with no DOM manipulation
+
+#### **3. Live Parameter Tuning (`window.reclassWater`)**
+- **Real-time water classification** without page reloads
+- **Adjustable thresholds** for sea level, area thresholds, and quantization
+- **Immediate feedback** on parameter changes
+- **Global accessibility** for debugging and fine-tuning
+
+#### **4. Enhanced Main App Integration**
+- **Step 3b pipeline** integrated after anchor enrichment
+- **Water component logging** with detailed metrics
+- **Global window variables** for inspection and debugging
+- **Component anchor building** with styling application
+
 ### 📋 **What Was Accomplished**
 
 #### **1. Anchor Enrichment Module (`src/labels/enrich.js`)**
@@ -32,6 +64,107 @@ Successfully completed Step 3 of the labeling system reconstruction project. Anc
 - **Global window variables** (`__anchorsEnriched`, `__anchorsStyled`) for inspection
 
 ### 🔧 **Technical Implementation**
+
+#### **Water Component Detection System**
+```javascript
+// src/labels/water-split.js - Edge-based adjacency
+function buildWaterAdjacencyByEdges(polygons, waterSet, quant = 1) {
+  const qf = 10 ** quant;
+  const q = v => Math.round(v * qf) / qf;
+  const edgeKey = (a, b) => {
+    // order endpoints so the edge is undirected-stable
+    const k1 = `${q(a[0])},${q(a[1])}`;
+    const k2 = `${q(b[0])},${q(b[1])}`;
+    return (k1 < k2) ? `${k1}|${k2}` : `${k2}|${k1}`;
+  };
+
+  const edgeMap = new Map(); // edgeKey -> [polyIdx, ...]
+  for (const i of waterSet) {
+    const poly = polygons[i];
+    if (!Array.isArray(poly) || poly.length < 2) continue;
+    for (let a = 0, b = poly.length - 1; a < poly.length; b = a++) {
+      const key = edgeKey(poly[b], poly[a]);
+      if (!edgeMap.has(key)) edgeMap.set(key, []);
+      edgeMap.get(key).push(i);
+    }
+  }
+
+  const adj = new Map(); // i -> Set(neighborIdx)
+  for (const i of waterSet) adj.set(i, new Set());
+  for (const [, arr] of edgeMap) {
+    if (arr.length <= 1) continue;
+    for (let x = 0; x < arr.length; x++) {
+      for (let y = x + 1; y < arr.length; y++) {
+        adj.get(arr[x]).add(arr[y]);
+        adj.get(arr[y]).add(arr[x]);
+      }
+    }
+  }
+  return adj;
+}
+
+// Topology-based water classification
+export function computeWaterComponentsTopo({
+  polygons, width, height,
+  seaLevel = 0.10,
+  seaAreaPx = null,   // absolute threshold in px^2 (recommended)
+  seaFrac   = 0.004,  // fallback: 0.4% of map area if seaAreaPx is null
+  quant     = 1       // vertex rounding decimals for adjacency
+}) {
+  // ... implementation details
+}
+```
+
+#### **Water Component Anchors**
+```javascript
+// src/labels/anchors-water.js - Component-based positioning
+export function buildWaterComponentAnchors({ components, polygons, includeOcean = false }) {
+  const anchors = [];
+  let seas = 0, lakes = 0, oceans = 0;
+
+  for (const comp of components || []) {
+    if (!includeOcean && comp.kind === "ocean") { oceans++; continue; }
+    const [x, y] = componentCentroid(comp, polygons);
+    const id = `${comp.kind}-${anchors.length}`;
+    
+    anchors.push({
+      id,
+      polyIndex: comp.indices[0] ?? null,
+      kind: comp.kind,          // "sea" or "lake"
+      tier: comp.kind === "sea" ? "t2" : "t3",
+      x, y,                     // Area-weighted centroid
+      area: comp.area,
+      text: comp.kind.toUpperCase(),
+      estWidth: 100
+    });
+    
+    if (comp.kind === "sea") seas++; else if (comp.kind === "lake") lakes++; else oceans++;
+  }
+
+  return { anchors, metrics: { seas, lakes, oceans, total: anchors.length } };
+}
+```
+
+#### **Live Parameter Tuning**
+```javascript
+// src/main.js - Global tuning helper
+window.reclassWater = (opts = {}) => {
+  const {
+    seaLevel  = 0.20,   // height <= seaLevel -> water
+    seaAreaPx = Math.max(900, 0.004 * mapW * mapH), // absolute threshold
+    seaFrac   = 0.004,  // fallback fraction
+    quant     = 1       // edge quantization precision
+  } = opts;
+
+  const water = computeWaterComponentsTopo({
+    polygons: window.currentPolygons,
+    width: mapW, height: mapH,
+    seaLevel, seaAreaPx, seaFrac, quant
+  });
+
+  // ... rest of implementation
+};
+```
 
 #### **Anchor Enrichment System**
 ```javascript
@@ -98,6 +231,9 @@ console.log("[anchors:style] sample", styledAnchors.slice(0, 5).map(a => ({
 |------|--------|-------|
 | Anchor enrichment | ✅ PASS | Classifies water/land with robust fallbacks |
 | Style attachment | ✅ PASS | Uses existing style system with kind-based lookup |
+| Water component detection | ✅ PASS | Edge-based topology with stable boundaries |
+| Component anchor building | ✅ PASS | Area-weighted centroids with proper classification |
+| Live parameter tuning | ✅ PASS | Real-time reclassification without reloads |
 | Polygon linking | ✅ PASS | `polyIndex` properly connects anchors to polygons |
 | Main app integration | ✅ PASS | Triggers after Step 2 with comprehensive logging |
 | Console logging | ✅ PASS | Shows enrichment metrics and styled anchor samples |

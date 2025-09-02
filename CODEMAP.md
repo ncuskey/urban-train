@@ -30,7 +30,9 @@ urban-train/
 │   │   ├── style-tokens.js # Style definitions (tiers, categories, rules)
 │   │   ├── index.js        # Initialization + getters
 │   │   ├── anchors.js      # Proto-anchors from polygons (Step 2)
-│   │   └── spatial-index.js # Quadtree spatial indexing (Step 2)
+│   │   ├── spatial-index.js # Quadtree spatial indexing (Step 2)
+│   │   ├── enrich.js       # Anchor enrichment with polygon context (Step 3)
+│   │   └── style-apply.js  # Style attachment to anchors (Step 3)
 │   ├── render/
 │   │   └── layers.js       # SVG layer creation/ordering/cleanup
 │   └── selftest.js         # Sanity checks + badge
@@ -54,6 +56,8 @@ urban-train/
   * `attachInteraction(...)` (≈ 441)
   * `buildProtoAnchors()` (≈ 553): Build Step 2 proto-anchors from largest polygons
   * `makeAnchorIndex()` (≈ 554): Create spatial index for collision detection
+  * `enrichAnchors()` (≈ 564): Enrich anchors with polygon context and kind classification (Step 3)
+  * `attachStyles()` (≈ 567): Attach styles to anchors based on kind (Step 3)
   * `buildFeatureLabels(...)` (≈ 541) and `placeLabelsAvoidingCollisions(...)` (≈ 567/846/887) - via null shim
   * `fitToLand` / `autoFitToWorld` usage appears via helpers and menu actions.
 * **Utilities**: `timeit` for coarse timings; `window.DEBUG` toggle.
@@ -98,15 +102,16 @@ urban-train/
   * `initLabelingStyle(tokens)`: Validates and initializes the style system
   * `getStyleFor(kind)`: Returns merged style for a specific feature kind
   * `getStyleTokens()`: Returns the complete token configuration
-* **`anchors.js`** (NEW: Step 2): Proto-anchors from polygons for label placement
-  * `buildProtoAnchors({ polygons, max = 200 })`: Creates up to 200 anchors from largest polygons
-  * `centroid(poly)`: Calculates polygon centroid with D3 fallback
-  * `areaAbs(poly)`: Calculates polygon area with D3 fallback
+* **`anchors.js`**: Proto-anchor creation from polygons (Step 2)
+  * `buildProtoAnchors({ polygons, max = 200 })`: Creates anchors from largest polygons
   * `estimateTextWidth(text, px)`: Heuristic text width estimation
-* **`spatial-index.js`** (NEW: Step 2): Quadtree spatial indexing for collision detection
+* **`spatial-index.js`**: Quadtree spatial indexing (Step 2)
   * `makeAnchorIndex(anchors)`: Creates D3 quadtree with query interface
-  * `query(bbox)`: Efficient bounding box queries for collision detection
-  * `size()`: Reports total anchors in index
+* **`enrich.js`**: Anchor enrichment with polygon context (Step 3)
+  * `enrichAnchors({ anchors, polygons, sea = 0.10 })`: Classifies water/land and links to polygons
+  * `isWaterPoly(poly, sea)`: Water detection with multiple fallback strategies
+* **`style-apply.js`**: Style attachment to anchors (Step 3)
+  * `attachStyles(anchors)`: Attaches styles to anchors based on kind classification
 
 ### `src/modules/labels-null-shim.js` (Temporary: Step 0)
 

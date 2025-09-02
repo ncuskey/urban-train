@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Water Split Test - Urban Train</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 20px; }
+    .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 8px; }
+    .success { background: #d4edda; border-color: #c3e6cb; }
+    .error { background: #f8d7da; border-color: #f5c6cb; }
+    .info { background: #d1ecf1; border-color: #bee5eb; }
+    pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; }
+    button { padding: 8px 16px; margin: 5px; border: none; border-radius: 4px; background: #007bff; color: white; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    button:disabled { background: #6c757d; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <h1>Water Split Test</h1>
+  <p>Testing the water splitting functionality that classifies water into ocean, sea, and lake components.</p>
+
+  <div class="test-section info">
+    <h3>Test Status</h3>
+    <div id="status">Ready to test</div>
+  </div>
+
+  <div class="test-section">
+    <h3>Actions</h3>
+    <button id="testModule" onclick="testWaterSplitModule()">Test Water Split Module</button>
+    <button id="testIntegration" onclick="testIntegration()" disabled>Test Integration</button>
+    <button id="generateMap" onclick="generateMap()" disabled>Generate Test Map</button>
+  </div>
+
+  <div class="test-section">
+    <h3>Results</h3>
+    <div id="results"></div>
+  </div>
+
+  <script type="module">
+    // Test the water-split module directly
+    window.testWaterSplitModule = async function() {
+      const status = document.getElementById('status');
+      const results = document.getElementById('results');
+      
+      try {
+        status.textContent = 'Testing water-split module...';
+        results.innerHTML = '<p>Loading module...</p>';
+        
+        // Import the module
+        const { computeWaterComponents, applyWaterKindsToAnchors } = await import('../src/labels/water-split.js');
+        
+        // Test with mock data
+        const mockPolygons = [
+          // Border-touching water (should be ocean)
+          [[0, 0], [10, 0], [10, 10], [0, 10]], // touches left border
+          [[90, 0], [100, 0], [100, 10], [90, 10]], // touches right border
+          
+          // Inland water - large (should be sea)
+          [[20, 20], [80, 20], [80, 40], [20, 40]], // large area
+          
+          // Inland water - small (should be lake)
+          [[30, 50], [40, 50], [40, 60], [30, 60]], // small area
+        ];
+        
+        // Mock height data (all water)
+        mockPolygons.forEach((poly, i) => {
+          poly.height = 0.05; // below sea level
+          poly.isWater = true;
+        });
+        
+        const water = computeWaterComponents({
+          polygons: mockPolygons,
+          width: 100,
+          height: 100,
+          seaLevel: 0.10,
+          seaFrac: 0.005,
+          radiusK: 1.6
+        });
+        
+        // Test anchor application
+        const mockAnchors = [
+          { id: 'ocean1', isWater: true, polyIndex: 0, kind: 'water' },
+          { id: 'ocean2', isWater: true, polyIndex: 1, kind: 'water' },
+          { id: 'sea1', isWater: true, polyIndex: 2, kind: 'water' },
+          { id: 'lake1', isWater: true, polyIndex: 3, kind: 'water' },
+        ];
+        
+        const refined = applyWaterKindsToAnchors(mockAnchors, water.classByPoly);
+        
+        // Display results
+        results.innerHTML = `
+          <h4>Module Test Results:</h4>
+          <pre>${JSON.stringify(water, null, 2)}</pre>
+          
+          <h4>Refined Anchors:</h4>
+          <pre>${JSON.stringify(refined, null, 2)}</pre>
+          
+          <h4>Component Summary:</h4>
+          <ul>
+            <li>Total components: ${water.components.length}</li>
+            <li>Oceans: ${water.components.filter(c => c.kind === 'ocean').length}</li>
+            <li>Seas: ${water.components.filter(c => c.kind === 'sea').length}</li>
+            <li>Lakes: ${water.components.filter(c => c.kind === 'lake').length}</li>
+          </ul>
+        `;
+        
+        status.textContent = 'Module test completed successfully!';
+        status.className = 'test-section success';
+        
+        // Enable next test
+        document.getElementById('testIntegration').disabled = false;
+        
+      } catch (error) {
+        status.textContent = 'Module test failed!';
+        status.className = 'test-section error';
+        results.innerHTML = `<p class="error">Error: ${error.message}</p><pre>${error.stack}</pre>`;
+      }
+    };
+    
+    // Test integration with main app
+    window.testIntegration = async function() {
+      const status = document.getElementById('status');
+      const results = document.getElementById('results');
+      
+      try {
+        status.textContent = 'Testing integration...';
+        results.innerHTML += '<p>Testing integration...</p>';
+        
+        // Check if main app is available
+        if (typeof window.computeWaterComponents === 'undefined') {
+          // Try to load the main app
+          const script = document.createElement('script');
+          script.type = 'module';
+          script.src = '../src/main.js';
+          document.head.appendChild(script);
+          
+          // Wait a bit for it to load
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        
+        if (typeof window.computeWaterComponents !== 'undefined') {
+          results.innerHTML += '<p class="success">✓ Main app integration available</p>';
+          document.getElementById('generateMap').disabled = false;
+        } else {
+          results.innerHTML += '<p class="error">✗ Main app integration not available</p>';
+        }
+        
+        status.textContent = 'Integration test completed!';
+        
+      } catch (error) {
+        status.textContent = 'Integration test failed!';
+        results.innerHTML += `<p class="error">Integration error: ${error.message}</p>`;
+      }
+    };
+    
+    // Generate a test map to see water splitting in action
+    window.generateMap = async function() {
+      const status = document.getElementById('status');
+      const results = document.getElementById('results');
+      
+      try {
+        status.textContent = 'Generating test map...';
+        results.innerHTML += '<p>Generating test map...</p>';
+        
+        // This would require the full app to be loaded
+        // For now, just show that the function is available
+        results.innerHTML += '<p class="info">Map generation would require the full app context</p>';
+        
+        status.textContent = 'Ready for map generation!';
+        
+      } catch (error) {
+        status.textContent = 'Map generation failed!';
+        results.innerHTML += `<p class="error">Map generation error: ${error.message}</p>`;
+      }
+    };
+    
+    // Auto-run module test on load
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        document.getElementById('testModule').click();
+      }, 500);
+    });
+  </script>
+</body>
+</html>
