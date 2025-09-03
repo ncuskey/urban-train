@@ -59,11 +59,107 @@ import { makeAnchorIndex } from "./labels/spatial-index.js";
 import { enrichAnchors } from "./labels/enrich.js";
 import { attachStyles } from "./labels/style-apply.js";
 import { computeWaterComponentsTopo, applyWaterKindsToAnchors } from "./labels/water-split.js";
-import { buildWaterComponentAnchors } from "./labels/anchors-water.js";
+import { buildWaterAnchors } from "./labels/anchors-water.js";
 import { renderQAWaterAnchors, syncQAWaterRadius, renderQACandidates, clearQACandidates, renderQACollision } from "./labels/debug-markers.js";
 import { computeLOD, visibleAtK } from "./labels/lod.js";
 import { makeCandidates } from "./labels/placement/candidates.js";
 import { greedyPlace } from "./labels/placement/collide.js";
+import { deferIdle, cancelIdle } from "./core/idle.js";
+import { getLastWaterAnchors } from "./labels/anchors-water.js";
+
+// --- Labels store (hoisted; no TDZ) ---
+// Use var so the binding exists early during module evaluation.
+var __labelsStore = { oceans: [], nonOcean: [], total: 0 };
+
+export function getFeatureLabelsStore() {
+  return __labelsStore;
+}
+
+// Hoisted function declaration so call sites anywhere in the file can use it.
+export function ensureLabelsStore() {
+  if (!__labelsStore || typeof __labelsStore !== "object") {
+    __labelsStore = { oceans: [], nonOcean: [], total: 0 };
+  }
+  if (!Array.isArray(__labelsStore.oceans)) __labelsStore.oceans = [];
+  if (!Array.isArray(__labelsStore.nonOcean)) __labelsStore.nonOcean = [];
+  const calcTotal = (__labelsStore.oceans?.length || 0) + (__labelsStore.nonOcean?.length || 0);
+  if (typeof __labelsStore.total !== "number" || __labelsStore.total !== calcTotal) {
+    // Use the setter to update the total for consistency
+    setFeatureLabelsStore({ total: calcTotal });
+  }
+  return __labelsStore;
+}
+
+// Merge-safe setter; normalizes shapes and recomputes total.
+export function setFeatureLabelsStore(next) {
+  // Defensive: in case ensureLabelsStore is not yet defined/available in older patches.
+  const prev = (typeof ensureLabelsStore === "function")
+    ? ensureLabelsStore()
+    : (__labelsStore && typeof __labelsStore === "object" ? __labelsStore : { oceans: [], nonOcean: [], total: 0 });
+
+  const normNext = { ...next };
+  // Normalize singular key if some producers send { ocean: [...] }
+  if (normNext && "ocean" in normNext && !("oceans" in normNext)) {
+    normNext.oceans = normNext.ocean;
+    delete normNext.ocean;
+  }
+
+  const merged = { ...prev, ...normNext };
+  if (!Array.isArray(merged.oceans))  merged.oceans  = Array.isArray(prev.oceans)   ? prev.oceans   : [];
+  if (!Array.isArray(merged.nonOcean)) merged.nonOcean = Array.isArray(prev.nonOcean) ? prev.nonOcean : [];
+  merged.total = (merged.oceans?.length || 0) + (merged.nonOcean?.length || 0);
+
+  __labelsStore = merged;
+  return __labelsStore;
+}
+
+// Hoisted to avoid TDZ when deferOceanPlacement runs during early autofit.
+// Use var so it's hoisted and initialized to undefined (no TDZ).
+var _oceanIdleHandle = null;
+
+// --- helpers: ocean label group + fallback placement ---
+function ensureOceanLabelGroup() {
+  const root = d3.select("#labels-world");           // parent world labels group (already scaled by k)
+  let g = root.select("#labels-world-ocean");        // dedicated ocean layer
+  if (g.empty()) g = root.append("g").attr("id", "labels-world-ocean").attr("class", "labels ocean");
+  return g;
+}
+
+function placeOceanFallbackLabel(anchor) {
+  if (!anchor) return;
+  const k = (window.__zoom && window.__zoom.k) || window.zoomK || 1;
+  const g = ensureOceanLabelGroup();
+  const id = `ocean-fallback-${anchor.id || "0"}`;
+  // Remove any previous fallback for id to avoid duplicates
+  g.select(`#${id}`).remove();
+
+  const cx = anchor.cx ?? anchor.x ?? (anchor.bbox?.cx) ?? 0;
+  const cy = anchor.cy ?? anchor.y ?? (anchor.bbox?.cy) ?? 0;
+  const label = anchor.label || anchor.name || "Ocean";
+
+  // Choose a safe, readable pixel size (bounded); counter-scale the group, not the font.
+  const fontPx = Math.max(12, Math.min(24, (label?.length || 10) < 12 ? 22 : 18));
+
+  // Create a child group so we can apply translate + counter-scale without affecting siblings
+  const node = g.append("g")
+    .attr("id", id)
+    .attr("class", "ocean-label fallback")
+    .attr("transform", `translate(${cx},${cy}) scale(${1 / k})`)
+    .style("pointer-events", "none")
+    .style("opacity", 0.92);
+
+  node.append("text")
+    .attr("text-anchor", "middle")
+    .attr("dominant-baseline", "central")
+    .attr("class", "label water ocean")
+    .style("font-style", "italic")   // stylistic default; your style system can override if bound later
+    .style("letter-spacing", "0.08em")
+    .style("font-size", `${fontPx}px`)
+    .text(label);
+
+  console.log("[ocean][fallback] placed:", { id, k, cx, cy, fontPx, label });
+}
+
 // Null shim for old labeling functions (temporary until new modules arrive)
 import {
   ensureLabelContainers,
@@ -138,6 +234,15 @@ window.reclassWater = (opts = {}) => {
       window.__anchorsRefined  = refined;
       window.__anchorsStyled   = styled;
 
+      // Rebuild water anchors after reclassification
+      const waterAnchors = buildWaterAnchors({
+        components: water.components,
+        polygons: window.currentPolygons,
+        mapW: mapW,
+        mapH: mapH
+      });
+      window.__waterAnchors = waterAnchors;
+
       const count = k => refined.filter(a => a.kind === k).length;
       console.log("[water:tune]", {
         params: { seaLevel, seaAreaPx, seaFrac, quant },
@@ -147,8 +252,18 @@ window.reclassWater = (opts = {}) => {
           seas:   water.components.filter(c => c.kind === "sea").length,
           lakes:  water.components.filter(c => c.kind === "lake").length
         },
-        anchors: { ocean: count("ocean"), sea: count("sea"), lake: count("lake") }
+        anchors: { ocean: count("ocean"), sea: count("sea"), lake: count("lake") },
+        waterAnchors: {
+          oceans: waterAnchors.anchors.filter(a => a.kind === "ocean").length,
+          seas: waterAnchors.anchors.filter(a => a.kind === "sea").length,
+          lakes: waterAnchors.anchors.filter(a => a.kind === "lake").length,
+          total: waterAnchors.anchors.length
+        }
       });
+
+      // Keep QA in sync after reclassification
+      if (window.syncQACandidates) window.syncQACandidates(window.getZoomScale?.() ?? 1);
+      if (window.syncQACollision) window.syncQACollision(window.getZoomScale?.() ?? 1);
 
       return { water, refined, styled };
     });
@@ -671,14 +786,14 @@ async function generate(count) {
       lakes:  water.components.filter(c => c.kind === "lake").length
     }, water.metrics);
 
-    // Build one anchor per inland water component (no rendering yet)
-    const waterAnchorBuild = buildWaterComponentAnchors({
+    // Build one anchor per water component (ocean, sea, lake)
+    const waterAnchors = buildWaterAnchors({
       components: water.components,
       polygons: window.currentPolygons,
-      includeOcean: false
+      mapW: mapWidth,
+      mapH: mapHeight
     });
 
-    const waterAnchors = waterAnchorBuild.anchors;
     const waterAnchorsStyled = attachStyles(waterAnchors);
 
     window.__waterAnchors = waterAnchors;
@@ -691,8 +806,12 @@ async function generate(count) {
       console.log("[qa] water centroid markers rendered:", (window.__waterAnchors || []).length);
     }
 
-    console.log("[water:anchors] built", waterAnchorBuild.metrics,
-      { sample: waterAnchorsStyled.slice(0, 5).map(a => ({ id:a.id, kind:a.kind })) });
+    console.log("[water:anchors] built", {
+      oceans: waterAnchors.filter(a => a.kind === 'ocean').length,
+      seas: waterAnchors.filter(a => a.kind === 'sea').length,
+      lakes: waterAnchors.filter(a => a.kind === 'lake').length,
+      total: waterAnchors.length
+    }, { sample: waterAnchorsStyled.slice(0, 5).map(a => ({ id:a.id, kind:a.kind })) });
 
     // Live reclassification helper moved to global scope
 
@@ -711,10 +830,11 @@ async function generate(count) {
 
     const anchorsLOD = computeLOD({
       anchors: combinedStyled,
-      // QA-friendly visibility: show seas/lakes early
+      // QA-friendly visibility: ocean earliest, lakes last
       minKByKind: {
-        sea:  1.1,
-        lake: 1.2,
+        ocean: 1.0,
+        sea:   1.1,
+        lake:  1.2,
       },
     });
     window.__anchorsLOD = anchorsLOD;
@@ -737,8 +857,8 @@ async function generate(count) {
       if (!hasFlag('qaCentroids')) return;
       const svgNode = (typeof svg !== 'undefined' && svg.node) ? svg : d3.select('svg');
 
-      // show only sea/lake dots that are visible at k
-      const waterOnly = anchorsLOD.filter(a => a.kind === 'sea' || a.kind === 'lake');
+      // show only water dots that are visible at k: ocean, sea, lake
+      const waterOnly = anchorsLOD.filter(a => a.kind === 'ocean' || a.kind === 'sea' || a.kind === 'lake');
       const visible = visibleAtK(waterOnly, k);
 
       renderQAWaterAnchors(svgNode, visible);
@@ -749,7 +869,7 @@ async function generate(count) {
     if (hasFlag('qaCentroids')) {
       window.syncQADotsLOD(1.0);
       console.log("[qa] water centroid markers rendered (LOD @k=1.0):",
-        (visibleAtK(anchorsLOD.filter(a=>a.kind==='sea'||a.kind==='lake'), 1.0)).length
+        (visibleAtK(anchorsLOD.filter(a=>a.kind==='ocean'||a.kind==='sea'||a.kind==='lake'), 1.0)).length
       );
     }
 
@@ -776,14 +896,33 @@ async function generate(count) {
     // Expose a sync used by zoom handler
     window.syncQACollision = (k = 1.0) => {
       if (!hasFlag('qaCollide')) return;
-      const cands = makeCandidates({ anchorsLOD: window.__anchorsLOD, k });
+      
+      // Keep the candidates strictly component-based, and handle empty gracefully
+      const allWater = window.__waterAnchors || [];
+      if (!allWater.length) {
+        console.warn('[qa:collide] no __waterAnchors; skip');
+        window.__candidates = [];
+        window.__placed = [];
+        window.__rejected = [];
+        const svgNode = (typeof svg !== 'undefined' && svg.node) ? svg : d3.select('svg');
+        renderQACollision?.(svgNode, [], []);
+        return;
+      }
+      
+      const waterLOD = window.visibleAtK ? visibleAtK(allWater, k)
+                                         : allWater.filter(a => !a.lod || (a.lod.minK <= k && k <= a.lod.maxK));
+      const cands = makeCandidates({ anchorsLOD: waterLOD, k });
+      
+      // Cache for debugging
+      window.__waterAnchorsLOD = waterLOD;
+      
       const { placed, rejected } = greedyPlace(cands, { cell: 64 });
       window.__candidates = cands;
       window.__placed = placed;
       window.__rejected = rejected;
 
       const svgNode = (typeof svg !== 'undefined' && svg.node) ? svg : d3.select('svg');
-      renderQACollision(svgNode, placed, rejected);
+      renderQACollision?.(svgNode, placed, rejected);
 
       console.log("[qa:collide] k=%s placed=%d rejected=%d", k.toFixed(2), placed.length, rejected.length);
     };
@@ -993,7 +1132,7 @@ async function generate(count) {
       // Mouse movement in last 100ms
       (window.lastMouseMove && Date.now() - window.lastMouseMove < 100) ||
       // Touch events in last 100ms  
-      (window.lastTouchEvent && Date.now() - window.lastTouchTouch < 100) ||
+      (window.lastTouchEvent && Date.now() - window.lastTouchEvent < 100) ||
       // Scroll events in last 100ms
       (window.lastScrollEvent && Date.now() - window.lastScrollEvent < 100)
     );
@@ -1004,40 +1143,36 @@ async function generate(count) {
     return isUserInteracting || isCriticalPhase;
   }
 
-  // Defer ocean placement to idle time when possible to avoid blocking requestAnimationFrame
-  // This improves perceived performance by:
-  // - Allowing smooth animations to continue uninterrupted
-  // - Reducing frame drops during autofit operations
-  // - Prioritizing user interactions over background label placement
-  // - Using browser idle time when available (requestIdleCallback)
+  // Centralized ocean placement scheduling via core/idle.js
+  // - Cancels any pending schedule before scheduling a new one
+  // - Uses requestIdleCallback when available, with strict IdleRequestOptions
+  // - Falls back to setTimeout otherwise
   function deferOceanPlacement(callback, options = {}) {
-    const { 
-      immediate = false,           // Force immediate execution
-      timeout = 1000,             // Idle callback timeout (ms)
-      fallbackDelay = 16          // Fallback delay (ms)
-    } = options;
+    const { immediate = false, timeout = 1000, fallbackDelay = 16 } = options;
 
-    // Determine if immediate placement is needed
+    // Cancel any previous scheduling to avoid duplicate runs
+    if (_oceanIdleHandle) {
+      cancelIdle(_oceanIdleHandle);
+      _oceanIdleHandle = null;
+    }
+
     const needsImmediate = immediate || shouldPlaceImmediately();
-
-    // If immediate placement is required, execute now
     if (needsImmediate) {
       console.log('[ocean] Immediate placement (blocking) - user interaction or critical phase');
       callback();
       return;
     }
 
-    // Check if requestIdleCallback is available
-    if (typeof requestIdleCallback !== 'undefined') {
-      // Defer to idle time with configurable timeout
-      requestIdleCallback(callback, { timeout });
+    _oceanIdleHandle = deferIdle(() => {
+      _oceanIdleHandle = null; // clear after run
+      callback();
+    }, { timeout, fallbackDelay });
+
+    if (_oceanIdleHandle?.type === 'ric') {
       console.log(`[ocean] Deferred placement to idle time (timeout: ${timeout}ms)`);
     } else {
-      // Fallback for browsers without requestIdleCallback
-      // Use a small delay to avoid blocking the current frame
-      setTimeout(callback, fallbackDelay);
-      console.log(`[ocean] Fallback: deferred placement with setTimeout (${fallbackDelay}ms)`);
-        }
+      console.log(`[ocean] Deferred placement with setTimeout (${fallbackDelay}ms)`);
+    }
   }
   
   // Expose ocean placement control for debugging
@@ -1053,11 +1188,27 @@ async function generate(count) {
   
   // Old labeling system removed
     
+    // Fallback: if the legacy store is empty, use the most recently built anchors
+    let oceans = oceanLabels;
+    let oceanCount = oceanLabels.length;
+    
+    if (oceanCount === 0) {
+      const cached = getLastWaterAnchors?.();
+      if (cached?.oceans?.length) {
+        console.log("[ocean] Fallback to cached water anchors:", { oceans: cached.oceans.length });
+        oceans = cached.oceans;
+        oceanCount = oceans.length;
+      } else {
+        console.warn("[ocean] No oceans available in store or cache — skipping ocean placement this frame.");
+        return; // Bail early; nothing to place
+      }
+    }
+    
     console.log('[ocean] DEBUG: After autofit, featureLabels available:', {
       stored: !!window.__featureLabels,
       count: featureLabels.length,
-      oceanCount: oceanLabels.length,
-      sample: oceanLabels.slice(0, 2).map(l => ({ kind: l.kind, text: l.text }))
+      oceanCount: oceanCount,
+      sample: oceans.slice(0, 2).map(l => ({ kind: l.kind, text: l.text }))
     });
     
     // --- Shared labels store (debug-friendly) ---
@@ -1066,23 +1217,37 @@ async function generate(count) {
       return d && (d.type === 'ocean' || d.kind === 'ocean' || d.isOcean === true);
     }
     
-    (function ensureLabelsStore(){
+    (function updateLabelsStore(){
       if (!window.__labelsStoreMeta) window.__labelsStoreMeta = {};
 
       // Store the array used for rendering labels (ALL features)
-      window.__labelsStore = Array.isArray(featureLabels) ? featureLabels : [];
-      const oceanCount = window.__labelsStore.filter(isOceanFeature).length;
+      // Merge-safe: preserve existing structure when updating
+      const next = Array.isArray(featureLabels) ? featureLabels : [];
+      const oceanCount = next.filter(isOceanFeature).length;
+      
+      // Update the hoisted module-scoped store using the merge-safe helper
+      const storePayload = {
+        oceans: Array.isArray(next) ? next.filter(isOceanFeature) : [],
+        nonOcean: Array.isArray(next) ? next.filter(f => !isOceanFeature(f)) : [],
+        raw: next
+      };
+      
+      setFeatureLabelsStore(storePayload);
+      
+      // Also update window.__labelsStore for backward compatibility
+      window.__labelsStore = __labelsStore;
+      
       window.__labelsStoreMeta.lastSet = {
-        total: window.__labelsStore.length,
+        total: __labelsStore.total,
         ocean: oceanCount,
-        nonOcean: window.__labelsStore.length - oceanCount,
+        nonOcean: __labelsStore.nonOcean.length,
       };
       console.log('[store] set __labelsStore', window.__labelsStoreMeta.lastSet);
     })();
     
     // --- Stabilize feature keys for joins ---
     (function stabilizeLabelIds(){
-      const store = window.__labelsStore || [];
+      const store = __labelsStore?.raw || __labelsStore || [];
       const meta = window.__labelsStoreMeta || (window.__labelsStoreMeta = {});
       // Prefer existing ids; fall back to a centroid-ish fingerprint
       function labelKey(d, i) {
@@ -1106,7 +1271,7 @@ async function generate(count) {
       console.log('[store] stabilized ids', meta.keys, { sample: store.slice(0,5).map(d => d.labelId) });
     })();
     
-    if (oceanLabels.length > 0) {
+    if (oceanCount > 0) {
       console.log('[ocean] 🎯 Placing ocean labels after autofit with correct bounds');
       
       // Get the viewport bounds in screen coordinates (for SAT-based placement)
@@ -1123,7 +1288,7 @@ async function generate(count) {
         console.warn('[ocean] getCellAtXY not ready; using fallback circle-based placement.');
         
         // Fallback to circle-based placement
-        for (const oceanLabel of oceanLabels) {
+        for (const oceanLabel of oceans) {
           const t = d3.zoomTransform(svgSel.node());
           const [x0, y0, x1, y1] = getVisibleWorldBoundsFromLabels(svgSel, mapWidth, mapHeight);
           const visibleWorld = [x0, y0, x1, y1];
@@ -1166,6 +1331,17 @@ async function generate(count) {
         // Primary: Use SAT-based placement with post-autofit bounds
         console.log('[ocean] 🎯 Primary path: Using SAT-based ocean label placement with post-autofit bounds');
         
+        // --- PRECONDITION DEBUG (SAT inputs) ---
+        const _k = (window.__zoom && window.__zoom.k) || window.zoomK || 1;
+        const _o = oceans?.[0]; // first (and largest) ocean anchor
+        const _minPx = 12;       // whatever your current min font px is (log it; do not change logic)
+        const _maxPx = 24;       // whatever your current max font px is (log it; do not change logic)
+        const _minRectW = 80;    // example: SAT min rect width in px (if you have a constant, log that instead)
+        const _minRectH = 18;    // example: SAT min rect height in px (ditto)
+        console.log("[ocean][sat:pre] k=", _k, "anchor:", {
+          id: _o?.id, name: _o?.name || _o?.label, areaW: _o?.bbox?.w, areaH: _o?.bbox?.h, cx: _o?.cx, cy: _o?.cy
+        }, "thresholds:", { _minPx, _maxPx, _minRectW, _minRectH });
+        
         // Calculate dynamic step size based on viewport dimensions
         const vw = viewportBounds[2] - viewportBounds[0];
         const vh = viewportBounds[3] - viewportBounds[1];
@@ -1175,8 +1351,21 @@ async function generate(count) {
         // Use the new SAT-based rectangle finder with viewport bounds
         const pxRect = findOceanLabelRectAfterAutofit(viewportBounds, state.getCellAtXY, state.seaLevel, step, 1, 2.0, 0.6);
         
+        // --- RESULT DEBUG ---
+        if (!pxRect) {
+          console.warn("[ocean][sat:miss] No rectangle returned. Likely causes: too-small ocean area, overly strict min size, or fully blocked mask.");
+        } else {
+          console.log("[ocean][sat:hit]", { x: pxRect.x, y: pxRect.y, w: pxRect.w, h: pxRect.h });
+        }
+        
+        if (!pxRect) {
+          console.warn("[ocean] ❌ No suitable SAT rectangle found; placing fallback label at anchor center.");
+          placeOceanFallbackLabel(oceans?.[0]);
+          return; // Avoid running the normal system immediately after; we've placed the fallback.
+        }
+        
         if (pxRect) {
-          console.log(`[ocean] ✅ Using SAT-based placement for ${oceanLabels.length} ocean label(s)`);
+          console.log(`[ocean] ✅ Using SAT-based placement for ${oceanCount} ocean label(s)`);
           
           // Set the world keep-in rect on the ocean label datum
           const ocean = featureLabels.find(l => l.kind === 'ocean');
@@ -1278,11 +1467,11 @@ async function generate(count) {
               // Source sanity: compare old vs new
               console.log('[non-ocean] source sanity', {
                 fromWindowFeature: (window.featureLabels || []).length,
-                fromStore: (window.__labelsStore || []).length
+                fromStore: (__labelsStore?.raw || __labelsStore || []).length
               });
 
               // Use the unified store
-              const nonOceans = (window.__labelsStore || []).filter(f => !isOceanFeature(f));
+              const nonOceans = (__labelsStore?.raw || __labelsStore || []).filter(f => !isOceanFeature(f));
 
               // If it's empty, bail early to avoid turning everything into exits
               if (!nonOceans.length) {
@@ -1291,7 +1480,7 @@ async function generate(count) {
               }
 
               console.log('[non-ocean] data before join', {
-                totalFeatures: (window.__labelsStore || []).length,
+                totalFeatures: (__labelsStore?.raw || __labelsStore || []).length,
                 nonOceans: nonOceans.length,
                 domBefore
               });

@@ -12,7 +12,9 @@ urban-train/
 │   ├── main.js             # Orchestrates generation, rendering, labels, zoom
 │   ├── core/
 │   │   ├── rng.js          # Seedable RNG
-│   │   └── timers.js       # Lightweight timing helpers
+│   │   ├── timers.js       # Lightweight timing helpers
+│   │   ├── zoom-utils.js   # Reliable zoom state access (Step 7)
+│   │   └── idle.js         # Centralized idle scheduler with cancellation (Step 8)
 │   ├── modules/
 │   │   ├── geometry.js     # Poisson-disc sampling + Voronoi + neighbors
 │   │   ├── heightmap.js    # Seed blobs + diffuse heights; clamp 0..1
@@ -34,7 +36,9 @@ urban-train/
 │   │   ├── enrich.js       # Anchor enrichment with polygon context (Step 3)
 │   │   ├── style-apply.js  # Style attachment to anchors (Step 3)
 │   │   ├── placement/      # NEW: Label placement pipeline (Step 5+)
-│   │   │   └── candidates.js # Candidate boxes for visible anchors (Step 5)
+│   │   │   └── candidates.js # Candidate boxes for visible anchors (Step 5+)
+│   │   ├── metrics/        # NEW: Text measurement system (Step 7)
+│   │   │   └── text-metrics.js # Canvas-based text dimensions + caching
 │   │   ├── lod.js          # LOD bands + zoom filtering (Step 4)
 │   │   ├── water-split.js  # Water component topology + kind assignment (Step 3b)
 │   │   ├── anchors-water.js # Water-specific anchor building (Step 3b)
@@ -43,6 +47,11 @@ urban-train/
 │   │   └── layers.js       # SVG layer creation/ordering/cleanup
 │   └── selftest.js         # Sanity checks + badge
 ├── dev/                    # Sandboxes for local testing
+│   ├── test-text-metrics.html    # Text metrics testing (Step 7)
+│   ├── test-zoom-utils.html      # Zoom utilities testing (Step 7)
+│   ├── test-collision-qa.html    # Collision QA testing (Step 6)
+│   ├── test-candidates.html      # Candidates testing (Step 5)
+│   └── ...                        # Other test pages
 ├── vendor/
 
 ├── README.md
@@ -78,7 +87,46 @@ urban-train/
   * Grid-based spatial indexing for O(1) neighborhood queries
   * Priority-based ranking with tier scores + kind boosts + area penalties
   * Flag-gated with `?flags=qaCollide` URL parameter
+* **Text Metrics System** (Step 7): Canvas-based text measurement for precise label sizing
+  * `measureLabel({ text, style, tier })`: Precise text dimensions with font properties
+  * **Caps transformation**: upper, title case with smart word handling
+  * **Letter spacing**: accurate width calculations including tracking
+  * **Performance caching**: prevents repeated Canvas operations
+  * **Fallback metrics**: graceful degradation when Canvas unavailable
+* **Zoom Utilities** (Step 7): Reliable zoom state access throughout application
+  * `getZoomScale()`: Current zoom scale factor with fallback
+  * `getZoomTransform()`: Full zoom transform object {k, x, y}
+  * `getZoomState()`: Convenient zoom state with human-readable level
+  * **Global functions**: `window.getZoomScale`, `window.getZoomTransform`, `window.getZoomState`
+  * **QA seeding**: Immediate QA updates after autofit using current zoom level
+* **Idle Scheduler** (Step 8): Centralized idle scheduling with cancellation support
+  * `deferIdle(cb, { timeout, fallbackDelay, signal })`: Safari-safe idle scheduling
+  * **Fallback handling**: Automatic setTimeout when requestIdleCallback unavailable
+  * **Cancellation**: `.cancel()` method prevents duplicate executions
+  * **Signal support**: AbortSignal for early cancellation
+  * **Ocean placement**: Deferred to idle time to avoid blocking main thread
+* **Ocean Placement Resilience** (Step 8): Robust ocean label placement with fallback system
+  * **SAT-based placement**: Rectangle finding with viewport bounds and dynamic step sizing
+  * **Fallback labels**: When SAT fails, labels placed at anchor centers with counter-scaling
+  * **Store safety**: Merge-safe updates prevent data loss during label operations
+  * **Cached anchors**: Fallback to cached water anchors when legacy store is empty
+  * **Debug instrumentation**: Comprehensive logging of SAT inputs, thresholds, and results
 * **Utilities**: `timeit` for coarse timings; `window.DEBUG` toggle.
+
+### `src/core/zoom-utils.js`
+
+* `getZoomScale()`: Reliable zoom scale access with fallback to `window.currentTransform`
+* `getZoomTransform()`: Full zoom transform object access
+* `getZoomState()`: Convenient zoom state with human-readable level descriptions
+* **Global setup**: Automatically provides `window.getZoomScale`, `window.getZoomTransform`, `window.getZoomState`
+
+### `src/labels/metrics/text-metrics.js`
+
+* `measureLabel({ text, style, tier })`: Canvas-based text measurement with caching
+* **Font handling**: family, weight, italic, size per tier
+* **Caps transformation**: upper, title case with smart word handling
+* **Letter spacing**: accurate width calculations including tracking
+* **Performance**: Cached results prevent repeated Canvas operations
 
 ### `src/modules/geometry.js`
 
@@ -130,9 +178,12 @@ urban-train/
   * `isWaterPoly(poly, sea)`: Water detection with multiple fallback strategies
 * **`style-apply.js`**: Style attachment to anchors (Step 3)
   * `attachStyles(anchors)`: Attaches styles to anchors based on kind classification
-* **`placement/candidates.js`**: Candidate boxes for visible anchors (Step 5)
+* **`placement/candidates.js`**: Candidate boxes for visible anchors (Step 5+)
   * `makeCandidates({ anchorsLOD, k })`: Generates candidate boxes with LOD filtering
-  * Text width estimation with basic heuristic (0.58 × length × size + letter spacing)
+  * **Text metrics integration** (Step 7): Uses `measureLabel()` for precise dimensions
+  * **Canvas-based measurement**: Real font metrics instead of heuristic estimation
+  * **Caps transformation**: Applies caps during measurement for accurate sizing
+  * **Letter spacing**: Accurate width calculations including tracking
   * Centered positioning with x0, y0, x1, y1 bounding box coordinates
   * LOD-aware visibility using `visibleAtK()` for zoom-based filtering
 * **`placement/collide.js`**: Greedy collision detection with spatial indexing (Step 6)

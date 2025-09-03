@@ -18,6 +18,9 @@ A web‑based fantasy map generator that builds Voronoi‑based worlds with real
   * **SAT caching**: Water mask computation cached between runs when geometry hasn't changed (keyed on seed + viewport + water components).
   * **Deferred placement**: Ocean labels deferred to idle time when possible to avoid blocking `requestAnimationFrame`.
   * **Viewport culling**: Off-screen labels are hidden for performance, with ocean label sticky visibility.
+  * **Fallback labels**: When SAT rectangle finding fails, ocean labels are placed at anchor centers with counter-scaling.
+  * **Robust scheduling**: Centralized idle scheduler with Safari-safe options handling and cancellation support.
+  * **Store safety**: Merge-safe store updates prevent data loss during label operations.
 * **Interaction**: Smooth pan/zoom (D3 v5), HUD readouts, and a lightweight performance HUD.
 * **Performance**: Intelligent deferral of heavy operations to idle time, SAT caching, and raster scaling optimizations.
 * **Safety**: Defensive checks against NaN/Infinity, clamped zoom, and self‑tests.
