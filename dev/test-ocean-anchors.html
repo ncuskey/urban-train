@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Ocean Anchors - Centroid & BBox</title>
+  <style>
+    body { font-family: monospace; margin: 20px; }
+    .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+    .success { background: #d4edda; border-color: #c3e6cb; }
+    .error { background: #f8d7da; border-color: #f5c6cb; }
+    pre { background: #f8f9fa; padding: 10px; overflow-x: auto; }
+    .anchor-details { margin: 10px 0; padding: 10px; background: #e9ecef; }
+  </style>
+</head>
+<body>
+  <h1>Test Ocean Anchors - Centroid & BBox</h1>
+  
+  <div class="test-section">
+    <h2>Test Setup</h2>
+    <p>This test verifies that ocean anchors now include <code>cx</code>, <code>cy</code>, and <code>bbox</code> fields.</p>
+    <button id="runTest">Run Test</button>
+    <div id="testResults"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>Sample Ocean Anchor Structure</h2>
+    <div id="sampleAnchor"></div>
+  </div>
+
+  <script type="module">
+    import { buildWaterAnchors } from '../src/labels/anchors-water.js';
+
+    // Mock water components with points for testing
+    const mockComponents = [
+      {
+        kind: 'ocean',
+        id: 'test-ocean-1',
+        label: 'Test Ocean',
+        points: [
+          { x: 100, y: 50 },
+          { x: 300, y: 50 },
+          { x: 300, y: 200 },
+          { x: 100, y: 200 }
+        ],
+        area: 0.15
+      },
+      {
+        kind: 'sea',
+        id: 'test-sea-1',
+        label: 'Test Sea',
+        points: [
+          { x: 400, y: 100 },
+          { x: 500, y: 100 },
+          { x: 500, y: 150 },
+          { x: 400, y: 150 }
+        ],
+        area: 0.05
+      }
+    ];
+
+    function runTest() {
+      const resultsDiv = document.getElementById('testResults');
+      resultsDiv.innerHTML = '<p>Running test...</p>';
+
+      try {
+        // Build water anchors
+        const anchors = buildWaterAnchors({
+          components: mockComponents,
+          polygons: [],
+          mapW: 800,
+          mapH: 400
+        });
+
+        // Filter to just oceans
+        const oceanAnchors = anchors.filter(a => a.kind === 'ocean');
+        
+        if (oceanAnchors.length === 0) {
+          resultsDiv.innerHTML = '<div class="error"><strong>❌ FAIL:</strong> No ocean anchors found</div>';
+          return;
+        }
+
+        const ocean = oceanAnchors[0];
+        
+        // Check for required fields
+        const hasCx = typeof ocean.cx === 'number';
+        const hasCy = typeof ocean.cy === 'number';
+        const hasBbox = ocean.bbox && typeof ocean.bbox.x === 'number' && typeof ocean.bbox.y === 'number' && 
+                       typeof ocean.bbox.w === 'number' && typeof ocean.bbox.h === 'number';
+
+        if (hasCx && hasCy && hasBbox) {
+          resultsDiv.innerHTML = `
+            <div class="success">
+              <strong>✅ PASS:</strong> Ocean anchor has all required fields
+              <ul>
+                <li>cx: ${ocean.cx} (${typeof ocean.cx})</li>
+                <li>cy: ${ocean.cy} (${typeof ocean.cy})</li>
+                <li>bbox: ${JSON.stringify(ocean.bbox)}</li>
+              </ul>
+            </div>
+          `;
+
+          // Display sample anchor structure
+          document.getElementById('sampleAnchor').innerHTML = `
+            <pre>${JSON.stringify(ocean, null, 2)}</pre>
+          `;
+        } else {
+          resultsDiv.innerHTML = `
+            <div class="error">
+              <strong>❌ FAIL:</strong> Missing required fields
+              <ul>
+                <li>cx: ${hasCx ? '✅' : '❌'} (${typeof ocean.cx})</li>
+                <li>cy: ${hasCy ? '✅' : '❌'} (${typeof ocean.cy})</li>
+                <li>bbox: ${hasBbox ? '✅' : '❌'} (${ocean.bbox ? JSON.stringify(ocean.bbox) : 'missing'})</li>
+              </ul>
+            </div>
+          `;
+        }
+
+      } catch (error) {
+        resultsDiv.innerHTML = `
+          <div class="error">
+            <strong>❌ ERROR:</strong> ${error.message}
+            <pre>${error.stack}</pre>
+          </div>
+        `;
+      }
+    }
+
+    // Attach test button
+    document.getElementById('runTest').addEventListener('click', runTest);
+    
+    // Auto-run test on load
+    window.addEventListener('load', () => {
+      setTimeout(runTest, 100);
+    });
+  </script>
+</body>
+</html>

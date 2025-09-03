@@ -37,6 +37,40 @@ function componentCentroid(comp, polygons) {
 }
 
 /**
+ * Compute bounding box for a set of world-space points.
+ * Returns { x, y, w, h, cx, cy } in world coordinates.
+ */
+function quickBBox(points) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of points) {
+    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+  }
+  return { 
+    x: minX, y: minY, 
+    w: maxX - minX, h: maxY - minY, 
+    cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 
+  };
+}
+
+/**
+ * Compute polygon centroid using shoelace formula.
+ * Falls back to bbox center if degenerate.
+ */
+function polygonCentroid(points) {
+  // Shoelace centroid; falls back to bbox center if degenerate
+  let a = 0, cx = 0, cy = 0;
+  for (let i = 0, n = points.length, j = n - 1; i < n; j = i++) {
+    const p0 = points[j], p1 = points[i];
+    const f = (p0.x * p1.y) - (p1.x * p0.y);
+    a += f; cx += (p0.x + p1.x) * f; cy += (p0.y + p1.y) * f;
+  }
+  if (a === 0) return null;
+  a *= 0.5;
+  return { cx: cx / (6 * a), cy: cy / (6 * a) };
+}
+
+/**
  * Build one anchor per water component (ocean/sea/lake).
  * Returns the anchors array and also sets window.__waterAnchors.
  */
@@ -93,11 +127,22 @@ export function buildWaterAnchors({ components = [], polygons = [], mapW = 640, 
       maxK: 32
     };
 
+    // Compute centroid and bbox for ocean anchors
+    let cx = x, cy = y, bbox = null;
+    if (c.kind === 'ocean' && c.points && Array.isArray(c.points)) {
+      const pts = c.points; // world-space points for this water component
+      const bb = quickBBox(pts);
+      const cen = polygonCentroid(pts) || { cx: bb.cx, cy: bb.cy };
+      cx = cen.cx; cy = cen.cy;
+      bbox = { x: bb.x, y: bb.y, w: bb.w, h: bb.h };
+    }
+
     anchors.push({
       id,
       kind: c.kind,
       tier,
       x, y,
+      cx, cy, bbox, // Add centroid and bbox fields
       lod,
       category: 'waterArea',
       text: c.label || c.kind.toUpperCase()
@@ -111,11 +156,23 @@ export function buildWaterAnchors({ components = [], polygons = [], mapW = 640, 
     )[0];
     let [x, y] = getXY(best);
     if (x >= 0 && x <= 1 && y >= 0 && y <= 1) { x *= mapW; y *= mapH; }
+    
+    // Compute centroid and bbox for fallback anchor if it has points
+    let cx = x, cy = y, bbox = null;
+    if (best.points && Array.isArray(best.points)) {
+      const pts = best.points;
+      const bb = quickBBox(pts);
+      const cen = polygonCentroid(pts) || { cx: bb.cx, cy: bb.cy };
+      cx = cen.cx; cy = cen.cy;
+      bbox = { x: bb.x, y: bb.y, w: bb.w, h: bb.h };
+    }
+    
     anchors.push({
       id: best.id ?? `${best.kind || 'water'}-fallback`,
       kind: best.kind || 'water',
       tier: 't4',
       x, y,
+      cx, cy, bbox, // Add centroid and bbox fields
       lod: { minK: 1.2, maxK: 32 },
       category: 'waterArea',
       text: best.label || (best.kind ? best.kind.toUpperCase() : 'WATER')

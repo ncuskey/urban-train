@@ -276,6 +276,75 @@ function placeOceanFallbackLabel(anchor) {
   console.log("[ocean][fallback] placed:", { id, k, cx, cy, fontPx, label });
 }
 
+/**
+ * Compute land bbox in screen space from the grid (uses height > sea level).
+ */
+function computeLandBBoxScreen(cells, getHeight, getXY, seaLevel) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, count = 0;
+  for (let i = 0; i < cells.length; i++) {
+    const h = getHeight(i);
+    if (h > seaLevel) {
+      const [x, y] = getXY(i); // screen coords
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+      count++;
+    }
+  }
+  if (!count || !Number.isFinite(minX)) return null;
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+/**
+ * Build 4 frame rectangles by subtracting land bbox from viewport, choose the largest.
+ */
+function chooseLargestFrameRect(viewportW, viewportH, landRect, margin = 8) {
+  if (!landRect) return { x: margin, y: margin, w: viewportW - 2*margin, h: viewportH - 2*margin };
+  const L = Math.max(0, landRect.x - margin);
+  const T = Math.max(0, landRect.y - margin);
+  const R = Math.min(viewportW, landRect.x + landRect.w + margin);
+  const B = Math.min(viewportH, landRect.y + landRect.h + margin);
+
+  const frames = [
+    { x: 0, y: 0, w: viewportW, h: T,                  side: "top"    },
+    { x: 0, y: B, w: viewportW, h: viewportH - B,      side: "bottom" },
+    { x: 0, y: T, w: L,            h: Math.max(0, B-T), side: "left"   },
+    { x: R, y: T, w: viewportW-R,  h: Math.max(0, B-T), side: "right"  },
+  ].filter(r => r.w > 16 && r.h > 16);
+
+  if (!frames.length) return null;
+  frames.sort((a, b) => (b.w*b.h) - (a.w*a.h));
+  return frames[0];
+}
+
+/**
+ * Place ocean label in a frame rectangle.
+ */
+function placeOceanLabelInRect(rect, label, k) {
+  const g = ensureOceanLabelGroup();
+  g.selectAll("g.ocean-label.frame-candidate").remove();
+
+  const cx = rect.x + rect.w/2;
+  const cy = rect.y + rect.h/2;
+  const fontPx = Math.max(12, Math.min(28, Math.min(rect.w/10, rect.h/2)));
+
+  const node = g.append("g")
+    .attr("class", "ocean-label frame-candidate")
+    .attr("transform", `translate(${cx},${cy}) scale(${1 / k})`)
+    .style("pointer-events", "none")
+    .style("opacity", 0.92);
+
+  node.append("text")
+    .attr("text-anchor", "middle")
+    .attr("dominant-baseline", "central")
+    .attr("class", "label water ocean")
+    .style("font-style", "italic")
+    .style("letter-spacing", "0.08em")
+    .style("font-size", `${fontPx}px`)
+    .text(label);
+
+  console.log("[ocean][frame] placed in", rect);
+}
+
 // Null shim for old labeling functions (temporary until new modules arrive)
 import {
   ensureLabelContainers,
@@ -1490,7 +1559,38 @@ async function generate(count) {
         }
         
         if (!pxRect) {
-          console.warn("[ocean] ❌ No suitable SAT rectangle found; placing fallback label at anchor center.");
+          console.warn("[ocean] ❌ No suitable SAT rectangle found; trying frame-based rect.");
+          const k = (window.__zoom && window.__zoom.k) || window.zoomK || 1;
+
+          // Access grid data for frame rectangle computation
+          const cells = window.currentPolygons || [];
+          const getHeight = (i) => cells[i]?.height ?? 0;
+          const getXY = (i) => {
+            const cell = cells[i];
+            if (!cell || !Array.isArray(cell) || cell.length === 0) return [0, 0];
+            // Calculate centroid from polygon vertices
+            let cx = 0, cy = 0, count = 0;
+            cell.forEach(vertex => {
+              if (vertex && vertex.length >= 2) {
+                cx += vertex[0];
+                cy += vertex[1];
+                count++;
+              }
+            });
+            return count > 0 ? [cx / count, cy / count] : [0, 0];
+          };
+          const sl = (typeof resolveSeaLevel === "function")
+            ? resolveSeaLevel(window.__mapState, window.__options)
+            : (window.DEFAULT_SEA_LEVEL || 0.20);
+
+          const landRect = computeLandBBoxScreen(cells, getHeight, getXY, sl);
+          const frame = chooseLargestFrameRect(mapWidth, mapHeight, landRect, 10);
+          if (frame) {
+            drawOceanDebugRect(frame);
+            placeOceanLabelInRect(frame, NA.label, k);
+            return;
+          }
+          console.warn("[ocean][frame] No frame big enough; falling back to anchor-centered text.");
           placeOceanFallbackLabel({
             id: NA.id,
             // keep compatibility with your existing fallback helper:
