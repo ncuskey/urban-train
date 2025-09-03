@@ -1,5 +1,97 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Step 9 Complete: SeaLevel Resolution + Scope Safety ✅
+
+### 🎯 **SeaLevel Resolution + Scope Safety Complete**
+Successfully implemented robust seaLevel resolution with proper scope capture, eliminating ReferenceError issues in nested callbacks and global functions. The system now provides a single source of truth for seaLevel configuration with proper fallback and clamping.
+
+### 📋 **What Was Accomplished**
+
+#### **1. SeaLevel Resolver Function (`src/main.js`)**
+- **`resolveSeaLevel(state, opts)`** with proper fallback and clamping
+- **Single source of truth** for seaLevel configuration
+- **Automatic fallback** to `DEFAULT_SEA_LEVEL = 0.20` when no value provided
+- **Value clamping** ensures seaLevel stays within [0, 1] range
+- **Priority order**: opts.seaLevel → state.seaLevel → DEFAULT_SEA_LEVEL
+
+#### **2. Scope-Safe SeaLevel Usage**
+- **Captured in generate()** with `const sl = seaLevel;` for nested callbacks
+- **Global functions** use `DEFAULT_SEA_LEVEL` constant directly
+- **No more ReferenceError** from free variable access in nested promises
+- **Consistent behavior** across all seaLevel-dependent operations
+
+#### **3. Comprehensive SeaLevel Integration**
+- **Coastline refinement**: Uses resolved seaLevel for coastal point generation
+- **Water components**: Ocean/sea/lake classification with consistent seaLevel
+- **SAT placement**: Ocean label placement with proper water detection
+- **Autofit functions**: Land bounding box computation with correct seaLevel
+- **Debug logging**: Consistent seaLevel reporting across all operations
+
+### 🔧 **Technical Implementation**
+
+#### **SeaLevel Resolver**
+```javascript
+// src/main.js - Single source of truth for seaLevel
+const DEFAULT_SEA_LEVEL = 0.20;
+
+/** Resolve sea level from options/state with clamping. */
+function resolveSeaLevel(state, opts) {
+  let v = (opts && Number.isFinite(opts.seaLevel) ? opts.seaLevel : undefined);
+  if (v == null && state && Number.isFinite(state.seaLevel)) v = state.seaLevel;
+  if (!Number.isFinite(v)) v = DEFAULT_SEA_LEVEL;
+  if (v < 0) v = 0;
+  if (v > 1) v = 1;
+  return v;
+}
+```
+
+#### **Scope-Safe Capture in Generate**
+```javascript
+// src/main.js - Captured for nested callbacks
+// NOTE: Do not reference `seaLevel` as a free variable inside generate() or nested callbacks.
+// Always use the captured `sl` defined below.
+
+// Resolve once per run and capture for nested callbacks/promises.
+const seaLevel = resolveSeaLevel(window.__mapState, options);
+const sl = seaLevel; // stable capture
+```
+
+#### **Global Function Safety**
+```javascript
+// src/main.js - Uses constant directly, no scope issues
+window.fitLand = () => fitToLand({
+  svg: svgSel,
+  zoom: zoom,
+  polygons,
+  width: mapWidth,
+  height: mapHeight,
+  seaLevel: DEFAULT_SEA_LEVEL, // Constant, always available
+  preferFeatureType: true,
+  margin: 0.08,
+  duration: 600
+});
+```
+
+### 🚀 **Benefits Achieved**
+
+- **No more ReferenceError**: Eliminated free variable access issues in nested callbacks
+- **Single source of truth**: All seaLevel values come from the resolver function
+- **Proper fallback**: Automatic fallback to sensible defaults when no value provided
+- **Value validation**: SeaLevel values are clamped to valid [0, 1] range
+- **Scope safety**: Global functions use constants, local functions use captured values
+- **Consistent behavior**: Same seaLevel value used throughout generation pipeline
+
+### 🔍 **What Was Fixed**
+
+- **Coastline refinement**: Now uses `DEFAULT_SEA_LEVEL` instead of undefined `sl`
+- **Water components**: Consistent seaLevel for ocean/sea/lake classification
+- **SAT placement**: Proper seaLevel for ocean label placement algorithms
+- **Autofit functions**: Correct seaLevel for land bounding box computation
+- **Debug logging**: Consistent seaLevel reporting across all operations
+- **Global functions**: No more scope issues in `window.fitLand` and similar functions
+
+---
+
 ## 2025-01-27 - Step 8 Complete: Robust Idle Scheduler + Ocean Placement Resilience ✅
 
 ### 🎯 **Robust Idle Scheduler + Ocean Placement Resilience Complete**

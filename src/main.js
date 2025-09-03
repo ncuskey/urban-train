@@ -67,6 +67,19 @@ import { greedyPlace } from "./labels/placement/collide.js";
 import { deferIdle, cancelIdle } from "./core/idle.js";
 import { getLastWaterAnchors } from "./labels/anchors-water.js";
 
+// --- water config ---
+const DEFAULT_SEA_LEVEL = 0.20;
+
+/** Resolve sea level from options/state with clamping. */
+function resolveSeaLevel(state, opts) {
+  let v = (opts && Number.isFinite(opts.seaLevel) ? opts.seaLevel : undefined);
+  if (v == null && state && Number.isFinite(state.seaLevel)) v = state.seaLevel;
+  if (!Number.isFinite(v)) v = DEFAULT_SEA_LEVEL;
+  if (v < 0) v = 0;
+  if (v > 1) v = 1;
+  return v;
+}
+
 // --- Labels store (hoisted; no TDZ) ---
 // Use var so the binding exists early during module evaluation.
 var __labelsStore = { oceans: [], nonOcean: [], total: 0 };
@@ -123,6 +136,109 @@ function ensureOceanLabelGroup() {
   let g = root.select("#labels-world-ocean");        // dedicated ocean layer
   if (g.empty()) g = root.append("g").attr("id", "labels-world-ocean").attr("class", "labels ocean");
   return g;
+}
+
+// Normalize any ocean anchor into a consistent shape the placer expects.
+// - Reads multiple possible field names for center/label.
+// - Computes a screen-center using current zoom/projection if available.
+// - Bbox (world/screen) is optional; we log when absent.
+function normalizeOceanAnchor(raw, proj) {
+  const a = raw || {};
+
+  // 1) Label
+  const label =
+    a.label ?? a.name ?? a.text ?? a.title ?? "Ocean";
+
+  // 2) Center (world space)
+  // Try common field names; then polygon centroid if available; else viewport center as last resort.
+  let cxW =
+    a.cx ?? a.x ?? a.centerX ?? (Array.isArray(a.centroid) ? a.centroid[0] : undefined);
+  let cyW =
+    a.cy ?? a.y ?? a.centerY ?? (Array.isArray(a.centroid) ? a.centroid[1] : undefined);
+
+  if ((cxW == null || cyW == null) && a.bbox) {
+    // Use bbox center in world space if provided
+    const bx = a.bbox.x ?? a.bbox.left ?? a.bbox.minX;
+    const by = a.bbox.y ?? a.bbox.top  ?? a.bbox.minY;
+    const bw = a.bbox.w ?? a.bbox.width  ?? ((a.bbox.maxX != null && bx != null) ? (a.bbox.maxX - bx) : undefined);
+    const bh = a.bbox.h ?? a.bbox.height ?? ((a.bbox.maxY != null && by != null) ? (a.bbox.maxY - by) : undefined);
+    if (bx != null && by != null && bw != null && bh != null) {
+      cxW = bx + bw / 2;
+      cyW = by + bh / 2;
+    }
+  }
+
+  // 3) Bbox world (if present)
+  const bboxWorld = (() => {
+    const b = a.bbox || a.bboxWorld;
+    if (!b) return null;
+    const bx = b.x ?? b.left ?? b.minX;
+    const by = b.y ?? b.top  ?? b.minY;
+    const bw = b.w ?? b.width  ?? ((b.maxX != null && bx != null) ? (b.maxX - bx) : undefined);
+    const bh = b.h ?? b.height ?? ((b.maxY != null && by != null) ? (b.maxY - by) : undefined);
+    if ([bx, by, bw, bh].every(v => Number.isFinite(v))) {
+      return { x: bx, y: by, w: bw, h: bh, cx: bx + bw/2, cy: by + bh/2 };
+    }
+    return null;
+  })();
+
+  // 4) Screen projection (center + bbox)
+  const k = (window.__zoom && window.__zoom.k) || window.zoomK || 1;
+  const toScreen = (pt) => {
+    // Minimal world->screen mapping; if you have a proper projection, call it here.
+    // We assume world units are already in SVG coords; apply zoom translate if your code keeps it.
+    return pt;
+  };
+
+  const cxS = (cxW != null && cyW != null) ? toScreen([cxW, cyW])[0] : undefined;
+  const cyS = (cxW != null && cyW != null) ? toScreen([cxW, cyW])[1] : undefined;
+
+  const bboxScreen = (() => {
+    if (!bboxWorld) return null;
+    const tl = toScreen([bboxWorld.x, bboxWorld.y]);
+    if (!tl) return null;
+    // If you need scaling/translation here, insert it; for now assume 1:1 then zoom via counter-scale groups.
+    return { x: tl[0], y: tl[1], w: bboxWorld.w, h: bboxWorld.h, cx: tl[0] + bboxWorld.w/2, cy: tl[1] + bboxWorld.h/2, k };
+  })();
+
+  return {
+    id: a.id ?? a._id ?? "ocean-0",
+    label,
+    cxW, cyW,
+    cxS, cyS,
+    bboxWorld,
+    bboxScreen,
+    k
+  };
+}
+
+function drawOceanDebugDot(x, y, note = "") {
+  const g = ensureOceanLabelGroup();
+  g.selectAll("circle.debug-ocean-dot").remove();
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  g.append("circle")
+    .attr("class", "debug-ocean-dot")
+    .attr("cx", x)
+    .attr("cy", y)
+    .attr("r", 2.5)
+    .style("fill", "currentColor")
+    .style("opacity", 0.9);
+  if (note) console.log("[ocean][debug:dot]", { x, y, note });
+}
+
+function drawOceanDebugRect(r) {
+  const g = ensureOceanLabelGroup();
+  g.selectAll("rect.debug-ocean-rect").remove();
+  if (!r) return;
+  g.append("rect")
+    .attr("class", "debug-ocean-rect")
+    .attr("x", r.x).attr("y", r.y)
+    .attr("width", r.w).attr("height", r.h)
+    .style("fill", "none")
+    .style("stroke", "currentColor")
+    .style("stroke-width", 1)
+    .style("opacity", 0.6);
+  console.log("[ocean][debug:rect]", r);
 }
 
 function placeOceanFallbackLabel(anchor) {
@@ -302,7 +418,7 @@ const Perf = (() => {
 const state = {
   seed: Math.floor(Math.random() * 1000000), // Random seed for initial generation
   getCellAtXY: null, // Will be set after Voronoi/refine
-  seaLevel: 0.2
+  seaLevel: DEFAULT_SEA_LEVEL
 };
 
 // Build robust XY→cell accessor using simple nearest-neighbor search (D3 v5 compatible)
@@ -696,6 +812,13 @@ async function generate(count) {
       mapWidth, mapHeight, color, radiusOutput
     });
     
+    // NOTE: Do not reference `seaLevel` as a free variable inside generate() or nested callbacks.
+    // Always use the captured `sl` defined below.
+    
+    // Resolve once per run and capture for nested callbacks/promises.
+    const seaLevel = resolveSeaLevel(window.__mapState, options);
+    const sl = seaLevel; // stable capture
+
     // === Adaptive Coastline Refinement ===================================
     {
       // Pre-refinement height check
@@ -710,7 +833,6 @@ async function generate(count) {
         console.log(`${tag} height stats: count=${c} min=${min.toFixed(3)} max=${max.toFixed(3)} mean=${(sum/c).toFixed(3)}`);
       })('[pre-refine]', polygons);
       
-      const seaLevel = 0.2; // keep consistent with existing logic
       // More aggressive spacing for noticeable refinement:
       const targetSpacing = Math.max(4, sizeInput.valueAsNumber * 0.4);
       const minSpacingFactor = 0.6;
@@ -721,7 +843,7 @@ async function generate(count) {
         polygons,
         mapWidth,
         mapHeight,
-        seaLevel,
+        seaLevel: DEFAULT_SEA_LEVEL,
         targetSpacing,
         minSpacingFactor
       });
@@ -759,14 +881,14 @@ async function generate(count) {
     console.log("[water:debug]", {
       polygonsCount: window.currentPolygons?.length || 0,
       mapW, mapH,
-      seaLevel: 0.20
+      seaLevel: DEFAULT_SEA_LEVEL
     });
 
     const water = computeWaterComponentsTopo({
       polygons: window.currentPolygons,
       width: mapW,
       height: mapH,
-      seaLevel: 0.20,
+      seaLevel: DEFAULT_SEA_LEVEL,
       seaAreaPx: Math.max(900, 0.004 * mapW * mapH), // ≈ "big lake → sea"
       // seaFrac: 0.004, // (fallback if you prefer fraction)
       quant: 1
@@ -1021,7 +1143,7 @@ async function generate(count) {
     polygons,
     width: mapWidth,
     height: mapHeight,
-    seaLevel: 0.2,
+    seaLevel: DEFAULT_SEA_LEVEL,
     preferFeatureType: true,
     margin: 0.08,
     duration: 600
@@ -1295,7 +1417,7 @@ async function generate(count) {
           const paddedBounds = padBounds(visibleWorld, 32, t.k);
           
           // Create water test function for this ocean label
-          const isWaterAt = makeIsWater((x, y) => diagram.find(x, y), 0.2);
+          const isWaterAt = makeIsWater((x, y) => diagram.find(x, y), DEFAULT_SEA_LEVEL);
           
           const spot = findOceanLabelSpot({
             svg: svgSel,
@@ -1332,15 +1454,24 @@ async function generate(count) {
         console.log('[ocean] 🎯 Primary path: Using SAT-based ocean label placement with post-autofit bounds');
         
         // --- PRECONDITION DEBUG (SAT inputs) ---
-        const _k = (window.__zoom && window.__zoom.k) || window.zoomK || 1;
-        const _o = oceans?.[0]; // first (and largest) ocean anchor
+        const primary = oceans?.[0];
+        const NA = normalizeOceanAnchor(primary);
+        const _k = NA.k;
         const _minPx = 12;       // whatever your current min font px is (log it; do not change logic)
         const _maxPx = 24;       // whatever your current max font px is (log it; do not change logic)
         const _minRectW = 80;    // example: SAT min rect width in px (if you have a constant, log that instead)
         const _minRectH = 18;    // example: SAT min rect height in px (ditto)
-        console.log("[ocean][sat:pre] k=", _k, "anchor:", {
-          id: _o?.id, name: _o?.name || _o?.label, areaW: _o?.bbox?.w, areaH: _o?.bbox?.h, cx: _o?.cx, cy: _o?.cy
-        }, "thresholds:", { _minPx, _maxPx, _minRectW, _minRectH });
+        console.log("[ocean][sat:pre]", {
+          k: _k,
+          anchor: {
+            id: NA.id, label: NA.label,
+            cxW: NA.cxW, cyW: NA.cyW,
+            cxS: NA.cxS, cyS: NA.cyS,
+            bboxWorld: NA.bboxWorld, bboxScreen: NA.bboxScreen
+          },
+          thresholds: { _minPx, _maxPx, _minRectW, _minRectH }
+        });
+        drawOceanDebugDot(NA.cxS ?? NA.cxW, NA.cyS ?? NA.cyW, "anchor-center");
         
         // Calculate dynamic step size based on viewport dimensions
         const vw = viewportBounds[2] - viewportBounds[0];
@@ -1349,7 +1480,7 @@ async function generate(count) {
         const step = Math.max(8, Math.min(14, Math.round(maxDim / 120)));
         
         // Use the new SAT-based rectangle finder with viewport bounds
-        const pxRect = findOceanLabelRectAfterAutofit(viewportBounds, state.getCellAtXY, state.seaLevel, step, 1, 2.0, 0.6);
+        const pxRect = findOceanLabelRectAfterAutofit(viewportBounds, state.getCellAtXY, DEFAULT_SEA_LEVEL, step, 1, 2.0, 0.6);
         
         // --- RESULT DEBUG ---
         if (!pxRect) {
@@ -1360,7 +1491,13 @@ async function generate(count) {
         
         if (!pxRect) {
           console.warn("[ocean] ❌ No suitable SAT rectangle found; placing fallback label at anchor center.");
-          placeOceanFallbackLabel(oceans?.[0]);
+          placeOceanFallbackLabel({
+            id: NA.id,
+            // keep compatibility with your existing fallback helper:
+            cx: NA.cxS ?? NA.cxW, cy: NA.cyS ?? NA.cyW,
+            label: NA.label,
+            bbox: NA.bboxScreen || NA.bboxWorld || null
+          });
           return; // Avoid running the normal system immediately after; we've placed the fallback.
         }
         
@@ -1393,6 +1530,7 @@ async function generate(count) {
 
           // Draw debug rectangle
           if (LABEL_DEBUG) drawDebugOceanRect(pxRect);
+          drawOceanDebugRect(pxRect);
           
           // Set up areas layer for non-ocean labels
           const gAll = svgSel.select('#labels-world-areas');    // islands + lakes (areas layer)
