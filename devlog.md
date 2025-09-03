@@ -1,5 +1,141 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Step 0 Complete: Label Placement State Cleanup + Store Warnings ✅
+
+### 🎯 **Step 0: Label Placement State Cleanup + Store Warnings Complete**
+Successfully implemented comprehensive label placement state cleanup after autofit operations, including placement epoch management, DOM cleanup, store reset, and intelligent warnings for numeric-only payloads. The system now provides clean, isolated placement runs with protection against stale callbacks and confusing store updates.
+
+### 📋 **What Was Accomplished**
+
+#### **1. Step 0 Placement State Cleanup (`src/main.js`)**
+- **Placement epoch system**: Unique epoch numbers for each autofit run
+- **DOM cleanup**: Removes rendered labels while preserving containers
+- **Pending work cancellation**: Cancels idle handles and scheduled placement work
+- **Store reset**: Resets store to clean, empty state
+- **Automatic execution**: Triggers immediately after zoom extent lock
+
+#### **2. Epoch-Based Callback Protection**
+- **Epoch capture**: Records epoch when placement is scheduled
+- **Stale callback detection**: Ignores callbacks from previous epochs
+- **Immediate placement guards**: Prevents execution if epoch changed
+- **Idle callback protection**: Safely ignores late idle callbacks
+- **Comprehensive logging**: Tracks epoch progression and callback filtering
+
+#### **3. Intelligent Store Warnings**
+- **Numeric-only detection**: Identifies payloads with only counts (no arrays)
+- **Warning + ignore**: Logs clear warnings and returns unchanged store
+- **Step 0 protection**: Allows explicit resets while blocking rogue writes
+- **Merge-safe operations**: Preserves existing arrays when appropriate
+- **Developer awareness**: Clear console warnings about ignored payloads
+
+#### **4. Dev Console Debug Tools**
+- **LabelsDebug API**: `window.LabelsDebug` namespace for console debugging
+- **Step 0 control**: `LabelsDebug.step0()` for manual cleanup
+- **Epoch inspection**: `LabelsDebug.epoch()` and `LabelsDebug.bumpEpoch()`
+- **Work cancellation**: `LabelsDebug.cancel()` for pending placement work
+- **Dev-only exposure**: Only available in browser environment
+
+### 🔧 **Technical Implementation**
+
+#### **Step 0 Core Functions**
+```javascript
+// src/main.js - Placement epoch & cleanup helpers
+var __placementEpoch = 0;
+export function getPlacementEpoch() { return __placementEpoch; }
+export function bumpPlacementEpoch() { __placementEpoch += 1; return __placementEpoch; }
+
+export function step0ClearAfterAutofit() {
+  const epoch = bumpPlacementEpoch();
+  cancelPendingPlacement();
+  clearLabelDOM();
+  resetLabelStoreClean();
+  console.log("[step0] Ready for fresh placement. epoch=", epoch);
+}
+```
+
+#### **Epoch-Guarded Placement Scheduling**
+```javascript
+// src/main.js - Epoch protection in deferOceanPlacement
+function deferOceanPlacement(callback, options = {}) {
+  // Capture current epoch at schedule time
+  const epochAtSchedule = getPlacementEpoch?.() ?? __placementEpoch ?? 0;
+  
+  // ... scheduling logic ...
+  
+  _oceanIdleHandle = deferIdle(() => {
+    // Ignore late callback from previous epoch
+    const nowEpoch = getPlacementEpoch?.() ?? __placementEpoch ?? 0;
+    if (nowEpoch !== epochAtSchedule) {
+      console.log("[step0] Skip idle callback from stale epoch", { epochAtSchedule, nowEpoch });
+      return;
+    }
+    callback();
+  }, { timeout, fallbackDelay });
+}
+```
+
+#### **Store Warning System**
+```javascript
+// src/main.js - Numeric-only payload detection
+export function setFeatureLabelsStore(next) {
+  // ... normalization logic ...
+  
+  // If caller provided only numeric counts (no arrays), treat as a no-op and warn.
+  const onlyNumbersNoArrays =
+    !Array.isArray(normNext.oceans) &&
+    !Array.isArray(normNext.nonOcean) &&
+    Object.keys(normNext).every(k => ["total", "ocean", "oceans", "nonOcean"].includes(k) && typeof normNext[k] !== "object");
+  if (onlyNumbersNoArrays) {
+    console.warn("[store] ignored numeric-only payload (no arrays provided)", normNext);
+    return __labelsStore;
+  }
+  
+  // ... normal processing ...
+}
+```
+
+#### **Dev Console Debug API**
+```javascript
+// src/main.js - Dev-only debug tools
+if (typeof window !== "undefined") {
+  Object.assign(window.LabelsDebug, {
+    step0: step0ClearAfterAutofit,
+    epoch: () => getPlacementEpoch?.(),
+    bumpEpoch: () => bumpPlacementEpoch?.(),
+    cancel: () => { try { cancelPendingPlacement(); } catch (e) { console.warn(e); } },
+  });
+  console.log("[debug] window.LabelsDebug ready (step0 | epoch | bumpEpoch | cancel)");
+}
+```
+
+### 🚀 **Benefits Achieved**
+
+- **Clean placement state**: Each autofit run starts with known-clean state
+- **Callback isolation**: Late callbacks from previous runs can't pollute current state
+- **Store consistency**: Prevents rogue numeric-only writes from clobbering arrays
+- **Developer visibility**: Clear warnings and debug tools for troubleshooting
+- **Performance protection**: Cancels pending work to avoid unnecessary processing
+- **Epoch tracking**: Clear visibility into placement run isolation
+
+### 🔍 **What Was Fixed**
+
+- **Post-autofit confusion**: No more `{total: 0, ocean: 0, nonOcean: 0}` store pollution
+- **Stale callback execution**: Late placement callbacks are safely ignored
+- **DOM state cleanup**: Previous labels are removed before new placement
+- **Store reset reliability**: Step 0 provides explicit, controlled store reset
+- **Debug visibility**: Console warnings and debug API for troubleshooting
+- **Placement isolation**: Each autofit run is completely independent
+
+### 🧪 **Testing & Verification**
+
+- **Step 0 test page**: `test-step0.html` verifies cleanup functions
+- **Store warnings test**: `test-store-warnings.html` tests numeric-only payload handling
+- **Debug API test**: `test-debug-api.html` verifies console tools
+- **Console integration**: All warnings and debug messages are properly logged
+- **Epoch progression**: Verified epoch increments and callback filtering
+
+---
+
 ## 2025-01-27 - Step 9 Complete: SeaLevel Resolution + Scope Safety ✅
 
 ### 🎯 **SeaLevel Resolution + Scope Safety Complete**

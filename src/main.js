@@ -67,6 +67,84 @@ import { greedyPlace } from "./labels/placement/collide.js";
 import { deferIdle, cancelIdle } from "./core/idle.js";
 import { getLastWaterAnchors } from "./labels/anchors-water.js";
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Step 0 — placement epoch & cleanup helpers
+// ──────────────────────────────────────────────────────────────────────────────
+// Epoch ensures late callbacks from a previous run can't mutate current state.
+var __placementEpoch = 0;
+export function getPlacementEpoch() { return __placementEpoch; }
+export function bumpPlacementEpoch() { __placementEpoch += 1; return __placementEpoch; }
+
+// Ensure the world label layers exist; don't change IDs/classes.
+function ensureLabelLayers() {
+  const root = d3.select("#labels");
+  let world = root.select("#labels-world");
+  if (world.empty()) world = root.append("g").attr("id", "labels-world");
+  let ocean = world.select("#labels-world-ocean");
+  if (ocean.empty()) ocean = world.append("g").attr("id", "labels-world-ocean").attr("class", "labels ocean");
+  return { root, world, ocean };
+}
+
+// Remove *rendered* labels/visual debug shapes, preserving containers.
+function clearLabelDOM() {
+  const { world, ocean } = ensureLabelLayers();
+  // Remove any previous label nodes
+  world.selectAll("g.ocean-label, text.label").remove();
+  // Remove debug marks
+  world.selectAll("circle.debug-ocean-dot, rect.debug-ocean-rect").remove();
+  console.log("[step0] Cleared world label DOM (kept containers)");
+}
+
+// Cancel any pending placement work (idle handles, timeouts).
+function cancelPendingPlacement() {
+  try { if (typeof _oceanIdleHandle !== "undefined" && _oceanIdleHandle) { cancelIdle(_oceanIdleHandle); } } catch {}
+  // Add other handles here if you introduce more schedulers later.
+  console.log("[step0] Canceled pending placement handles");
+}
+
+// Reset store to an empty, normalized shape without clobbering helpers.
+function resetLabelStoreClean() {
+  if (typeof setFeatureLabelsStore === "function") {
+    setFeatureLabelsStore({ oceans: [], nonOcean: [] });
+  } else {
+    // Fallback if setter hasn't been patched yet:
+    if (!window.__labelsStore || typeof window.__labelsStore !== "object")
+      window.__labelsStore = { oceans: [], nonOcean: [], total: 0 };
+    else {
+      window.__labelsStore.oceans = [];
+      window.__labelsStore.nonOcean = [];
+      window.__labelsStore.total = 0;
+    }
+  }
+  console.log("[step0] Store reset (oceans=0, nonOcean=0, total=0)");
+}
+
+// Public Step 0: bump epoch, cancel pending work, clear DOM, reset store.
+export function step0ClearAfterAutofit() {
+  const epoch = bumpPlacementEpoch();
+  cancelPendingPlacement();
+  clearLabelDOM();
+  resetLabelStoreClean();
+  console.log("[step0] Ready for fresh placement. epoch=", epoch);
+}
+
+// ── Dev-only debug API (exposed to console)
+if (typeof window !== "undefined" && !window.LabelsDebug) {
+  window.LabelsDebug = {};
+}
+if (typeof window !== "undefined") {
+  Object.assign(window.LabelsDebug, {
+    // Step 0
+    step0: step0ClearAfterAutofit,
+    // Epoch controls
+    epoch: () => getPlacementEpoch?.(),
+    bumpEpoch: () => bumpPlacementEpoch?.(),
+    // Convenience: cancel any pending scheduled placement now
+    cancel: () => { try { cancelPendingPlacement(); } catch (e) { console.warn(e); } },
+  });
+  console.log("[debug] window.LabelsDebug ready (step0 | epoch | bumpEpoch | cancel)");
+}
+
 // --- water config ---
 const DEFAULT_SEA_LEVEL = 0.20;
 
@@ -117,6 +195,17 @@ export function setFeatureLabelsStore(next) {
     delete normNext.ocean;
   }
 
+  // If caller provided only numeric counts (no arrays), treat as a no-op and warn.
+  const onlyNumbersNoArrays =
+    !Array.isArray(normNext.oceans) &&
+    !Array.isArray(normNext.nonOcean) &&
+    Object.keys(normNext).every(k => ["total", "ocean", "oceans", "nonOcean"].includes(k) && typeof normNext[k] !== "object");
+  if (onlyNumbersNoArrays) {
+    console.warn("[store] ignored numeric-only payload (no arrays provided)", normNext);
+    return __labelsStore;
+  }
+
+  // Treat numeric zeros without arrays as *no-op* (avoid clobbering arrays mid-run)
   const merged = { ...prev, ...normNext };
   if (!Array.isArray(merged.oceans))  merged.oceans  = Array.isArray(prev.oceans)   ? prev.oceans   : [];
   if (!Array.isArray(merged.nonOcean)) merged.nonOcean = Array.isArray(prev.nonOcean) ? prev.nonOcean : [];
@@ -1313,6 +1402,9 @@ async function generate(count) {
       // Set minimum zoom to the autofit level to prevent zooming out
       zoom.scaleExtent([autofitZoomLevel, 32]);
       console.log(`[autofit] 🔒 Locked zoom extent: [${autofitZoomLevel.toFixed(2)}, 32]`);
+      
+      // ── Step 0: Clean placement state (epoch bump, cancel, DOM clear, store reset)
+      step0ClearAfterAutofit();
     }
   }
 
@@ -1341,6 +1433,9 @@ async function generate(count) {
   function deferOceanPlacement(callback, options = {}) {
     const { immediate = false, timeout = 1000, fallbackDelay = 16 } = options;
 
+    // Capture current epoch at schedule time
+    const epochAtSchedule = getPlacementEpoch?.() ?? __placementEpoch ?? 0;
+
     // Cancel any previous scheduling to avoid duplicate runs
     if (_oceanIdleHandle) {
       cancelIdle(_oceanIdleHandle);
@@ -1350,12 +1445,20 @@ async function generate(count) {
     const needsImmediate = immediate || shouldPlaceImmediately();
     if (needsImmediate) {
       console.log('[ocean] Immediate placement (blocking) - user interaction or critical phase');
-      callback();
+      // Ignore if epoch changed since scheduling request
+      const nowEpoch = getPlacementEpoch?.() ?? __placementEpoch ?? 0;
+      if (nowEpoch === epochAtSchedule) callback();
       return;
     }
 
     _oceanIdleHandle = deferIdle(() => {
       _oceanIdleHandle = null; // clear after run
+      // Ignore late callback from previous epoch
+      const nowEpoch = getPlacementEpoch?.() ?? __placementEpoch ?? 0;
+      if (nowEpoch !== epochAtSchedule) {
+        console.log("[step0] Skip idle callback from stale epoch", { epochAtSchedule, nowEpoch });
+        return;
+      }
       callback();
     }, { timeout, fallbackDelay });
 
