@@ -1,5 +1,163 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Step 1 Complete: Ocean Label Layout Computation + Debug Visualization ✅
+
+### 🎯 **Step 1: Ocean Label Layout Computation + Debug Visualization Complete**
+Successfully implemented Step 1 of the ocean label placement system, which computes optimal font sizes and text wrapping for ocean labels within chosen rectangles. The system now provides intelligent layout optimization with debug visualization, storing results per-epoch for Step 2 consumption.
+
+### 📋 **What Was Accomplished**
+
+#### **1. Text Measurement Utility (`src/core/measure-text.js`)**
+- **Offscreen canvas measurement**: Reliable text width/height using canvas context
+- **Font string builder**: Proper CSS font string formatting with size, family, weight, style
+- **Letter spacing support**: Accurate width calculations including letter-spacing adjustments
+- **Word wrapping utility**: Greedy algorithm for fitting text within width constraints
+- **Performance optimized**: Singleton canvas context for efficient reuse
+
+#### **2. Ocean Layout Scorer (`src/labels/ocean/layout.js`)**
+- **Layout optimization**: Finds best font size and wrapping for given rectangle
+- **Scoring algorithm**: Prioritizes larger fonts, good space utilization, fewer lines
+- **Multi-line support**: Tests 1, 2, and 3 lines for each font size
+- **Early exit optimization**: Single-line fits at maximum size win immediately
+- **Comprehensive options**: Configurable font ranges, padding, letter-spacing
+
+#### **3. Step 1 Orchestration (`src/main.js`)**
+- **Placements registry**: Per-epoch storage of computed layouts
+- **All placement paths covered**: SAT-based, frame-based, and fallback placement
+- **Layout computation**: Calls `computeBestLayout` for each chosen rectangle
+- **Debug visualization**: Draws faint rectangles and center ticks
+- **No final rendering**: Step 1 stops after computation and storage
+
+#### **4. Enhanced Debug API**
+- **LabelsDebug.oceanBest()**: Inspect current epoch's ocean layout decision
+- **Placement inspection**: Easy access to rect, font size, lines, and scoring
+- **Console debugging**: Developer-friendly inspection of Step 1 results
+
+### 🔧 **Technical Implementation**
+
+#### **Text Measurement Core**
+```javascript
+// src/core/measure-text.js - Offscreen canvas measurement
+let _canvas, _ctx;
+function ctx() {
+  if (!_canvas) { _canvas = document.createElement("canvas"); _ctx = _canvas.getContext("2d"); }
+  return _ctx;
+}
+
+export function measureLine(text, fontPx, opts = {}) {
+  const { family = "serif", letterSpacing = 0, lineHeight = 1.2, weight = "", style = "" } = opts;
+  const c = ctx();
+  c.font = fontString(fontPx, family, weight, style);
+  const m = c.measureText(text || "");
+  const width = (m.width || 0) + Math.max(0, (text?.length ? (text.length - 1) : 0)) * letterSpacing;
+  const height = Math.ceil(fontPx * lineHeight);
+  return { width, height, fontPx, lineHeight, letterSpacing, family };
+}
+```
+
+#### **Layout Optimization Algorithm**
+```javascript
+// src/labels/ocean/layout.js - Best layout computation
+export function computeBestLayout(rect, text, k, opts = {}) {
+  const { maxPx = 36, minPx = 12, stepPx = 1, padding = 8, letterSpacing = 0.08 } = opts;
+  
+  let best = null;
+  for (let px = maxPx; px >= minPx; px -= stepPx) {
+    // Try single line first
+    const one = measureLine(text, px, { family, letterSpacing, lineHeight });
+    if (one.width <= innerW && one.height <= innerH) {
+      const score = px * 10 + (one.width / innerW) * 2 - 0.5;
+      best = { ok: true, fontPx: px, lines: [text], score, reasons };
+      break; // max px single-line wins
+    }
+    // Try wrapped into 2..maxLines
+    for (let lines = 2; lines <= maxLines; lines++) {
+      const wrapped = wrapText(text, px, innerW, { family, letterSpacing, lineHeight }, lines);
+      if (wrapped && wrapped.height <= innerH) {
+        const score = px * 10 + fill * 3 - linePenalty;
+        if (!best || score > best.score) best = candidate;
+      }
+    }
+  }
+  return best;
+}
+```
+
+#### **Step 1 Integration**
+```javascript
+// src/main.js - Step 1 orchestration
+const __placements = new Map(); // epoch -> { ocean?: {...}, seas?:[], ... }
+
+function placementsForCurrentEpoch() {
+  const e = getPlacementEpoch?.() ?? 0;
+  if (!__placements.has(e)) __placements.set(e, {});
+  return __placements.get(e);
+}
+
+// After choosing rect (SAT/frame/fallback), compute best layout
+const best = computeBestLayout(rect, label, k, {
+  maxPx: 36, minPx: 12, stepPx: 1,
+  padding: 10, letterSpacing: 0.6, family: "serif", lineHeight: 1.2, maxLines: 3
+});
+
+if (best?.ok) {
+  const bucket = placementsForCurrentEpoch();
+  bucket.ocean = { rect, best, k };
+  
+  // Debug draw: outline chosen rect + center tick
+  const g = ensureOceanLabelGroup();
+  g.append("rect").attr("class", "ocean-layout-debug")...
+  g.append("line").attr("class", "ocean-layout-center")...
+}
+```
+
+#### **Debug API Extension**
+```javascript
+// src/main.js - Enhanced LabelsDebug
+Object.assign(window.LabelsDebug, {
+  step0: step0ClearAfterAutofit,
+  epoch: () => getPlacementEpoch?.(),
+  bumpEpoch: () => bumpPlacementEpoch?.(),
+  cancel: () => { try { cancelPendingPlacement(); } catch (e) { console.warn(e); } },
+  oceanBest: () => { const p = placementsForCurrentEpoch(); return p?.ocean || null; },
+});
+```
+
+### 🎨 **Debug Visualization**
+
+#### **Visual Elements**
+- **Faint rectangles**: Show chosen placement areas with 40% opacity
+- **Center ticks**: Horizontal lines indicating anchor points
+- **Consistent styling**: Uses `currentColor` for theme compatibility
+- **Clean removal**: Previous debug elements removed before new ones added
+
+#### **Console Inspection**
+```javascript
+// Check what Step 1 decided
+LabelsDebug.oceanBest()
+// Returns: { rect: {...}, best: {fontPx: 24, lines: ["Ocean"], score: 245.6}, k: 1 }
+
+// Inspect the chosen rectangle
+LabelsDebug.oceanBest()?.rect
+// Returns: { x: 100, y: 80, w: 200, h: 60 }
+
+// Check font size and line count
+LabelsDebug.oceanBest()?.best
+// Returns: { fontPx: 24, lines: ["Ocean"], lineWidths: [120], score: 245.6 }
+```
+
+### 🚀 **Next Steps: Step 2**
+
+Step 1 is now complete and provides:
+- ✅ **Layout computation**: Optimal font sizes and wrapping
+- ✅ **Result storage**: Per-epoch placement decisions
+- ✅ **Debug visualization**: Visual feedback for chosen areas
+- ✅ **Console inspection**: Easy access to computed layouts
+
+Step 2 will consume these stored layouts and render the actual ocean labels with the computed font sizes and line configurations.
+
+---
+
 ## 2025-01-27 - Step 0 Complete: Label Placement State Cleanup + Store Warnings ✅
 
 ### 🎯 **Step 0: Label Placement State Cleanup + Store Warnings Complete**

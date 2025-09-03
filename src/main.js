@@ -65,6 +65,7 @@ import { computeLOD, visibleAtK } from "./labels/lod.js";
 import { makeCandidates } from "./labels/placement/candidates.js";
 import { greedyPlace } from "./labels/placement/collide.js";
 import { deferIdle, cancelIdle } from "./core/idle.js";
+import { computeBestLayout } from "./labels/ocean/layout.js";
 import { getLastWaterAnchors } from "./labels/anchors-water.js";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -74,6 +75,19 @@ import { getLastWaterAnchors } from "./labels/anchors-water.js";
 var __placementEpoch = 0;
 export function getPlacementEpoch() { return __placementEpoch; }
 export function bumpPlacementEpoch() { __placementEpoch += 1; return __placementEpoch; }
+
+// ── ephemeral placements by epoch (not persisted)
+const __placements = new Map(); // epoch -> { ocean?: {...}, seas?:[], ... }
+function placementsForCurrentEpoch() {
+  const e = getPlacementEpoch?.() ?? 0;
+  if (!__placements.has(e)) __placements.set(e, {});
+  return __placements.get(e);
+}
+function clearOldPlacements() {
+  // keep only current epoch to avoid leaks
+  const curr = getPlacementEpoch?.() ?? 0;
+  for (const key of __placements.keys()) if (key !== curr) __placements.delete(key);
+}
 
 // Ensure the world label layers exist; don't change IDs/classes.
 function ensureLabelLayers() {
@@ -125,6 +139,7 @@ export function step0ClearAfterAutofit() {
   cancelPendingPlacement();
   clearLabelDOM();
   resetLabelStoreClean();
+  clearOldPlacements();
   console.log("[step0] Ready for fresh placement. epoch=", epoch);
 }
 
@@ -141,8 +156,10 @@ if (typeof window !== "undefined") {
     bumpEpoch: () => bumpPlacementEpoch?.(),
     // Convenience: cancel any pending scheduled placement now
     cancel: () => { try { cancelPendingPlacement(); } catch (e) { console.warn(e); } },
+    // Step 1 inspection
+    oceanBest: () => { const p = placementsForCurrentEpoch(); return p?.ocean || null; },
   });
-  console.log("[debug] window.LabelsDebug ready (step0 | epoch | bumpEpoch | cancel)");
+  console.log("[debug] window.LabelsDebug ready (step0 | epoch | bumpEpoch | cancel | oceanBest)");
 }
 
 // --- water config ---
@@ -1689,23 +1706,110 @@ async function generate(count) {
           const landRect = computeLandBBoxScreen(cells, getHeight, getXY, sl);
           const frame = chooseLargestFrameRect(mapWidth, mapHeight, landRect, 10);
           if (frame) {
-            drawOceanDebugRect(frame);
-            placeOceanLabelInRect(frame, NA.label, k);
-            return;
+            // Step 1: compute best layout for this rect (do not render final label yet)
+            const label = NA?.label || "Ocean";
+            const best = computeBestLayout(frame, label, k, {
+              maxPx: 36, minPx: 12, stepPx: 1,
+              padding: 10, letterSpacing: 0.6, family: "serif", lineHeight: 1.2, maxLines: 3
+            });
+            if (!best?.ok) {
+              console.warn("[step1:ocean] No layout fits rect; keeping center-fallback as a last resort.", { rect: frame, reason: best?.reason });
+            } else {
+              const bucket = placementsForCurrentEpoch();
+              bucket.ocean = { rect: frame, best, k };
+              console.log("[step1:ocean:best]", { rect: frame, best });
+
+              // Debug draw: outline chosen rect + a center tick; do NOT render final text yet.
+              (function debugDraw() {
+                const g = ensureOceanLabelGroup();
+                g.selectAll("rect.ocean-layout-debug").remove();
+                g.selectAll("line.ocean-layout-center").remove();
+                g.append("rect")
+                  .attr("class", "ocean-layout-debug")
+                  .attr("x", frame.x).attr("y", frame.y)
+                  .attr("width", frame.w).attr("height", frame.h)
+                  .style("fill", "none").style("stroke", "currentColor").style("stroke-width", 1).style("opacity", 0.4);
+                g.append("line")
+                  .attr("class", "ocean-layout-center")
+                  .attr("x1", best.anchor.cx - 6).attr("y1", best.anchor.cy)
+                  .attr("x2", best.anchor.cx + 6).attr("y2", best.anchor.cy)
+                  .style("stroke", "currentColor").style("opacity", 0.6);
+              })();
+            }
+            return; // Step 1 stops here; Step 2 will render.
           }
           console.warn("[ocean][frame] No frame big enough; falling back to anchor-centered text.");
-          placeOceanFallbackLabel({
-            id: NA.id,
-            // keep compatibility with your existing fallback helper:
-            cx: NA.cxS ?? NA.cxW, cy: NA.cyS ?? NA.cyW,
-            label: NA.label,
-            bbox: NA.bboxScreen || NA.bboxWorld || null
+          // Step 1: compute best layout for fallback (do not render final label yet)
+          const fallbackRect = {
+            x: (NA.cxS ?? NA.cxW) - 40, y: (NA.cyS ?? NA.cyW) - 20,
+            w: 80, h: 40
+          };
+          const label = NA?.label || "Ocean";
+          const best = computeBestLayout(fallbackRect, label, k, {
+            maxPx: 36, minPx: 12, stepPx: 1,
+            padding: 10, letterSpacing: 0.6, family: "serif", lineHeight: 1.2, maxLines: 3
           });
-          return; // Avoid running the normal system immediately after; we've placed the fallback.
+          if (!best?.ok) {
+            console.warn("[step1:ocean] No layout fits fallback rect; keeping center-fallback as a last resort.", { rect: fallbackRect, reason: best?.reason });
+          } else {
+            const bucket = placementsForCurrentEpoch();
+            bucket.ocean = { rect: fallbackRect, best, k };
+            console.log("[step1:ocean:best]", { rect: fallbackRect, best });
+
+            // Debug draw: outline chosen rect + a center tick; do NOT render final text yet.
+            (function debugDraw() {
+              const g = ensureOceanLabelGroup();
+              g.selectAll("rect.ocean-layout-debug").remove();
+              g.selectAll("line.ocean-layout-center").remove();
+              g.append("rect")
+                .attr("class", "ocean-layout-debug")
+                .attr("x", fallbackRect.x).attr("y", fallbackRect.y)
+                .attr("width", fallbackRect.w).attr("height", fallbackRect.h)
+                .style("fill", "none").style("stroke", "currentColor").style("stroke-width", 1).style("opacity", 0.4);
+              g.append("line")
+                .attr("class", "ocean-layout-center")
+                .attr("x1", best.anchor.cx - 6).attr("y1", best.anchor.cy)
+                .attr("x2", best.anchor.cx + 6).attr("y2", best.anchor.cy)
+                .style("stroke", "currentColor").style("opacity", 0.6);
+            })();
+          }
+          return; // Step 1 stops here; Step 2 will render.
         }
         
         if (pxRect) {
           console.log(`[ocean] ✅ Using SAT-based placement for ${oceanCount} ocean label(s)`);
+          
+          // Step 1: compute best layout for SAT rect (do not render final label yet)
+          const k = (window.__zoom && window.__zoom.k) || window.zoomK || 1;
+          const label = NA?.label || "Ocean";
+          const best = computeBestLayout(pxRect, label, k, {
+            maxPx: 36, minPx: 12, stepPx: 1,
+            padding: 10, letterSpacing: 0.6, family: "serif", lineHeight: 1.2, maxLines: 3
+          });
+          if (!best?.ok) {
+            console.warn("[step1:ocean] No layout fits SAT rect; keeping center-fallback as a last resort.", { rect: pxRect, reason: best?.reason });
+          } else {
+            const bucket = placementsForCurrentEpoch();
+            bucket.ocean = { rect: pxRect, best, k };
+            console.log("[step1:ocean:best]", { rect: pxRect, best });
+
+            // Debug draw: outline chosen rect + a center tick; do NOT render final text yet.
+            (function debugDraw() {
+              const g = ensureOceanLabelGroup();
+              g.selectAll("rect.ocean-layout-debug").remove();
+              g.selectAll("line.ocean-layout-center").remove();
+              g.append("rect")
+                .attr("class", "ocean-layout-debug")
+                .attr("x", pxRect.x).attr("y", pxRect.y)
+                .attr("width", pxRect.w).attr("height", pxRect.h)
+                .style("fill", "none").style("stroke", "currentColor").style("stroke-width", 1).style("opacity", 0.4);
+              g.append("line")
+                .attr("class", "ocean-layout-center")
+                .attr("x1", best.anchor.cx - 6).attr("y1", best.anchor.cy)
+                .attr("x2", best.anchor.cx + 6).attr("y2", best.anchor.cy)
+                .style("stroke", "currentColor").style("opacity", 0.6);
+            })();
+          }
           
           // Set the world keep-in rect on the ocean label datum
           const ocean = featureLabels.find(l => l.kind === 'ocean');
@@ -1722,239 +1826,249 @@ async function generate(count) {
             // Ocean text fitting now handled in renderLabels via fitTextToRect
             // No need for post-fit nudge since fitTextToRect handles positioning
           }
+          
+          // Step 1 stops here; Step 2 will render.
+          return;
 
           // Re-apply LOD now that zoom is locked and oceans are placed
-          {
-            const svg = d3.select('svg');
-            const k = d3.zoomTransform(svg.node()).k;
-            const visible = filterByZoom(featureLabels, k);
-            updateLabelVisibilityWithOptions({ placed: featureLabels, visible });
-          }
+          // COMMENTED OUT FOR STEP 1: {
+          //   const svg = d3.select('svg');
+          //   const k = d3.zoomTransform(svg.node()).k;
+          //   const visible = filterByZoom(featureLabels, k);
+          //   updateLabelVisibilityWithOptions({ placed: featureLabels, visible });
+          // }
 
           // Draw debug rectangle
-          if (LABEL_DEBUG) drawDebugOceanRect(pxRect);
-          drawOceanDebugRect(pxRect);
+          // COMMENTED OUT FOR STEP 1: if (LABEL_DEBUG) drawDebugOceanRect(pxRect);
+          // COMMENTED OUT FOR STEP 1: drawOceanDebugRect(pxRect);
           
           // Set up areas layer for non-ocean labels
-          const gAll = svgSel.select('#labels-world-areas');    // islands + lakes (areas layer)
+          // COMMENTED OUT FOR STEP 1: const gAll = svgSel.select('#labels-world-areas');    // islands + lakes (areas layer)
           
-                      // Place ocean label in world space using the SAT rectangle
-            if (ocean && pxRect) {
-              renderOceanInWorld(svgSel, ocean.text);
-              
-              // Apply per-label transforms with zoom
-              const satZoom = d3.zoomTransform(svgSel.node()).k || 1;
-              updateLabelTransforms(svgSel, satZoom); // After ocean placement, no zoom
+          // COMMENTED OUT FOR STEP 1: // Place ocean label in world space using the SAT rectangle
+          // COMMENTED OUT FOR STEP 1: if (ocean && pxRect) {
+          //   renderOceanInWorld(svgSel, ocean.text);
+          //   
+          //   // Apply per-label transforms with zoom
+          //   const satZoom = d3.zoomTransform(svgSel.node()).k || 1;
+          //   updateLabelTransforms(svgSel, satZoom); // After ocean placement, no zoom
+          // 
+          // COMMENTED OUT FOR STEP 1: // Apply font caps after ocean label is placed (now we can read its size)
+          // COMMENTED OUT FOR STEP 1: applyFontCaps();
+          // COMMENTED OUT FOR STEP 1: }
+          
+          // COMMENTED OUT FOR STEP 1: // Guard: if ocean label was placed successfully (has keepWithinRect)
+          // COMMENTED OUT FOR STEP 1: // skip re-running global culls to avoid nuking island/lake labels.
+          // COMMENTED OUT FOR STEP 1: const okOcean = ocean && ocean.keepWithinRect;
+          // COMMENTED OUT FOR STEP 1: if (!okOcean) {
+          // COMMENTED OUT FOR STEP 1:   // Now run the normal label system to place all labels including oceans
+          // COMMENTED OUT FOR STEP 1:   console.log('[ocean] 🎯 Running normal label system with ocean constraints...');
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Ensure metrics are computed for the updated ocean labels
+          // COMMENTED OUT FOR STEP 1:   ensureMetrics(featureLabels, svgSel);
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Run collision avoidance (now includes oceans with keepWithinRect)
+          // COMMENTED OUT FOR STEP 1:   const placedFeatures = timeit('SA collision avoidance', () => placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels }));
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Apply LOD filtering after autofit + ocean placement (single pass)
+          // COMMENTED OUT FOR STEP 1:   const t = d3.zoomTransform(svgSel.node());
+          // COMMENTED OUT FOR STEP 1:   const selected = filterByZoom(placedFeatures, t.k);
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Render world layer (oceans + lakes + islands) and overlay layer (HUD/debug only)
+          // COMMENTED OUT FOR STEP 1:   console.debug('[LOD] non-ocean selected:', selected.length, 'of', placedFeatures.length);
+          // COMMENTED OUT FOR STEP 1:   renderWorldLabels(svgSel, selected);
+          // COMMENTED OUT FOR STEP 1:   renderOverlayLabels(svgSel, selected);
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Apply per-label transforms with zoom
+          // COMMENTED OUT FOR STEP 1:   const saZoom = d3.zoomTransform(svgSel.node()).k || 1;
+          // COMMENTED OUT FOR STEP 1:   updateLabelTransforms(svgSel, saZoom); // After SA placement, no zoom
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Debug logging after SA placement render
+          // COMMENTED OUT FOR STEP 1:   if (LABEL_DEBUG) {
+          // COMMENTED OUT FOR STEP 1:     const g = gAll.selectAll('g.label');
+          // COMMENTED OUT FOR STEP 1:     logProbe('post-SA-render', g);
+          // COMMENTED OUT FOR STEP 1:     }
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Store updated labels (with LOD filtering applied)
+          // COMMENTED OUT FOR STEP 1:   window.__labelsPlaced = { features: selected };
+          // COMMENTED OUT FOR STEP 1: } else {
+          // COMMENTED OUT FOR STEP 1:   console.log('[labels] ok==true; skipping global re-cull BUT re-rendering non-ocean labels');
             
-            // Apply font caps after ocean label is placed (now we can read its size)
-            applyFontCaps();
-          }
-          
-          // Guard: if ocean label was placed successfully (has keepWithinRect)
-          // skip re-running global culls to avoid nuking island/lake labels.
-          const okOcean = ocean && ocean.keepWithinRect;
-          if (!okOcean) {
-            // Now run the normal label system to place all labels including oceans
-            console.log('[ocean] 🎯 Running normal label system with ocean constraints...');
-            
-            // Ensure metrics are computed for the updated ocean labels
-            ensureMetrics(featureLabels, svgSel);
-            
-            // Run collision avoidance (now includes oceans with keepWithinRect)
-            const placedFeatures = timeit('SA collision avoidance', () => placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels }));
-            
-            // Apply LOD filtering after autofit + ocean placement (single pass)
-            const t = d3.zoomTransform(svgSel.node());
-            const selected = filterByZoom(placedFeatures, t.k);
-            
-            // Render world layer (oceans + lakes + islands) and overlay layer (HUD/debug only)
-            console.debug('[LOD] non-ocean selected:', selected.length, 'of', placedFeatures.length);
-            renderWorldLabels(svgSel, selected);
-            renderOverlayLabels(svgSel, selected);
-            
-
-            
-            // Apply per-label transforms with zoom
-            const saZoom = d3.zoomTransform(svgSel.node()).k || 1;
-            updateLabelTransforms(svgSel, saZoom); // After SA placement, no zoom
-            
-            // Debug logging after SA placement render
-            if (LABEL_DEBUG) {
-              const g = gAll.selectAll('g.label');
-              logProbe('post-SA-render', g);
-            }
-            
-            // Store updated labels (with LOD filtering applied)
-            window.__labelsPlaced = { features: selected };
-          } else {
-            console.log('[labels] ok==true; skipping global re-cull BUT re-rendering non-ocean labels');
-            
 
 
 
 
 
 
-            // ---- Instrumented re-render for NON-ocean labels
-            (function instrumentedNonOceanRerender() {
+          // COMMENTED OUT FOR STEP 1:   // ---- Instrumented re-render for NON-ocean labels
+          // COMMENTED OUT FOR STEP 1:   (function instrumentedNonOceanRerender() {
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:     // DOM snapshot BEFORE join
+          // COMMENTED OUT FOR STEP 1:   const domBefore = {
+          // COMMENTED OUT FOR STEP 1:     worldGroups: d3.select('#labels-world').selectAll('g').size(),
+          // COMMENTED OUT FOR STEP 1:     oceanGroups: d3.select('#labels-world').selectAll('g.label--ocean').size(),
+          // COMMENTED OUT FOR STEP 1:     areaGuess: d3.select('#labels-world-areas').selectAll('g.label').size()
+          // COMMENTED OUT FOR STEP 1:   };
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:   // Source sanity: compare old vs new
+          // COMMENTED OUT FOR STEP 1:   console.log('[non-ocean] source sanity', {
+          // COMMENTED OUT FOR STEP 1:     fromWindowFeature: (window.featureLabels || []).length,
+          // COMMENTED OUT FOR STEP 1:     fromStore: (__labelsStore?.raw || __labelsStore || []).length
+          // COMMENTED OUT FOR STEP 1:   });
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:   // Use the unified store
+          // COMMENTED OUT FOR STEP 1:   const nonOceans = (__labelsStore?.raw || __labelsStore || []).filter(f => !isOceanFeature(f));
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:   // If it's empty, bail early to avoid turning everything into exits
+          // COMMENTED OUT FOR STEP 1:   if (!nonOceans.length) {
+          // COMMENTED OUT FOR STEP 1:     console.warn('[non-ocean] EMPTY DATA — skipping join to prevent accidental deletions');
+          // COMMENTED OUT FOR STEP 1:     return;
+          // COMMENTED OUT FOR STEP 1:   }
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:   console.log('[non-ocean] data before join', {
+          // COMMENTED OUT FOR STEP 1:     totalFeatures: (__labelsStore?.raw || __labelsStore || []).length,
+          // COMMENTED OUT FOR STEP 1:     nonOceans: nonOceans.length,
+          // COMMENTED OUT FOR STEP 1:     domBefore
+          // COMMENTED OUT FOR STEP 1:   });
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:   // Work only inside the non-ocean container
+          // COMMENTED OUT FOR STEP 1:   let labelsWorld = d3.select('#labels-world-areas');
+          // COMMENTED OUT FOR STEP 1:   if (labelsWorld.empty()) {
+          // COMMENTED OUT FOR STEP 1:     console.warn('[non-ocean] #labels-world-areas not found; falling back to #labels-world');
+          // COMMENTED OUT FOR STEP 1:     labelsWorld = d3.select('#labels-world'); // last resort
+          // COMMENTED OUT FOR STEP 1:   }
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:   const keyFn = d => d.labelId;
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:   // JOIN (scoped to the correct parent)
+          // COMMENTED OUT FOR STEP 1:   const sel = labelsWorld
+          // COMMENTED OUT FOR STEP 1:     .selectAll('.label--area, .label--river, .label--lake, .label--island')
+          // COMMENTED OUT FOR STEP 1:     .data(nonOceans, keyFn);
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:   // EXIT
+          // COMMENTED OUT FOR STEP 1:   const sel.exit();
+          // COMMENTED OUT FOR STEP 1:   console.log('[non-ocean] exiting count', exitSel.size());
+          // COMMENTED OUT FOR STEP 1:   exitSel.each(d => console.log('[non-ocean] removing node', d && d.labelId, d && d.type))
+          // COMMENTED OUT FOR STEP 1:          .remove();
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:   // ENTER
+          // COMMENTED OUT FOR STEP 1:   const enterSel = sel.enter();
+          // COMMENTED OUT FOR STEP 1:   console.log('[non-ocean] enter count', enterSel.size());
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:   // Simple append to the non-ocean container (z-order handled by container hierarchy)
+          // COMMENTED OUT FOR STEP 1:   const enterG = enterSel.append('g')
+          // COMMENTED OUT FOR STEP 1:     .attr('class', d => {
+          // COMMENTED OUT FOR STEP 1:       // keep your existing class logic here
+          // COMMENTED OUT FOR STEP 1:       // e.g., return `label ${d.kindClass} ${d.tierClass} label--${d.type}`;
+          // COMMENTED OUT FOR STEP 1:       return d.class || 'label non-ocean';
+          // COMMENTED OUT FOR STEP 1:     });
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:   // Basic text creation for entered labels
+          // COMMENTED OUT FOR STEP 1:   enterG.append('text')
+          // COMMENTED OUT FOR STEP 1:     .attr('text-anchor', 'middle')
+          // COMMENTED OUT FOR STEP 1:     .attr('dominant-baseline', 'middle')
+          // COMMENTED OUT FOR STEP 1:     .style('font-size', '14px')
+          // COMMENTED OUT FOR STEP 1:     .style('font-family', 'serif')
+          // COMMENTED OUT FOR STEP 1:     .text(d => d.text || d.name || 'Label');
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:   // UPDATE + MERGE
+          // COMMENTED OUT FOR STEP 1:   const merged = enterG.merge(sel);
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:   // (Optional) if you rely on z-order after update, you can re-assert it safely:
+          // COMMENTED OUT FOR STEP 1:   // merged.each(function() { this.parentNode && this.parentNode.appendChild(this); }); // bring to front
+          // COMMENTED OUT FOR STEP 1:   // or merged.lower(); // send behind (D3 adds .lower in v5)
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:   // Post-join integrity logs
+          // COMMENTED OUT FOR STEP 1:   const domAfter = {
+          // COMMENTED OUT FOR STEP 1:     worldGroups: d3.select('#world').selectAll(':scope > g').size(),
+          // COMMENTED OUT FOR STEP 1:     oceanGroups: d3.selectAll('#labels-world-ocean .ocean-label').size(),
+          // COMMENTED OUT FOR STEP 1:     nonOceanGroups: d3.selectAll('#labels-world-areas .label').size(),
+          // COMMENTED OUT FOR STEP 1:   };
+          // COMMENTED OUT FOR STEP 1:   console.log('[non-ocean] after merge size', merged.size());
+          // COMMENTED OUT FOR STEP 1:   console.log('[non-ocean] DOM after cleanup', domAfter);
 
-              // DOM snapshot BEFORE join
-              const domBefore = {
-                worldGroups: d3.select('#labels-world').selectAll('g').size(),
-                oceanGroups: d3.select('#labels-world').selectAll('g.label--ocean').size(),
-                areaGuess: d3.select('#labels-world-areas').selectAll('g.label').size()
-              };
+          // COMMENTED OUT FOR STEP 1:     // Also log the join delta with keys for clarity
+          // COMMENTED OUT FOR STEP 1:     console.log('[non-ocean] join delta (keys)', {
+          // COMMENTED OUT FOR STEP 1:       entered: enterSel.size(),
+          // COMMENTED OUT FOR STEP 1:       updated: merged.size() - enterSel.size(),
+          // COMMENTED OUT FOR STEP 1:       exiting: 0 // we removed them above
+          // COMMENTED OUT FOR STEP 1:     });
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:     // Explicit z-order (optional, but removes any doubt)
+          // COMMENTED OUT FOR STEP 1:     // After your non-ocean join, adjust stacking once, not per label:
+          // COMMENTED OUT FOR STEP 1:     svg.select('#labels-world-areas').raise(); // put areas above
+          // COMMENTED OUT FOR STEP 1:     svg.select('#labels-world-ocean').lower(); // keep ocean below
+          // COMMENTED OUT FOR STEP 1:     // (Flip these if you want oceans on top.)
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1:   })();
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Ocean labels are already placed, but we still need to render lakes/islands
+          // COMMENTED OUT FOR STEP 1:   // No need to re-run LOD filtering or collision avoidance, but we must render world labels
+          // COMMENTED OUT FOR STEP 1:   }
 
-              // Source sanity: compare old vs new
-              console.log('[non-ocean] source sanity', {
-                fromWindowFeature: (window.featureLabels || []).length,
-                fromStore: (__labelsStore?.raw || __labelsStore || []).length
-              });
-
-              // Use the unified store
-              const nonOceans = (__labelsStore?.raw || __labelsStore || []).filter(f => !isOceanFeature(f));
-
-              // If it's empty, bail early to avoid turning everything into exits
-              if (!nonOceans.length) {
-                console.warn('[non-ocean] EMPTY DATA — skipping join to prevent accidental deletions');
-                return;
-              }
-
-              console.log('[non-ocean] data before join', {
-                totalFeatures: (__labelsStore?.raw || __labelsStore || []).length,
-                nonOceans: nonOceans.length,
-                domBefore
-              });
-
-              // Work only inside the non-ocean container
-              let labelsWorld = d3.select('#labels-world-areas');
-              if (labelsWorld.empty()) {
-                console.warn('[non-ocean] #labels-world-areas not found; falling back to #labels-world');
-                labelsWorld = d3.select('#labels-world'); // last resort
-              }
-
-              const keyFn = d => d.labelId;
-
-              // JOIN (scoped to the correct parent)
-              const sel = labelsWorld
-                .selectAll('.label--area, .label--river, .label--lake, .label--island')
-                .data(nonOceans, keyFn);
-
-              // EXIT
-              const exitSel = sel.exit();
-              console.log('[non-ocean] exiting count', exitSel.size());
-              exitSel.each(d => console.log('[non-ocean] removing node', d && d.labelId, d && d.type))
-                     .remove();
-
-              // ENTER
-              const enterSel = sel.enter();
-              console.log('[non-ocean] enter count', enterSel.size());
-
-              // Simple append to the non-ocean container (z-order handled by container hierarchy)
-              const enterG = enterSel.append('g')
-                .attr('class', d => {
-                  // keep your existing class logic here
-                  // e.g., return `label ${d.kindClass} ${d.tierClass} label--${d.type}`;
-                  return d.class || 'label non-ocean';
-                });
-
-              // Basic text creation for entered labels
-              enterG.append('text')
-                .attr('text-anchor', 'middle')
-                .attr('dominant-baseline', 'middle')
-                .style('font-size', '14px')
-                .style('font-family', 'serif')
-                .text(d => d.text || d.name || 'Label');
-
-              // UPDATE + MERGE
-              const merged = enterG.merge(sel);
-
-              // (Optional) if you rely on z-order after update, you can re-assert it safely:
-              // merged.each(function() { this.parentNode && this.parentNode.appendChild(this); }); // bring to front
-              // or merged.lower(); // send behind (D3 adds .lower in v5)
-
-              // Post-join integrity logs
-              const domAfter = {
-                worldGroups: d3.select('#world').selectAll(':scope > g').size(),
-                oceanGroups: d3.selectAll('#labels-world-ocean .ocean-label').size(),
-                nonOceanGroups: d3.selectAll('#labels-world-areas .label').size(),
-              };
-              console.log('[non-ocean] after merge size', merged.size());
-              console.log('[non-ocean] DOM after cleanup', domAfter);
-
-              // Also log the join delta with keys for clarity
-              console.log('[non-ocean] join delta (keys)', {
-                entered: enterSel.size(),
-                updated: merged.size() - enterSel.size(),
-                exiting: 0 // we removed them above
-              });
-
-              // Explicit z-order (optional, but removes any doubt)
-              // After your non-ocean join, adjust stacking once, not per label:
-              svg.select('#labels-world-areas').raise(); // put areas above
-              svg.select('#labels-world-ocean').lower(); // keep ocean below
-              // (Flip these if you want oceans on top.)
-
-
-            })();
-            
-            // Ocean labels are already placed, but we still need to render lakes/islands
-            // No need to re-run LOD filtering or collision avoidance, but we must render world labels
-          }
-
-          // NEW: unconditionally render/update lakes + islands on the world layer.
-          // Apply LOD filtering for the re-render case
-          const t = d3.zoomTransform(svgSel.node());
-          const selected = filterByZoom(featureLabels, t.k);
-          console.debug('[LOD] re-render selected:', selected.length, 'of', featureLabels.length);
-          renderWorldLabels(svgSel, selected);
-          
-          // Apply per-label transforms with zoom
-          const reRenderZoom = d3.zoomTransform(svgSel.node()).k || 1;
-          updateLabelTransforms(svgSel, reRenderZoom); // After re-render, no zoom
-          
-        } else {
-          console.warn('[ocean] ❌ No suitable SAT rectangle found; ocean labels will use default placement.');
-          
-          // Set up areas layer for non-ocean labels
-          const gAll = svgSel.select('#labels-world-areas');    // islands + lakes (areas layer)
-          
-          // Run normal label system without ocean constraints
-          console.log('[ocean] 🔄 Running normal label system without ocean constraints...');
-          
-          // Ensure metrics are computed
-          ensureMetrics(featureLabels, svgSel);
-          
-          // Run collision avoidance
-          const placedFeatures = timeit('SA collision avoidance', () => placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels }));
-          
-          // Apply LOD filtering after autofit + ocean placement (single pass)
-          const t = d3.zoomTransform(svgSel.node());
-          const selected = filterByZoom(placedFeatures, t.k);
-          
-          // Render world layer (oceans + lakes + islands) and overlay layer (HUD/debug only)
-          console.debug('[LOD] non-ocean selected:', selected.length, 'of', placedFeatures.length);
-          renderWorldLabels(svgSel, selected);
-          renderOverlayLabels(svgSel, selected);
-          
-
-          
-          // Apply per-label transforms with zoom
-          const saPlacementZoom = d3.zoomTransform(svgSel.node()).k || 1;
-          updateLabelTransforms(svgSel, saPlacementZoom); // After SA placement, no zoom
-          
-          // Debug logging after SA placement render
-          if (LABEL_DEBUG) {
-            const g = gAll.selectAll('g.label');
-            logProbe('post-SA-render', g);
-          }
-          
-          // Store updated labels (with LOD filtering applied)
-          window.__labelsPlaced = { features: selected };
-        }
+          // COMMENTED OUT FOR STEP 1: // NEW: unconditionally render/update lakes + islands on the world layer.
+          // COMMENTED OUT FOR STEP 1: // Apply LOD filtering for the re-render case
+          // COMMENTED OUT FOR STEP 1: const t = d3.zoomTransform(svgSel.node());
+          // COMMENTED OUT FOR STEP 1: const selected = filterByZoom(featureLabels, t.k);
+          // COMMENTED OUT FOR STEP 1: console.debug('[LOD] re-render selected:', selected.length, 'of', featureLabels.length);
+          // COMMENTED OUT FOR STEP 1: renderWorldLabels(svgSel, selected);
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1: // Apply per-label transforms with zoom
+          // COMMENTED OUT FOR STEP 1: const reRenderZoom = d3.zoomTransform(svgSel.node()).k || 1;
+          // COMMENTED OUT FOR STEP 1: updateLabelTransforms(svgSel, reRenderZoom); // After re-render, no zoom
+          // COMMENTED OUT FOR STEP 1: 
+          // COMMENTED OUT FOR STEP 1: } else {
+          // COMMENTED OUT FOR STEP 1:   console.warn('[ocean] ❌ No suitable SAT rectangle found; ocean labels will use default placement.');
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Set up areas layer for non-ocean labels
+          // COMMENTED OUT FOR STEP 1:   const gAll = svgSel.select('#labels-world-areas');    // islands + lakes (areas layer)
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1: // Run normal label system without ocean constraints
+          // COMMENTED OUT FOR STEP 1:   console.log('[ocean] 🔄 Running normal label system without ocean constraints...');
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Ensure metrics are computed
+          // COMMENTED OUT FOR STEP 1:   ensureMetrics(featureLabels, svgSel);
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Run collision avoidance
+          // COMMENTED OUT FOR STEP 1:   const placedFeatures = timeit('SA collision avoidance', () => placeLabelsAvoidingCollisions({ svg: svgSel, labels: featureLabels }));
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Apply LOD filtering after autofit + ocean placement (single pass)
+          // COMMENTED OUT FOR STEP 1:   const t = d3.zoomTransform(svgSel.node());
+          // COMMENTED OUT FOR STEP 1: const selected = filterByZoom(placedFeatures, t.k);
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Render world layer (oceans + lakes + islands) and overlay layer (HUD/debug only)
+          // COMMENTED OUT FOR STEP 1:   console.debug('[LOD] non-ocean selected:', selected.length, 'of', placedFeatures.length);
+          // COMMENTED OUT FOR STEP 1:   renderWorldLabels(svgSel, selected);
+          // COMMENTED OUT FOR STEP 1:   renderOverlayLabels(svgSel, selected);
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Apply per-label transforms with zoom
+          // COMMENTED OUT FOR STEP 1:   const saPlacementZoom = d3.zoomTransform(svgSel.node()).k || 1;
+          // COMMENTED OUT FOR STEP 1:   updateLabelTransforms(svgSel, saPlacementZoom); // After SA placement, no zoom
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Debug logging after SA placement render
+          // COMMENTED OUT FOR STEP 1:   if (LABEL_DEBUG) {
+          // COMMENTED OUT FOR STEP 1:     const g = gAll.selectAll('g.label');
+          // COMMENTED OUT FOR STEP 1:     logProbe('post-SA-render', g);
+          // COMMENTED OUT FOR STEP 1:     }
+          // COMMENTED OUT FOR STEP 1:   
+          // COMMENTED OUT FOR STEP 1:   // Store updated labels (with LOD filtering applied)
+          // COMMENTED OUT FOR STEP 1:   window.__labelsPlaced = { features: selected };
+          // COMMENTED OUT FOR STEP 1:         }
       }
     }
   }
+  
+  // Function definition for placeOceanLabelsAfterAutofit
+  function placeOceanLabelsAfterAutofit() {
+    // This function is now implemented inline above
+    // The shim in labels-null-shim.js is no longer needed
+  }
+}
 
   // Clamp and normalize height values for self-tests (safe at top-level)
   {
