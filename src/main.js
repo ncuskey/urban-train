@@ -93,7 +93,6 @@ import { greedyPlace } from "./labels/placement/collide.js";
 import { deferIdle, cancelIdle } from "./core/idle.js";
 import { computeBestLayout } from "./labels/ocean/layout.js";
 import { getLastWaterAnchors } from "./labels/anchors-water.js";
-import { rasterizeWaterMask, erodeWater, largestRectOnes, gridToScreenRect } from "./labels/ocean/sat.js";
 import { intersectRect, clampPointToRect, waterFractionInRect } from "./core/rect.js";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -656,23 +655,7 @@ function buildSAT(a, gw, gh) {
   return sat;
 }
 
-function sumSAT(sat, gw, x0, y0, x1, y1) {
-  // x1,y1 are exclusive in SAT space
-  const W = gw + 1;
-  return sat[y1 * W + x1] - sat[y0 * W + x1] - sat[y1 * W + x0] + sat[y0 * W + x0];
-}
 
-function waterFracSAT(mask, rect) {
-  const { gw, gh, cellPx, viewport, sat } = mask;
-  const gx0 = Math.max(0, Math.floor((rect.x - viewport.x) / cellPx));
-  const gy0 = Math.max(0, Math.floor((rect.y - viewport.y) / cellPx));
-  const gx1 = Math.min(gw, Math.ceil((rect.x + rect.w - viewport.x) / cellPx));
-  const gy1 = Math.min(gh, Math.ceil((rect.y + rect.h - viewport.y) / cellPx));
-  if (gx1 <= gx0 || gy1 <= gy0) return 0;
-  const w = gx1 - gx0, h = gy1 - gy0;
-  const water = sumSAT(sat, gw, gx0, gy0, gx1, gy1);
-  return water / (w * h);
-}
 
 // === Corrected water fraction calculation ===
 function buildPrefixSum(mask) {
@@ -815,38 +798,6 @@ function chooseOceanRect(mask, padPx) {
   return rect;
 }
 
-// ── Maximal rectangle helpers for water-only detection
-// Maximal rectangle of 1s in a binary grid (O(gw*gh)) using histogram + monotonic stack.
-// Returns grid coordinates {gx, gy, gw, gh} or null.
-function largestRectOfOnes(a, gw, gh) {
-  const height = new Int32Array(gw);
-  let best = null, bestArea = 0;
-
-  for (let y = 0; y < gh; y++) {
-    // Build histogram for this row
-    for (let x = 0; x < gw; x++) {
-      height[x] = a[y * gw + x] ? height[x] + 1 : 0;
-    }
-    // Largest rect in histogram (indices are columns)
-    const stack = [];
-    for (let x = 0; x <= gw; x++) {
-      const h = x < gw ? height[x] : -1;
-      let start = x;
-      while (stack.length && stack[stack.length - 1].h > h) {
-        const { i, h: ph } = stack.pop();
-        const w = x - i;
-        const area = ph * w;
-        if (area > bestArea) {
-          bestArea = area;
-          best = { gx: i, gy: y - ph + 1, gw: w, gh: ph };
-        }
-        start = i;
-      }
-      stack.push({ i: start, h });
-    }
-  }
-  return best;
-}
 
 
 function aspectPenalty(r, strength = 0.6) {
@@ -918,7 +869,7 @@ function chooseBestFrameRect(viewportRect, landRect, mask, margin = 8) {
 
   let best = null;
   for (const r of frames) {
-    const wf = waterFracSAT(mask, r);           // ← uses eroded water
+    const wf = waterFrac(mask, r);              // ← uses corrected water fraction
     if (wf < OCEAN_MIN_WATER_FRAC) continue;    // hard reject
     const score = Math.pow(wf, 2) * r.w * r.h * arPenalty(r);
     r.__wf = wf; r.__score = score;
@@ -977,7 +928,7 @@ function refineRectForLabel(rect, label, k, scorerOpts = {}, _safeVP = null, _sa
     const ci = intersectRect(c, _safeVP); // keep inside safe viewport
     if (ci.w < 20 || ci.h < 20) continue;
     const fit = computeBestLayout(ci, label, k, scorerOpts);
-    const wf = waterFracSAT(_satMask, ci);
+    const wf = waterFrac(_satMask, ci);
     if (wf < OCEAN_MIN_WATER_FRAC) continue; // hard reject any land touch
     if (fit?.ok) {
       // Prefer waterier rects if mask is available
