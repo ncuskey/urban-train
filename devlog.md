@@ -1,5 +1,77 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Sampling Guard + Neighbor IDs ✅
+
+### 🎯 **Sampling Guard + Neighbor IDs Complete**
+Successfully implemented robust sampling guards and fixed neighbor ID assignment to prevent edge case failures and improve self-test reliability. These patches protect against degenerate sampling scenarios and ensure proper neighbor relationship validation.
+
+### 📋 **What Was Accomplished**
+
+#### **1. Geometry.js - Fixed Neighbor ID Assignment**
+- **Added `i.id = d`** in `detectNeighbors()` function to match self-test expectations
+- **Fixes reciprocal neighbor check**: Self-tests expect `c.id` but only `c.index` was being set
+- **Maintains consistency**: Follows existing index assignment pattern
+- **Improves test reliability**: "Graph neighbors reciprocal" test now passes consistently
+
+#### **2. Main.js - Sampling Robustness Guards**
+- **Deduplication filter**: Removes duplicate points using coordinate-based keys (3 decimal precision)
+- **Low sample count guard**: 
+  - Warns if fewer than 20 samples generated
+  - Retries once with 80% of original radius
+  - Aborts generation if still fewer than 3 samples
+- **Polygon count sanity check**: Warns if polygon count doesn't match sample count after Voronoi build
+
+### 🔧 **Technical Implementation**
+
+#### **Deduplication Strategy**
+```javascript
+const seen = new Set();
+samples = samples.filter(p => {
+  const key = (p[0].toFixed(3) + "," + p[1].toFixed(3));
+  if (seen.has(key)) return false;
+  seen.add(key);
+  return true;
+});
+```
+
+#### **Retry Logic with Graceful Degradation**
+```javascript
+if (samples.length < 20) {
+  console.warn(`[guard] too few samples (${samples.length}); retrying with smaller radius`);
+  const retryRadius = Math.max(1, sizeInput.valueAsNumber * 0.8);
+  const retrySampler = poissonDiscSampler(mapWidth, mapHeight, retryRadius, rng);
+  samples = [];
+  for (let s; (s = retrySampler()); ) samples.push(s);
+}
+if (samples.length < 3) {
+  console.error(`[guard] still too few samples (${samples.length}); aborting generation`);
+  return;
+}
+```
+
+#### **Sanity Check After Voronoi Build**
+```javascript
+if (!Array.isArray(polygons) || polygons.length !== samples.length) {
+  console.warn(`[guard] polygons mismatch: samples=${samples.length}, polygons=${polygons && polygons.length}`);
+}
+```
+
+### 🎯 **Benefits**
+- **Edge case protection**: Handles huge radius values, weird DOM inputs, duplicate points
+- **Self-test reliability**: Fixes reciprocal neighbor check by providing required `id` property
+- **Graceful degradation**: Retries with smaller radius before giving up
+- **Early failure detection**: Aborts generation if insufficient samples rather than proceeding with bad data
+- **No behavior change**: Normal operation remains identical; guards only activate in edge cases
+- **Better debugging**: Console warnings help identify problematic sampling scenarios
+
+### 🧪 **Testing Scenarios**
+- **Normal operation**: Maps generate identically to before
+- **Edge case testing**: Set `document.getElementById('sizeInput').value = 2000` in DevTools to trigger guards
+- **Self-test improvement**: Reciprocal neighbor test should pass more consistently
+- **Deduplication**: Rare duplicate points are automatically filtered out
+
+---
+
 ## 2025-01-27 - Robust Diagram.find Replacements ✅
 
 ### 🎯 **Robust Diagram.find Replacements Complete**

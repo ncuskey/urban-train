@@ -1441,9 +1441,35 @@ async function generate(count) {
   const sampler = poissonDiscSampler(mapWidth, mapHeight, sizeInput.valueAsNumber, rng);
   let samples = [];
   for (let s; (s = sampler()); ) samples.push(s);
+  // ── Dedupe (super rare, but protects against degenerate duplicates)
+  {
+    const seen = new Set();
+    samples = samples.filter(p => {
+      const key = (p[0].toFixed(3) + "," + p[1].toFixed(3));
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+  // ── Guard: ensure a usable number of samples; retry once with a slightly smaller radius
+  if (samples.length < 20) {
+    console.warn(`[guard] too few samples (${samples.length}); retrying with smaller radius`);
+    const retryRadius = Math.max(1, sizeInput.valueAsNumber * 0.8);
+    const retrySampler = poissonDiscSampler(mapWidth, mapHeight, retryRadius, rng);
+    samples = [];
+    for (let s; (s = retrySampler()); ) samples.push(s);
+  }
+  if (samples.length < 3) {
+    console.error(`[guard] still too few samples (${samples.length}); aborting generation`);
+    return;
+  }
   // Voronoi D3
   let diagram, polygons;
   ({ diagram, polygons } = buildVoronoi(samples, mapWidth, mapHeight));
+  // ── Sanity: polygon count should match sample count
+  if (!Array.isArray(polygons) || polygons.length !== samples.length) {
+    console.warn(`[guard] polygons mismatch: samples=${samples.length}, polygons=${polygons && polygons.length}`);
+  }
   window.currentPolygons = polygons; // keep a global mirror for late callbacks
   
   // Guard against undefined polygons

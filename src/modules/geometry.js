@@ -89,6 +89,7 @@ export function detectNeighbors(diagram, polygons) {
   // push neighbors indexes to each polygons element
   polygons.map(function(i, d) {
     i.index = d; // index of this element
+    i.id = d;    // required by self-tests (reciprocal neighbor check expects c.id)
     if (i.height == null) i.height = 0; // preserve any existing/transferred height
     var neighbors = [];
     diagram.cells[d].halfedges.forEach(function(e) {
