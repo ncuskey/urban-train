@@ -109,15 +109,34 @@ urban-train/
   * **Cancellation**: `.cancel()` method prevents duplicate executions
   * **Signal support**: AbortSignal for early cancellation
   * **Ocean placement**: Deferred to idle time to avoid blocking main thread
-* **Ocean Placement System** (Step 8): Advanced SAT-based ocean label placement with water-aware fallbacks
-  * **SAT-based placement**: Screen-space water mask rasterization with coast buffer erosion
-  * **Largest rectangle algorithm**: Histogram-based optimal rectangle finding (O(gw*gh))
-  * **Water-aware frame selection**: Chooses placement sides based on water content, not just area
+* **Ocean Placement System** (Step 8+): Advanced SAT-based ocean label placement with screen space unification and maximal water-only rectangles
+  * **Screen space unification**: All computation in screen coordinates with proper world coordinate conversion at render time
+  * **Transform helpers**: `currentZoomTransform()`, `toScreenXY()`, `toWorldXY()` for coordinate conversion
+  * **SAT-based placement**: Screen-space water mask rasterization with font-aware coast buffer erosion
+  * **Maximal rectangle algorithm**: O(gw*gh) histogram + monotonic stack for globally optimal water-only rectangles
+  * **Water-only constraints**: Hard 97% minimum water fraction with SAT-based fast queries
+  * **Water-aware frame selection**: Chooses placement sides based on water content with hard constraints
   * **Safe viewport clamping**: All placements respect inset boundaries with visual debug overlays
-  * **Rectangle utilities**: Intersect, clamp, and water fraction analysis for precise placement
-  * **Debug visualization**: Cyan rectangles show chosen areas, blue/orange show safe viewport/land bounds
-  * **Fallback system**: Frame→refine approach when SAT fails, with water-aware scoring
+  * **Debug visualization**: Screen-space debug rectangles, cyan for chosen areas, blue/orange for bounds
+  * **Smart fallback system**: Maximal rectangle → frame→refine with consistent water-only enforcement
+  * **Enhanced scoring**: Power functions for better land avoidance, aspect ratio penalties
   * **Store safety**: Merge-safe updates prevent data loss during label operations
+* **Screen Space Coordinate System**: Transform helpers for unified coordinate handling
+  * `currentZoomTransform()`: Gets current zoom transform from SVG
+  * `toScreenXY([x, y])`: Converts world coordinates to screen coordinates
+  * `toWorldXY([sx, sy])`: Converts screen coordinates to world coordinates
+* **SAT (Summed-Area Table) Helpers**: Fast water fraction queries for placement decisions
+  * `buildSAT(a, gw, gh)`: Builds summed-area table for O(1) rectangle sum queries
+  * `sumSAT(sat, gw, x0, y0, x1, y1)`: Computes sum in rectangular region
+  * `waterFracSAT(mask, rect)`: Fast water fraction calculation using SAT
+* **Maximal Rectangle Algorithm**: Global optimization for water-only rectangle placement
+  * `largestRectOfOnes(a, gw, gh)`: O(gw*gh) algorithm using histogram + monotonic stack
+  * `gridRectToScreen(mask, gr)`: Converts grid coordinates to screen coordinates
+  * `aspectPenalty(r, strength)`: Penalizes ultra-skinny rectangles for better placement
+* **Water-Only Constraints**: Hard constraints for placement quality
+  * `OCEAN_MIN_WATER_FRAC = 0.97`: Hard cutoff for water fraction (97% minimum)
+  * `OCEAN_AR_PENALTY = 0.6`: Aspect ratio penalty strength
+  * `OCEAN_SAFE_INSET_PX = 8`: Safe viewport inset for boundary respect
 * **Utilities**: `timeit` for coarse timings; `window.DEBUG` toggle.
 
 ### `src/core/rect.js`

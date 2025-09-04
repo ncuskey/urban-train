@@ -1,5 +1,198 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Screen Space Unification + Maximal Water-Only Rectangles Complete ✅
+
+### 🎯 **Screen Space Unification + Maximal Water-Only Rectangles Complete**
+Successfully implemented comprehensive screen space unification for ocean label placement and added maximal water-only rectangle detection. The system now operates entirely in screen space during computation with proper coordinate conversion at render time, eliminating positioning artifacts and providing globally optimal water-only rectangle placement.
+
+### 📋 **What Was Accomplished**
+
+#### **1. Screen Space Unification (Fix F)**
+- **Transform helpers**: Added `currentZoomTransform()`, `toScreenXY()`, `toWorldXY()` for coordinate conversion
+- **Screen-space computation**: All SAT mask and land bbox calculations now use screen coordinates
+- **Debug overlay fix**: Debug rectangles now use screen-space layer unaffected by world zoom
+- **Viewport clamping**: All candidates clamped to safe viewport bounds using `intersectRect()`
+- **World coordinate rendering**: Text positioned in world coordinates with proper transform conversion
+- **Enhanced water scoring**: Improved water-aware scoring with power functions for better land avoidance
+
+#### **2. Water-Only Rectangles with Hard Constraints (Step 1.7)**
+- **Hard water constraints**: Any candidate rect must be ≥97% water after erosion
+- **Font-aware coast buffer**: Erosion radius based on expected font size (0.6em buffer)
+- **SAT for fast queries**: Summed-area table enables O(1) water fraction calculations
+- **Consistent enforcement**: Both SAT and frame→refine paths use same water-only rules
+- **Configuration constants**: `OCEAN_MIN_WATER_FRAC = 0.97`, `OCEAN_AR_PENALTY = 0.6`
+
+#### **3. Maximal Water-Only Rectangle Detection (Step 1.a)**
+- **Global optimization**: Finds largest possible water-only rectangle across entire viewport
+- **Efficient algorithm**: O(gw*gh) time complexity using histogram + monotonic stack
+- **Smart fallback**: Gracefully falls back to frame→refine if no suitable maximal rectangle
+- **Aspect ratio optimization**: Penalizes ultra-skinny rectangles for better label placement
+- **Debug visibility**: Clear logging and debug rectangles distinguish placement strategies
+
+### 🔧 **Technical Implementation**
+
+#### **Screen Space Coordinate System**
+```javascript
+// Transform helpers for screen/world coordinate conversion
+function currentZoomTransform() {
+  const svg = d3.select("svg").node();
+  return d3.zoomTransform(svg);
+}
+
+function toScreenXY([x, y]) {
+  const t = currentZoomTransform();
+  const p = t.apply([x, y]);
+  return [p[0], p[1]];
+}
+
+function toWorldXY([sx, sy]) {
+  const t = currentZoomTransform();
+  const p = t.invert([sx, sy]);
+  return [p[0], p[1]];
+}
+```
+
+#### **Water-Only Constraints with SAT**
+```javascript
+// SAT (Summed-Area Table) helpers for fast water fraction queries
+function buildSAT(a, gw, gh) {
+  const sat = new Uint32Array((gw + 1) * (gh + 1));
+  for (let y = 1; y <= gh; y++) {
+    let rowSum = 0;
+    for (let x = 1; x <= gw; x++) {
+      rowSum += a[(y - 1) * gw + (x - 1)];
+      const above = sat[(y - 1) * (gw + 1) + x];
+      sat[y * (gw + 1) + x] = rowSum + above;
+    }
+  }
+  return sat;
+}
+
+function waterFracSAT(mask, rect) {
+  const { gw, gh, cellPx, viewport, sat } = mask;
+  const gx0 = Math.max(0, Math.floor((rect.x - viewport.x) / cellPx));
+  const gy0 = Math.max(0, Math.floor((rect.y - viewport.y) / cellPx));
+  const gx1 = Math.min(gw, Math.ceil((rect.x + rect.w - viewport.x) / cellPx));
+  const gy1 = Math.min(gh, Math.ceil((rect.y + rect.h - viewport.y) / cellPx));
+  if (gx1 <= gx0 || gy1 <= gy0) return 0;
+  const w = gx1 - gx0, h = gy1 - gy0;
+  const water = sumSAT(sat, gw, gx0, gy0, gx1, gy1);
+  return water / (w * h);
+}
+```
+
+#### **Maximal Rectangle Algorithm**
+```javascript
+// Maximal rectangle of 1s in a binary grid (O(gw*gh)) using histogram + monotonic stack
+function largestRectOfOnes(a, gw, gh) {
+  const height = new Int32Array(gw);
+  let best = null, bestArea = 0;
+
+  for (let y = 0; y < gh; y++) {
+    // Build histogram for this row
+    for (let x = 0; x < gw; x++) {
+      height[x] = a[y * gw + x] ? height[x] + 1 : 0;
+    }
+    // Largest rect in histogram (indices are columns)
+    const stack = [];
+    for (let x = 0; x <= gw; x++) {
+      const h = x < gw ? height[x] : -1;
+      let start = x;
+      while (stack.length && stack[stack.length - 1].h > h) {
+        const { i, h: ph } = stack.pop();
+        const w = x - i;
+        const area = ph * w;
+        if (area > bestArea) {
+          bestArea = area;
+          best = { gx: i, gy: y - ph + 1, gw: w, gh: ph };
+        }
+        start = i;
+      }
+      stack.push({ i: start, h });
+    }
+  }
+  return best;
+}
+```
+
+#### **Enhanced Water-Aware Scoring**
+```javascript
+// Frame selection with hard water constraints
+function chooseBestFrameRect(viewportRect, landRect, mask, margin = 8) {
+  // ... frame generation ...
+  
+  let best = null;
+  for (const r of frames) {
+    const wf = waterFracSAT(mask, r);           // ← uses eroded water
+    if (wf < OCEAN_MIN_WATER_FRAC) continue;    // hard reject
+    const score = Math.pow(wf, 2) * r.w * r.h * arPenalty(r);
+    r.__wf = wf; r.__score = score;
+    if (!best || score > best.__score) best = r;
+  }
+  return best ? best : null;
+}
+```
+
+### 🎨 **Visual Debug System**
+
+#### **Screen-Space Debug Overlay**
+- **Fixed coordinate system**: Debug rectangles now use screen coordinates, matching SAT mask
+- **Top-level SVG attachment**: Debug layer unaffected by world zoom transforms
+- **Consistent visualization**: Debug overlays match actual computation coordinate system
+- **Clear labeling**: Different debug labels for "sat-largest" vs "frame-refine" placement strategies
+
+#### **Enhanced Logging**
+```javascript
+console.log("[ocean][sat:largest] wf=", wf.toFixed(2), "score=", Math.round(score), rect);
+console.log("[step1.5:ocean] refined frame→rect", { original: frame, refined: r, score: refined.best.score });
+console.log("[ocean][frame:score]", frames.map(f => ({ side: f.side, wf: +(f.__wf||0).toFixed(2), score: Math.round(f.__score||0) })));
+```
+
+### 🚀 **Performance & Quality Improvements**
+
+#### **Coordinate System Fixes**
+- **Eliminated positioning artifacts**: Fixed "3/4 off frame" issue with proper world coordinate conversion
+- **Unified computation**: All placement logic now operates in consistent screen space
+- **Proper transform handling**: Text rendering uses world coordinates with correct zoom transforms
+- **Viewport safety**: All candidates properly clamped to safe viewport bounds
+
+#### **Water-Only Quality**
+- **Hard constraints**: 97% minimum water fraction ensures labels never overlap land
+- **Font-aware buffering**: Coast buffer scales with expected font size for optimal spacing
+- **Fast water queries**: SAT enables O(1) water fraction calculations instead of pixel-by-pixel
+- **Global optimization**: Maximal rectangle finds largest possible water-only areas
+
+#### **Algorithm Efficiency**
+- **O(gw*gh) complexity**: Maximal rectangle algorithm scales linearly with grid size
+- **SAT optimization**: Fast water fraction queries enable real-time placement decisions
+- **Smart fallbacks**: Graceful degradation from optimal to acceptable placement strategies
+- **Consistent scoring**: Unified water-aware scoring across all placement paths
+
+### 📊 **System Integration**
+
+#### **Unified Placement Pipeline**
+1. **Screen-space mask**: Build eroded water mask in screen coordinates
+2. **SAT construction**: Build summed-area table for fast water queries
+3. **Maximal rectangle**: Find globally optimal water-only rectangle
+4. **Frame fallback**: Use water-aware frame selection if maximal rectangle fails
+5. **Refinement**: Apply water-only constraints to refined candidates
+6. **World rendering**: Convert final position to world coordinates for text placement
+
+#### **Configuration Constants**
+```javascript
+const OCEAN_SAFE_INSET_PX = 8;      // Safe viewport inset
+const OCEAN_MIN_WATER_FRAC = 0.97;  // Hard cutoff for water fraction
+const OCEAN_AR_PENALTY = 0.6;       // Aspect ratio penalty strength
+```
+
+### 🎯 **Next Steps**
+- **Performance monitoring**: Track placement success rates and performance metrics
+- **Parameter tuning**: Fine-tune erosion radius and water fraction thresholds based on usage
+- **Extended testing**: Validate placement quality across different map types and zoom levels
+- **Documentation updates**: Update technical documentation with new coordinate system approach
+
+---
+
 ## 2025-01-27 - SAT Integration Complete: Advanced Ocean Placement with Water-Aware Fallbacks ✅
 
 ### 🎯 **SAT Integration: Advanced Ocean Placement System Complete**

@@ -4,6 +4,31 @@ window.DEBUG = false;
 // Label system temporarily disabled - flags removed until new modules arrive
 window.labelFlags = {};
 
+// ── Water-only selection knobs
+const OCEAN_SAFE_INSET_PX = 8;      // already used for safe viewport
+const OCEAN_MIN_WATER_FRAC = 0.97;  // hard cutoff
+const OCEAN_AR_PENALTY = 0.6;       // 0..1; higher penalizes skinny boxes more
+
+// ── Transform helpers for screen/world coordinate conversion
+function currentZoomTransform() {
+  const svg = d3.select("svg").node();
+  return d3.zoomTransform(svg);
+}
+
+// Convert world → screen using current zoom
+function toScreenXY([x, y]) {
+  const t = currentZoomTransform();
+  const p = t.apply([x, y]);
+  return [p[0], p[1]];
+}
+
+// Convert screen → world (for final label placement under world group)
+function toWorldXY([sx, sy]) {
+  const t = currentZoomTransform();
+  const p = t.invert([sx, sy]);
+  return [p[0], p[1]];
+}
+
 // URL flag helper for QA overlays and feature toggles
 const urlFlags = (new URLSearchParams(location.search).get('flags') || "")
   .split(",").filter(Boolean);
@@ -93,7 +118,7 @@ export function shrinkRect(rect, inset) {
 // ── Debug overlay for chosen ocean rect (screen-space)
 let __debugBoxesOn = true; // dev default; toggle via LabelsDebug
 function ensureOceanDebugLayer() {
-  const root = d3.select("#labels");
+  const root = d3.select("svg"); // top-level, unaffected by world zoom
   let layer = root.select("#labels-debug-ocean");
   if (layer.empty()) layer = root.append("g").attr("id", "labels-debug-ocean");
   return layer;
@@ -198,15 +223,19 @@ function step2RenderOceanLabel() {
   }
   const { rect, best, k } = entry;
   const { lines, fontPx } = best;
-  // Clamp anchor to rect inset
-  const { cx, cy } = clampPointToRect(best.anchor.cx, best.anchor.cy, rect, 4);
+  const pad = 4;
+  const sx = Math.max(rect.x + pad, Math.min(rect.x + rect.w - pad, best.anchor.cx));
+  const sy = Math.max(rect.y + pad, Math.min(rect.y + rect.h - pad, best.anchor.cy));
+
+  // convert to *world* coordinates so the parent zoom transform puts it at (sx, sy)
+  const [wx, wy] = toWorldXY([sx, sy]);
   const lineH = Math.ceil(fontPx * 1.2); // keep in sync with Step 1 default
 
   eraseOceanLabel(); // idempotent
   const g = ensureOceanLabelGroup();
   const node = g.append("g")
     .attr("class", "ocean-label final")
-    .attr("transform", `translate(${cx},${cy}) scale(${1 / (k || 1)})`)
+    .attr("transform", `translate(${wx},${wy}) scale(${1 / (k || 1)})`)
     .style("pointer-events", "none")
     .style("opacity", 0.95);
 
@@ -242,7 +271,7 @@ function step2RenderOceanLabel() {
       .attr("x", 0).attr("y", y);
   });
 
-  console.log("[step2:ocean] rendered", { lines, fontPx, anchor: { cx, cy }, k });
+  console.log("[step2:ocean] rendered", { lines, fontPx, anchor: { cx: sx, cy: sy }, k });
 }
 
 function clearOldPlacements() {
@@ -554,47 +583,122 @@ function computeLandBBoxScreen(cells, getHeight, getXY, seaLevel) {
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
+// ── SAT (Summed-Area Table) helpers for fast water fraction queries
+function buildSAT(a, gw, gh) {
+  const sat = new Uint32Array((gw + 1) * (gh + 1));
+  for (let y = 1; y <= gh; y++) {
+    let rowSum = 0;
+    for (let x = 1; x <= gw; x++) {
+      rowSum += a[(y - 1) * gw + (x - 1)];
+      const above = sat[(y - 1) * (gw + 1) + x];
+      sat[y * (gw + 1) + x] = rowSum + above;
+    }
+  }
+  return sat;
+}
+
+function sumSAT(sat, gw, x0, y0, x1, y1) {
+  // x1,y1 are exclusive in SAT space
+  const W = gw + 1;
+  return sat[y1 * W + x1] - sat[y0 * W + x1] - sat[y1 * W + x0] + sat[y0 * W + x0];
+}
+
+function waterFracSAT(mask, rect) {
+  const { gw, gh, cellPx, viewport, sat } = mask;
+  const gx0 = Math.max(0, Math.floor((rect.x - viewport.x) / cellPx));
+  const gy0 = Math.max(0, Math.floor((rect.y - viewport.y) / cellPx));
+  const gx1 = Math.min(gw, Math.ceil((rect.x + rect.w - viewport.x) / cellPx));
+  const gy1 = Math.min(gh, Math.ceil((rect.y + rect.h - viewport.y) / cellPx));
+  if (gx1 <= gx0 || gy1 <= gy0) return 0;
+  const w = gx1 - gx0, h = gy1 - gy0;
+  const water = sumSAT(sat, gw, gx0, gy0, gx1, gy1);
+  return water / (w * h);
+}
+
+// ── Maximal rectangle helpers for water-only detection
+// Maximal rectangle of 1s in a binary grid (O(gw*gh)) using histogram + monotonic stack.
+// Returns grid coordinates {gx, gy, gw, gh} or null.
+function largestRectOfOnes(a, gw, gh) {
+  const height = new Int32Array(gw);
+  let best = null, bestArea = 0;
+
+  for (let y = 0; y < gh; y++) {
+    // Build histogram for this row
+    for (let x = 0; x < gw; x++) {
+      height[x] = a[y * gw + x] ? height[x] + 1 : 0;
+    }
+    // Largest rect in histogram (indices are columns)
+    const stack = [];
+    for (let x = 0; x <= gw; x++) {
+      const h = x < gw ? height[x] : -1;
+      let start = x;
+      while (stack.length && stack[stack.length - 1].h > h) {
+        const { i, h: ph } = stack.pop();
+        const w = x - i;
+        const area = ph * w;
+        if (area > bestArea) {
+          bestArea = area;
+          best = { gx: i, gy: y - ph + 1, gw: w, gh: ph };
+        }
+        start = i;
+      }
+      stack.push({ i: start, h });
+    }
+  }
+  return best;
+}
+
+function gridRectToScreen(mask, gr) {
+  const { viewport, cellPx } = mask;
+  return {
+    x: viewport.x + gr.gx * cellPx,
+    y: viewport.y + gr.gy * cellPx,
+    w: gr.gw * cellPx,
+    h: gr.gh * cellPx
+  };
+}
+
+function aspectPenalty(r, strength = 0.6) {
+  const ar = r.w / Math.max(1, r.h);
+  const dev = Math.abs(Math.log2(ar));
+  return 1 / (1 + strength * dev);
+}
+
 /**
  * Build 4 frame rectangles by subtracting land bbox from viewport, choose the best by water content.
  */
 function chooseBestFrameRect(viewportRect, landRect, mask, margin = 8) {
-  const viewportW = viewportRect.w, viewportH = viewportRect.h;
-  const vX = viewportRect.x, vY = viewportRect.y;
-  if (!landRect) return { x: vX + margin, y: vY + margin, w: viewportW - 2*margin, h: viewportH - 2*margin };
-
-  const L = Math.max(vX, landRect.x - margin);
-  const T = Math.max(vY, landRect.y - margin);
-  const R = Math.min(vX + viewportW, landRect.x + landRect.w + margin);
-  const B = Math.min(vY + viewportH, landRect.y + landRect.h + margin);
+  const vX = viewportRect.x, vY = viewportRect.y, vW = viewportRect.w, vH = viewportRect.h;
+  const L = landRect ? Math.max(vX, landRect.x - margin) : vX;
+  const T = landRect ? Math.max(vY, landRect.y - margin) : vY;
+  const R = landRect ? Math.min(vX + vW, landRect.x + landRect.w + margin) : vX + vW;
+  const B = landRect ? Math.min(vY + vH, landRect.y + landRect.h + margin) : vY + vH;
 
   const frames = [
-    { x: vX, y: vY, w: viewportW,             h: Math.max(0, T - vY),           side: "top"    },
-    { x: vX, y: B,  w: viewportW,             h: Math.max(0, vY+viewportH - B), side: "bottom" },
-    { x: vX, y: T,  w: Math.max(0, L - vX),   h: Math.max(0, B - T),             side: "left"   },
-    { x: R,  y: T,  w: Math.max(0, vX+viewportW - R), h: Math.max(0, B - T),     side: "right"  },
-  ].filter(r => r.w > 16 && r.h > 16);
+    { x: vX, y: vY, w: vW,         h: Math.max(0, T - vY),          side: "top"    },
+    { x: vX, y: B,  w: vW,         h: Math.max(0, vY + vH - B),     side: "bottom" },
+    { x: vX, y: T,  w: Math.max(0, L - vX),   h: Math.max(0, B - T), side: "left"   },
+    { x: R,  y: T,  w: Math.max(0, vX + vW - R), h: Math.max(0, B - T), side: "right"  },
+  ].filter(r => r.w > 24 && r.h > 24);
 
   if (!frames.length) return null;
 
-  // Score by water content * area, lightly penalize skinny AR, then pick max.
-  function arPenalty(r) {
+  const arPenalty = (r) => {
     const ar = r.w / Math.max(1, r.h);
     const dev = Math.abs(Math.log2(ar));
-    return 1 / (1 + 0.6 * dev); // ∈ (0,1]; 1 if square-ish
-  }
+    return 1 / (1 + OCEAN_AR_PENALTY * dev);
+  };
+
   let best = null;
   for (const r of frames) {
-    const fr = intersectRect(r, viewportRect); // ensure inside safe viewport
-    if (fr.w < 16 || fr.h < 16) continue;
-    const wf = mask ? waterFractionInRect(mask, fr) : 1;
-    const area = fr.w * fr.h;
-    const score = wf * area * arPenalty(fr);
-    r.__score = score; r.__wf = wf; r.__rect = fr;
+    const wf = waterFracSAT(mask, r);           // ← uses eroded water
+    if (wf < OCEAN_MIN_WATER_FRAC) continue;    // hard reject
+    const score = Math.pow(wf, 2) * r.w * r.h * arPenalty(r);
+    r.__wf = wf; r.__score = score;
     if (!best || score > best.__score) best = r;
   }
-  if (!best) return null;
-  console.log("[ocean][frame:score]", frames.map(f => ({side: f.side, wf: +f.__wf.toFixed(2), score: Math.round(f.__score)})));
-  return best.__rect;
+  console.log("[ocean][frame:score]", frames.map(f => ({ side: f.side, wf: +(f.__wf||0).toFixed(2), score: Math.round(f.__score||0) })));
+  return best ? best : null;
 }
 
 // If a frame is too skinny, generate sub-rect candidates and choose the best by layout score.
@@ -646,11 +750,11 @@ function refineRectForLabel(rect, label, k, scorerOpts = {}, _safeVP = null, _sa
     const ci = intersectRect(c, _safeVP); // keep inside safe viewport
     if (ci.w < 20 || ci.h < 20) continue;
     const fit = computeBestLayout(ci, label, k, scorerOpts);
+    const wf = waterFracSAT(_satMask, ci);
+    if (wf < OCEAN_MIN_WATER_FRAC) continue; // hard reject any land touch
     if (fit?.ok) {
       // Prefer waterier rects if mask is available
-      const wf = (typeof waterFractionInRect === "function" && _satMask) ? waterFractionInRect(_satMask, ci) : 1;
-      const waterBonus = 1 + 0.5 * Math.min(1, wf);  // up to +50%
-      const score = fit.score * waterBonus;
+      const score = fit.score * Math.pow(Math.max(0.001, wf), 0.35); // wf^0.35 ~ strong nudge
       const entry = { rect: ci, best: { ...fit, score }, wf };
       if (!bestEntry || score > bestEntry.best.score) bestEntry = entry;
     }
@@ -2410,72 +2514,81 @@ async function generate(count) {
       // Build screen-space water mask → erode by coast buffer → largest rect
       const cells = window.__mesh?.cells || [];
       const getHeight = (i) => window.__heights?.[i];
-      const getXY = (i) => window.__xy?.(i);
+      const getXY = (i) => {
+        const base = window.__xy?.(i);
+        return base ? toScreenXY(base) : null;
+      };
       const sl = (typeof resolveSeaLevel === "function")
         ? resolveSeaLevel(window.__mapState, window.__options)
         : (window.DEFAULT_SEA_LEVEL || 0.20);
 
-      // Grid resolution & coastal buffer (in px)
-      const cellPx = 8;                 // coarser = faster; refine later if needed
-      const coastBufferPx = 12;         // keep label ~12px off coasts
-      const r = Math.max(1, Math.round(coastBufferPx / cellPx));
-
+      // Build screen-space mask at cellPx resolution
+      const cellPx = 8; // as you log now
       const mask = rasterizeWaterMask(_safeVP, cells, getHeight, getXY, sl, cellPx);
       console.log("[ocean][sat:mask]", { gw: mask.gw, gh: mask.gh, cellPx });
 
-      erodeWater(mask, r);
+      // --- NEW: erode water to keep labels off coasts, based on font size guess
+      const expectedFontPx = 36; // or compute from longest ocean name + style
+      const erodePx = Math.max(8, Math.round(expectedFontPx * 0.6));   // ~0.6em buffer
+      const erodeCells = Math.max(1, Math.round(erodePx / cellPx));
+      erodeWater(mask, erodeCells); // modify mask.a in-place (binary 0/1)
+
+      // --- NEW: build a summed-area table for fast water fraction queries
+      mask.sat = buildSAT(mask.a, mask.gw, mask.gh);
       const _satMask = mask; // expose to refiners in this scope
-      const gr = largestRectOnes(mask);
-
-      if (gr && gr.gw * gr.gh > 0) {
-        const satRect = gridToScreenRect(mask, gr);
-        const satInset = 2; // px
-        satRect.x += satInset; satRect.y += satInset;
-        satRect.w = Math.max(0, satRect.w - 2*satInset);
-        satRect.h = Math.max(0, satRect.h - 2*satInset);
-        console.log("[ocean][sat:hit]", { gr, satRect });
-
-        // Score & stash (Step 1 path)
-        const k = (window.__zoom && window.__zoom.k) || window.zoomK || 1;
-        const label = (window.__oceanName || "Ocean");
-        const best = computeBestLayout(satRect, label, k, {
-          maxPx: 36, minPx: 12, stepPx: 1,
-          padding: 10, letterSpacing: 0.6, family: "serif", lineHeight: 1.2, maxLines: 3
-        });
-
-        if (best?.ok) {
-          const bucket = placementsForCurrentEpoch();
-          bucket.ocean = { rect: satRect, best, k };
-          drawOceanDebugRect(satRect, "sat");
-          console.log("[step1:ocean:best]", { rect: satRect, best });
-          // Optional immediate render if you've enabled it:
-          if (typeof step2RenderOceanLabel === "function") step2RenderOceanLabel();
-          return;
+      
+      // mask already in screen space; eroded; and mask.sat built
+      // Try maximal water-only rectangle first (global, not just frame sides)
+      let satPick = null;
+      {
+        const gr = largestRectOfOnes(mask.a, mask.gw, mask.gh);
+        if (gr && gr.gw >= 3 && gr.gh >= 3) { // ≥3 grid cells each way (~24px if cellPx=8)
+          const rect = gridRectToScreen(mask, gr);
+          const wf = waterFracSAT(mask, rect); // should be 1.0 after erosion; still check
+          if (wf >= OCEAN_MIN_WATER_FRAC) {
+            // Prefer squarish boxes to ultra-skinny ones
+            const score = rect.w * rect.h * aspectPenalty(rect, OCEAN_AR_PENALTY);
+            satPick = { rect, score, wf };
+            console.log("[ocean][sat:largest] wf=", wf.toFixed(2), "score=", Math.round(score), rect);
+          }
         }
-        console.warn("[ocean][sat] layout didn't fit; falling back to frame-refine.");
       }
+      
+      let chosenRect = satPick?.rect || null;
 
-      // SAT miss or no fit → use your existing frame + refine logic
-      const landRect = computeLandBBoxScreen(cells, getHeight, getXY, sl);
-      drawDebugBounds(_safeVP, landRect);
-      const frame = chooseBestFrameRect(_safeVP, landRect, _satMask, 10);
-      if (frame) {
-        const k = (window.__zoom && window.__zoom.k) || window.zoomK || 1;
-        const label = (window.__oceanName || "Ocean");
-        const refined = refineRectForLabel(frame, label, k, {
-          maxPx: 36, minPx: 12, stepPx: 1, padding: 10, letterSpacing: 0.6, family: "serif", lineHeight: 1.2, maxLines: 3
-        }, _safeVP, _satMask);
-        if (refined?.best?.ok) {
-          const bucket = placementsForCurrentEpoch();
-          bucket.ocean = { rect: refined.rect, best: refined.best, k };
-          drawOceanDebugRect(refined.rect, "frame-refine");
-          console.log("[step1.5:ocean] refined frame→rect", { original: frame, refined: refined.rect, score: refined.best.score });
-          if (typeof step2RenderOceanLabel === "function") step2RenderOceanLabel();
-          return;
+      if (!chosenRect) {
+        const landRect = computeLandBBoxScreen(cells, getHeight, getXY, sl);
+        drawDebugBounds(_safeVP, landRect);
+        const frame = chooseBestFrameRect(_safeVP, landRect, _satMask, 10);
+        if (frame) {
+          drawOceanDebugRect(frame, "frame");       // existing debug
+          const k = (window.__zoom && window.__zoom.k) || window.zoomK || 1;
+          const label = (window.__oceanName || "Ocean");
+          const refined = refineRectForLabel(frame, label, k, {
+            maxPx: 36, minPx: 12, stepPx: 1, padding: 10, letterSpacing: 0.6, family: "serif", lineHeight: 1.2, maxLines: 3
+          }, _safeVP, _satMask);
+          if (refined?.best?.ok) {
+            const r = intersectRect(refined.rect, _safeVP);
+            // hard water-only gate on refined rect too
+            if (waterFracSAT(_satMask, r) >= OCEAN_MIN_WATER_FRAC) {
+              chosenRect = r;
+              console.log("[step1.5:ocean] refined frame→rect", { original: frame, refined: r, score: refined.best.score });
+            }
+          }
         }
       }
 
-      console.warn("[ocean] ❌ No SAT or frame candidate produced a fit; skipping render.");
+      if (!chosenRect) {
+        console.warn("[ocean] ❌ No SAT or frame candidate produced a fit; skipping render.");
+        return;
+      }
+
+      const k = (window.__zoom && window.__zoom.k) || window.zoomK || 1;
+      const bucket = placementsForCurrentEpoch();
+      bucket.ocean = { rect: chosenRect, best: { ok: true, anchor: { cx: chosenRect.x + chosenRect.w/2, cy: chosenRect.y + chosenRect.h/2 } }, k };
+      drawOceanDebugRect(chosenRect, satPick ? "sat-largest" : "frame-refine");
+      if (typeof step2RenderOceanLabel === "function") step2RenderOceanLabel();
+      return;
     }
   }
 }
