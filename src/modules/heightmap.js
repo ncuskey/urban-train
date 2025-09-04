@@ -1,6 +1,34 @@
 // js/modules/heightmap.js
 // NOTE: d3 is global; do not import it here.
 
+// Local helper: robust "find cell index at (x,y)"
+function cellIndexAt(diagram, polygons, x, y) {
+  if (window.state && typeof window.state.getCellAtXY === "function") {
+    const c = window.state.getCellAtXY(x, y);
+    if (c && Number.isFinite(c.index)) return c.index;
+  }
+  if (diagram && typeof diagram.find === "function") {
+    const f = diagram.find(x, y);
+    if (f && Number.isFinite(f.index)) return f.index;
+  }
+  // Fallback: nearest centroid
+  let bestI = 0, bestD = Infinity;
+  for (let i = 0; i < polygons.length; i++) {
+    const poly = polygons[i];
+    if (!Array.isArray(poly) || poly.length === 0) continue;
+    let cx = 0, cy = 0, n = 0;
+    for (const p of poly) {
+      if (p && p.length >= 2) { cx += p[0]; cy += p[1]; n++; }
+    }
+    if (!n) continue;
+    cx /= n; cy /= n;
+    const dx = cx - x, dy = cy - y;
+    const d2 = dx*dx + dy*dy;
+    if (d2 < bestD) { bestD = d2; bestI = i; }
+  }
+  return bestI;
+}
+
 export function randomMap(count, {
   rng, diagram, polygons,
   heightInput, radiusInput, sharpnessInput,
@@ -12,7 +40,7 @@ export function randomMap(count, {
     if (c == 0) {
       var x = rng.random() * mapWidth / 4 + mapWidth / 2;
       var y = rng.random() * mapHeight / 4 + mapHeight / 2;
-      var rnd = diagram.find(x, y).index;
+      var rnd = cellIndexAt(diagram, polygons, x, y);
       circlesLayer.append("circle")
         .attr("r", 3)
         .attr("cx", x)

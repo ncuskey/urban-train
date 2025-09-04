@@ -3,6 +3,36 @@
 
 import { makeNamer } from './names.js';
 
+// Local helper: robust "find cell index at (x,y)"
+function closestCellIndex(diagram, polygons, x, y) {
+  // 1) Prefer your world-space accessor if present (built in main.js)
+  if (window.state && typeof window.state.getCellAtXY === "function") {
+    const c = window.state.getCellAtXY(x, y);
+    if (c && Number.isFinite(c.index)) return c.index;
+  }
+  // 2) If the diagram happens to be a Delaunay-like object, use its find
+  if (diagram && typeof diagram.find === "function") {
+    const f = diagram.find(x, y);
+    if (f && Number.isFinite(f.index)) return f.index;
+  }
+  // 3) Fallback: nearest polygon centroid
+  let bestI = 0, bestD = Infinity;
+  for (let i = 0; i < polygons.length; i++) {
+    const poly = polygons[i];
+    if (!Array.isArray(poly) || poly.length === 0) continue;
+    let cx = 0, cy = 0, n = 0;
+    for (const p of poly) {
+      if (p && p.length >= 2) { cx += p[0]; cy += p[1]; n++; }
+    }
+    if (!n) continue;
+    cx /= n; cy /= n;
+    const dx = cx - x, dy = cy - y;
+    const d2 = dx*dx + dy*dy;
+    if (d2 < bestD) { bestD = d2; bestI = i; }
+  }
+  return bestI;
+}
+
 export function markFeatures({
   diagram,
   polygons,
@@ -18,7 +48,7 @@ export function markFeatures({
   const totalArea = polygons.length;
   
   // define ocean cells
-  var start = diagram.find(0, 0).index;
+  var start = closestCellIndex(diagram, polygons, 0, 0);
   queue.push(start);
   used.push(start);
   var type = "Ocean",

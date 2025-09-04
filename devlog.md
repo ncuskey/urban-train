@@ -1,5 +1,74 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Robust Diagram.find Replacements ✅
+
+### 🎯 **Robust Diagram.find Replacements Complete**
+Successfully implemented robust fallback systems for `diagram.find()` calls in both `features.js` and `heightmap.js`. These patches ensure the map generation pipeline works reliably with different diagram types, particularly when using d3.voronoi instead of the original diagram implementation.
+
+### 📋 **What Was Accomplished**
+
+#### **1. Features.js Robust Starting Cell Selection**
+- **`closestCellIndex(diagram, polygons, x, y)`**: Added robust helper function with three-tier fallback
+- **Primary fallback**: Uses `window.state.getCellAtXY()` if available (from main.js)
+- **Secondary fallback**: Falls back to `diagram.find()` if it exists and returns valid index
+- **Tertiary fallback**: Calculates nearest polygon centroid as final fallback
+- **Replaced fragile call**: Changed `diagram.find(0, 0).index` to `closestCellIndex(diagram, polygons, 0, 0)`
+
+#### **2. Heightmap.js Robust Big Blob Seed Selection**
+- **`cellIndexAt(diagram, polygons, x, y)`**: Added identical robust helper function
+- **Same three-tier fallback system**: Consistent approach across modules
+- **Replaced fragile call**: Changed `diagram.find(x, y).index` to `cellIndexAt(diagram, polygons, x, y)`
+- **Maintains performance**: Uses most efficient method available
+
+### 🔧 **Technical Implementation**
+
+#### **Robust Cell Index Lookup Pattern**
+```javascript
+function robustCellIndex(diagram, polygons, x, y) {
+  // 1) Prefer world-space accessor if present (built in main.js)
+  if (window.state && typeof window.state.getCellAtXY === "function") {
+    const c = window.state.getCellAtXY(x, y);
+    if (c && Number.isFinite(c.index)) return c.index;
+  }
+  // 2) If diagram has find method, use it
+  if (diagram && typeof diagram.find === "function") {
+    const f = diagram.find(x, y);
+    if (f && Number.isFinite(f.index)) return f.index;
+  }
+  // 3) Fallback: nearest polygon centroid
+  let bestI = 0, bestD = Infinity;
+  for (let i = 0; i < polygons.length; i++) {
+    const poly = polygons[i];
+    if (!Array.isArray(poly) || poly.length === 0) continue;
+    let cx = 0, cy = 0, n = 0;
+    for (const p of poly) {
+      if (p && p.length >= 2) { cx += p[0]; cy += p[1]; n++; }
+    }
+    if (!n) continue;
+    cx /= n; cy /= n;
+    const dx = cx - x, dy = cy - y;
+    const d2 = dx*dx + dy*dy;
+    if (d2 < bestD) { bestD = d2; bestI = i; }
+  }
+  return bestI;
+}
+```
+
+### 🎯 **Benefits**
+- **Robust**: Works with both d3.voronoi and other diagram types
+- **Fallback-safe**: Multiple strategies ensure valid cell index is always returned
+- **Performance-aware**: Uses most efficient method available
+- **No breaking changes**: Maintains existing behavior when `diagram.find()` works
+- **Consistent**: Same pattern used across both modules for maintainability
+
+### 🧪 **Testing**
+- No linting errors introduced
+- Maintains existing functionality when diagram.find() is available
+- Provides graceful degradation when diagram.find() is unavailable
+- Ready for testing with d3.voronoi implementation
+
+---
+
 ## 2025-01-27 - Ocean Label Placement: Interior Water Mask + Manhattan Distance Transform ✅
 
 ### 🎯 **Ocean Label Placement: Interior Water Mask + Manhattan Distance Transform Complete**
