@@ -6,8 +6,9 @@ window.labelFlags = {};
 
 // ── Water-only selection knobs
 const OCEAN_SAFE_INSET_PX = 8;      // already used for safe viewport
-const OCEAN_MIN_WATER_FRAC = 0.97;  // hard cutoff
+const OCEAN_MIN_WATER_FRAC = 0.92;  // slightly relaxed to reduce "no fit"
 const OCEAN_AR_PENALTY = 0.6;       // 0..1; higher penalizes skinny boxes more
+const MIN_GRID = 3;                 // ≥ ~24px if cell=8
 
 // ── Transform helpers for screen/world coordinate conversion
 function currentZoomTransform() {
@@ -583,6 +584,64 @@ function computeLandBBoxScreen(cells, getHeight, getXY, seaLevel) {
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
+// ── Binary utilities
+function invertBinary(A) {
+  const out = new Uint8Array(A.length);
+  for (let i = 0; i < A.length; i++) out[i] = A[i] ? 0 : 1;
+  return out;
+}
+
+function countOnes(A) {
+  let c = 0; for (let i = 0; i < A.length; i++) c += A[i];
+  return c;
+}
+
+// === water mask helpers ===
+function screenToWorld(x, y, zoom) {
+  // zoom = {k, x, y} from the settled transform
+  return { X: (x - zoom.x) / zoom.k, Y: (y - zoom.y) / zoom.k };
+}
+
+function buildWaterMaskFromHeights(safe, cellPx, zoom, getHeightAtWorld, seaLevel) {
+  const gw = Math.max(1, Math.floor(safe.w / cellPx));
+  const gh = Math.max(1, Math.floor(safe.h / cellPx));
+  const a  = new Uint8Array(gw * gh);
+
+  // sample at cell center in *screen* coords, convert to world, then height
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      const sx = safe.x + (gx + 0.5) * cellPx;
+      const sy = safe.y + (gy + 0.5) * cellPx;
+      const { X, Y } = screenToWorld(sx, sy, zoom);
+      const h = getHeightAtWorld(X, Y);
+      a[gy * gw + gx] = h <= seaLevel ? 1 : 0; // WATER==1
+    }
+  }
+  return { a, gw, gh, cellPx, viewport: safe, kind: "water" };
+}
+
+function erodeBinary(a, gw, gh, steps) {
+  if (steps <= 0) return a;
+  const out = new Uint8Array(a); // copy
+  for (let s = 0; s < steps; s++) {
+    const next = new Uint8Array(out);
+    for (let y = 0; y < gh; y++) {
+      for (let x = 0; x < gw; x++) {
+        const i = y * gw + x;
+        if (!out[i]) continue;
+        // if any 4-neighbors are land (0), shrink this water cell to 0
+        const up    = y > 0       ? out[(y - 1) * gw + x] : 0;
+        const down  = y + 1 < gh  ? out[(y + 1) * gw + x] : 0;
+        const left  = x > 0       ? out[y * gw + (x - 1)] : 0;
+        const right = x + 1 < gw  ? out[y * gw + (x + 1)] : 0;
+        if (up === 0 || down === 0 || left === 0 || right === 0) next[i] = 0;
+      }
+    }
+    out.set(next);
+  }
+  return out;
+}
+
 // ── SAT (Summed-Area Table) helpers for fast water fraction queries
 function buildSAT(a, gw, gh) {
   const sat = new Uint32Array((gw + 1) * (gh + 1));
@@ -613,6 +672,147 @@ function waterFracSAT(mask, rect) {
   const w = gx1 - gx0, h = gy1 - gy0;
   const water = sumSAT(sat, gw, gx0, gy0, gx1, gy1);
   return water / (w * h);
+}
+
+// === Corrected water fraction calculation ===
+function buildPrefixSum(mask) {
+  const { gw, gh, a } = mask;
+  const ps = new Uint32Array((gw + 1) * (gh + 1));
+  for (let y = 1; y <= gh; y++) {
+    let row = 0;
+    for (let x = 1; x <= gw; x++) {
+      row += a[(y - 1) * gw + (x - 1)];
+      ps[y * (gw + 1) + x] = ps[(y - 1) * (gw + 1) + x] + row;
+    }
+  }
+  mask.ps = ps;
+}
+
+function gridRectFromScreen(mask, rect) {
+  const { x:mx, y:my } = mask.viewport;
+  return {
+    gx0: Math.max(0, Math.floor((rect.x - mx) / mask.cellPx)),
+    gy0: Math.max(0, Math.floor((rect.y - my) / mask.cellPx)),
+    gx1: Math.min(mask.gw, Math.ceil((rect.x + rect.w - mx) / mask.cellPx)),
+    gy1: Math.min(mask.gh, Math.ceil((rect.y + rect.h - my) / mask.cellPx)),
+  };
+}
+
+function sumPS(mask, gx0, gy0, gx1, gy1) {
+  const W = mask.gw + 1, ps = mask.ps;
+  return ps[gy1*W + gx1] - ps[gy0*W + gx1] - ps[gy1*W + gx0] + ps[gy0*W + gx0];
+}
+
+function waterFrac(mask, rect) {
+  if (!mask.ps) buildPrefixSum(mask);
+  const { gx0, gy0, gx1, gy1 } = gridRectFromScreen(mask, rect);
+  const cells = Math.max(0, (gx1 - gx0) * (gy1 - gy0));
+  if (!cells) return 0;
+  const ones = sumPS(mask, gx0, gy0, gx1, gy1);
+  return ones / cells; // fraction in [0,1]
+}
+
+// === Interior-water mask with Manhattan distance transform ===
+function buildInteriorMask(mask, padPx) {
+  const { gw, gh, a, cellPx } = mask; // a[y*gw+x] is 1 for water, 0 for land
+  // Distances in grid cells
+  const padCells = Math.max(1, Math.ceil(padPx / cellPx));
+
+  // 1) Init dist: 0 on water? (we want distance-from-land) — mark land as 0, water as large
+  const INF = 1e9;
+  const dist = new Int32Array(gw * gh);
+  for (let i = 0; i < gw*gh; i++) dist[i] = a[i] ? INF : 0;
+
+  // 2) Two-pass city-block distance transform
+  // Forward pass
+  for (let y = 0; y < gh; y++) {
+    for (let x = 0; x < gw; x++) {
+      const i = y*gw + x;
+      if (dist[i] === 0) continue;
+      if (x > 0)   dist[i] = Math.min(dist[i], dist[i-1] + 1);
+      if (y > 0)   dist[i] = Math.min(dist[i], dist[i-gw] + 1);
+    }
+  }
+  // Backward pass
+  for (let y = gh-1; y >= 0; y--) {
+    for (let x = gw-1; x >= 0; x--) {
+      const i = y*gw + x;
+      if (x+1 < gw) dist[i] = Math.min(dist[i], dist[i+1] + 1);
+      if (y+1 < gh) dist[i] = Math.min(dist[i], dist[i+gw] + 1);
+    }
+  }
+
+  // 3) Interior mask: water AND dist >= padCells
+  const interior = new Uint8Array(gw * gh);
+  for (let i = 0; i < gw*gh; i++) interior[i] = (a[i] === 1 && dist[i] >= padCells) ? 1 : 0;
+
+  return { ...mask, interior };
+}
+
+// === Largest all-ones rectangle on interior mask ===
+function largestAllOnesRect(mask) {
+  const { gw, gh, interior } = mask;
+  const heights = new Int32Array(gw);
+  let best = { area: 0, gx0:0, gy0:0, gx1:0, gy1:0 };
+
+  function scanRow(y) {
+    const stack = []; // {x, heightStart}
+    let x = 0;
+    while (x <= gw) {
+      const h = (x < gw) ? heights[x] : 0; // sentinel zero
+      let start = x;
+      while (stack.length && stack[stack.length-1].h > h) {
+        const { h:hh, i:s } = stack.pop();
+        const area = hh * (x - s);
+        if (area > best.area) {
+          best = { area, gx0: s, gx1: x, gy0: y - hh, gy1: y };
+        }
+        start = s;
+      }
+      stack.push({ h, i:start });
+      x++;
+    }
+  }
+
+  for (let y = 0; y < gh; y++) {
+    // build histogram of consecutive interior 1's
+    for (let x = 0; x < gw; x++) {
+      const i = y*gw + x;
+      heights[x] = interior[i] ? heights[x] + 1 : 0;
+    }
+    scanRow(y+1); // y+1 because heights reflects 1-based height
+  }
+  return best.area > 0 ? best : null;
+}
+
+// === Convert grid rect to screen pixels and validate ===
+function gridRectToScreen(mask, r) {
+  const { x:mx, y:my } = mask.viewport; // top-left of safe viewport in screen px
+  const { cellPx } = mask;
+  return {
+    x: mx + r.gx0 * cellPx,
+    y: my + r.gy0 * cellPx,
+    w: (r.gx1 - r.gx0) * cellPx,
+    h: (r.gy1 - r.gy0) * cellPx
+  };
+}
+
+const MIN_W = 120;       // px — or textWidth + padding*2
+const MIN_H = 28;        // px — or fontPx + padding*2
+const OCEAN_MIN_FRAC = 0.95;  // fallback guard
+
+function chooseOceanRect(mask, padPx) {
+  const m = buildInteriorMask(mask, padPx);
+  const rGrid = largestAllOnesRect(m);
+  if (!rGrid) return null;
+
+  const rect = gridRectToScreen(mask, rGrid);
+
+  // Defensive: reject tiny or partially-wet rectangles
+  if (rect.w < MIN_W || rect.h < MIN_H) return null;
+  if (waterFrac(mask, rect) < OCEAN_MIN_FRAC) return null; // your prefix-sum version
+
+  return rect;
 }
 
 // ── Maximal rectangle helpers for water-only detection
@@ -648,20 +848,47 @@ function largestRectOfOnes(a, gw, gh) {
   return best;
 }
 
-function gridRectToScreen(mask, gr) {
-  const { viewport, cellPx } = mask;
-  return {
-    x: viewport.x + gr.gx * cellPx,
-    y: viewport.y + gr.gy * cellPx,
-    w: gr.gw * cellPx,
-    h: gr.gh * cellPx
-  };
-}
 
 function aspectPenalty(r, strength = 0.6) {
   const ar = r.w / Math.max(1, r.h);
   const dev = Math.abs(Math.log2(ar));
   return 1 / (1 + strength * dev);
+}
+
+function cornerRects(safe, pxW, pxH) {
+  const { x, y, w, h } = safe;
+  const W = Math.min(pxW, w), H = Math.min(pxH, h);
+  return [
+    { x: x,       y: y,       w: W, h: H },                 // TL
+    { x: x+w-W,   y: y,       w: W, h: H },                 // TR
+    { x: x,       y: y+h-H,   w: W, h: H },                 // BL
+    { x: x+w-W,   y: y+h-H,   w: W, h: H }                  // BR
+  ];
+}
+
+// === Debug overlay helpers (screen space) ===
+function ensureDebugOverlay() {
+  const svg = d3.select("svg");
+  let o = svg.select("#debug-overlay");
+  if (o.empty()) o = svg.append("g")
+    .attr("id", "debug-overlay")
+    .style("pointer-events", "none");
+  return o;
+}
+
+function drawDebugRect(kind, r, style={}) {
+  const g = ensureDebugOverlay();
+  const sel = g.selectAll(`rect.debug-${kind}`).data([r]);
+  sel.enter().append("rect").attr("class", `debug-box debug-${kind}`)
+    .merge(sel)
+    .attr("x", r.x).attr("y", r.y)
+    .attr("width", r.w).attr("height", r.h)
+    .attr("fill", "none")
+    .attr("stroke", style.stroke || "#ff6")
+    .attr("stroke-width", style.width || 2)
+    .attr("stroke-dasharray", style.dash || "6,4")
+    .attr("vector-effect", "non-scaling-stroke");
+  sel.exit().remove();
 }
 
 /**
@@ -2522,59 +2749,105 @@ async function generate(count) {
         ? resolveSeaLevel(window.__mapState, window.__options)
         : (window.DEFAULT_SEA_LEVEL || 0.20);
 
-      // Build screen-space mask at cellPx resolution
-      const cellPx = 8; // as you log now
-      const mask = rasterizeWaterMask(_safeVP, cells, getHeight, getXY, sl, cellPx);
-      console.log("[ocean][sat:mask]", { gw: mask.gw, gh: mask.gh, cellPx });
+      // Create height accessor for world coordinates
+      const getHeightAtWorld = (X, Y) => {
+        // Find closest cell to world coordinate
+        let closestDist = Infinity;
+        let closestHeight = sl; // default to sea level
+        for (let i = 0; i < cells.length; i++) {
+          const base = window.__xy?.(i);
+          if (!base) continue;
+          const [wx, wy] = base; // world coordinates
+          const dist = Math.sqrt((wx - X) ** 2 + (wy - Y) ** 2);
+          if (dist < closestDist) {
+            closestDist = dist;
+            closestHeight = getHeight(i);
+          }
+        }
+        return closestHeight;
+      };
 
-      // --- NEW: erode water to keep labels off coasts, based on font size guess
+      const cellPx = 8; // keep your current grid density
+      const seaLevel = sl;
+      // You already have the settled zoom transform — reuse it:
+      const zoom = currentZoomTransform();
+      // getHeightAtWorld(X,Y): wire your existing height accessor here
+      const mask0 = buildWaterMaskFromHeights(_safeVP, cellPx, zoom, getHeightAtWorld, seaLevel);
+
+      // erode away coast to avoid "kissing" land
       const expectedFontPx = 36; // or compute from longest ocean name + style
-      const erodePx = Math.max(8, Math.round(expectedFontPx * 0.6));   // ~0.6em buffer
-      const erodeCells = Math.max(1, Math.round(erodePx / cellPx));
-      erodeWater(mask, erodeCells); // modify mask.a in-place (binary 0/1)
+      const erodePx = Math.max(6, Math.round(expectedFontPx * 0.45));
+      const erodeSteps = Math.max(1, Math.round(erodePx / cellPx));
+      const mask = { ...mask0, a: erodeBinary(mask0.a, mask0.gw, mask0.gh, erodeSteps) };
+
+      console.log("[ocean][sat:mask]", { gw: mask.gw, gh: mask.gh, cellPx: mask.cellPx });
+      const waterCells = countOnes(mask.a);
+      const pct = (100 * waterCells / (mask.gw * mask.gh)).toFixed(1);
+      console.log("[ocean][mask:water] cells=", waterCells, `(${pct}%)`);
 
       // --- NEW: build a summed-area table for fast water fraction queries
       mask.sat = buildSAT(mask.a, mask.gw, mask.gh);
+      // Build prefix sum for corrected water fraction calculation
+      buildPrefixSum(mask);
       const _satMask = mask; // expose to refiners in this scope
       
       // mask already in screen space; eroded; and mask.sat built
-      // Try maximal water-only rectangle first (global, not just frame sides)
+      // Try interior-water rectangle first (guaranteed to stay off coast & land)
+      let chosenRect = null;
       let satPick = null;
       {
-        const gr = largestRectOfOnes(mask.a, mask.gw, mask.gh);
-        if (gr && gr.gw >= 3 && gr.gh >= 3) { // ≥3 grid cells each way (~24px if cellPx=8)
-          const rect = gridRectToScreen(mask, gr);
-          const wf = waterFracSAT(mask, rect); // should be 1.0 after erosion; still check
-          if (wf >= OCEAN_MIN_WATER_FRAC) {
-            // Prefer squarish boxes to ultra-skinny ones
-            const score = rect.w * rect.h * aspectPenalty(rect, OCEAN_AR_PENALTY);
-            satPick = { rect, score, wf };
-            console.log("[ocean][sat:largest] wf=", wf.toFixed(2), "score=", Math.round(score), rect);
-          }
+        const padPx = 10; // label padding + half stroke
+        const rect = chooseOceanRect(mask, padPx);
+        if (rect) {
+          const wf = waterFrac(mask, rect);
+          const score = rect.w * rect.h * aspectPenalty(rect, OCEAN_AR_PENALTY);
+          satPick = { rect, score, wf };
+          console.log("[ocean][interior:largest]", { wf: +wf.toFixed(3), score: Math.round(score), rect });
+        } else {
+          console.log("[ocean][interior:largest] none");
         }
       }
-      
-      let chosenRect = satPick?.rect || null;
+
+      if (satPick) chosenRect = satPick.rect;
 
       if (!chosenRect) {
         const landRect = computeLandBBoxScreen(cells, getHeight, getXY, sl);
         drawDebugBounds(_safeVP, landRect);
         const frame = chooseBestFrameRect(_safeVP, landRect, _satMask, 10);
         if (frame) {
-          drawOceanDebugRect(frame, "frame");       // existing debug
+          drawDebugRect("frame", frame, { stroke: "#0ff", dash: "4,2" });
           const k = (window.__zoom && window.__zoom.k) || window.zoomK || 1;
           const label = (window.__oceanName || "Ocean");
           const refined = refineRectForLabel(frame, label, k, {
             maxPx: 36, minPx: 12, stepPx: 1, padding: 10, letterSpacing: 0.6, family: "serif", lineHeight: 1.2, maxLines: 3
           }, _safeVP, _satMask);
-          if (refined?.best?.ok) {
+          if (refined?.rect) {
             const r = intersectRect(refined.rect, _safeVP);
-            // hard water-only gate on refined rect too
-            if (waterFracSAT(_satMask, r) >= OCEAN_MIN_WATER_FRAC) {
+            if (waterFrac(mask, r) >= OCEAN_MIN_WATER_FRAC) {
               chosenRect = r;
-              console.log("[step1.5:ocean] refined frame→rect", { original: frame, refined: r, score: refined.best.score });
+              console.log("[step1.5:ocean] refined frame→rect", { score: refined.best?.score, r });
+            } else {
+              console.log("[step1.5:ocean] frame rect failed water gate", r);
             }
           }
+        }
+      }
+
+      if (!chosenRect) {
+        // Minimum viable box sized from label shaping / defaults:
+        const targetPxH = Math.max(24, Math.round(expectedFontPx * 1.0));
+        const targetPxW = Math.max(140, Math.round(targetPxH * 6)); // generous; we'll shrink when rendering
+        const cands = cornerRects(_safeVP, targetPxW, targetPxH);
+        let best = null;
+        for (const r of cands) {
+          const wf = waterFrac(mask, r);
+          const score = wf * r.w * r.h; // simple: pure water wins, larger wins
+          console.log("[ocean][corner]", { wf:+wf.toFixed(3), r });
+          if (wf >= OCEAN_MIN_WATER_FRAC && (!best || score > best.score)) best = { r, score };
+        }
+        if (best) {
+          chosenRect = best.r;
+          drawDebugRect("corner", chosenRect, { stroke: "#f0f", dash: "2,2" });
         }
       }
 
@@ -2584,9 +2857,17 @@ async function generate(count) {
       }
 
       const k = (window.__zoom && window.__zoom.k) || window.zoomK || 1;
+      const label = (window.__oceanName || "Ocean");
+      const best = computeBestLayout(chosenRect, label, k, {
+        maxPx: 36, minPx: 12, stepPx: 1, padding: 10, letterSpacing: 0.6, family: "serif", lineHeight: 1.2, maxLines: 3
+      });
+      if (!best?.ok) {
+        console.warn("[ocean] No layout fits chosen rect; skipping render.", { rect: chosenRect, reason: best?.reason });
+        return;
+      }
       const bucket = placementsForCurrentEpoch();
-      bucket.ocean = { rect: chosenRect, best: { ok: true, anchor: { cx: chosenRect.x + chosenRect.w/2, cy: chosenRect.y + chosenRect.h/2 } }, k };
-      drawOceanDebugRect(chosenRect, satPick ? "sat-largest" : "frame-refine");
+      bucket.ocean = { rect: chosenRect, best, k };
+      drawDebugRect(satPick ? "interior-largest" : "chosen", chosenRect, { stroke: satPick ? "#ffeb70" : "#6f6", dash: "8,6", width: 2 });
       if (typeof step2RenderOceanLabel === "function") step2RenderOceanLabel();
       return;
     }
@@ -3018,3 +3299,4 @@ window.runPerfTests = () => {
   
   console.groupEnd();
 };
+

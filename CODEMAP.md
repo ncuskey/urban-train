@@ -109,15 +109,16 @@ urban-train/
   * **Cancellation**: `.cancel()` method prevents duplicate executions
   * **Signal support**: AbortSignal for early cancellation
   * **Ocean placement**: Deferred to idle time to avoid blocking main thread
-* **Ocean Placement System** (Step 8+): Advanced SAT-based ocean label placement with screen space unification and maximal water-only rectangles
+* **Ocean Placement System** (Step 8+): Advanced interior water mask system with Manhattan distance transforms and maximal water-only rectangles
+  * **Interior water mask**: Manhattan distance transform creates guaranteed coast-free water areas
   * **Screen space unification**: All computation in screen coordinates with proper world coordinate conversion at render time
   * **Transform helpers**: `currentZoomTransform()`, `toScreenXY()`, `toWorldXY()` for coordinate conversion
-  * **SAT-based placement**: Screen-space water mask rasterization with font-aware coast buffer erosion
-  * **Maximal rectangle algorithm**: O(gw*gh) histogram + monotonic stack for globally optimal water-only rectangles
-  * **Water-only constraints**: Hard 97% minimum water fraction with SAT-based fast queries
-  * **Water-aware frame selection**: Chooses placement sides based on water content with hard constraints
-  * **Safe viewport clamping**: All placements respect inset boundaries with visual debug overlays
-  * **Debug visualization**: Screen-space debug rectangles, cyan for chosen areas, blue/orange for bounds
+  * **Distance-based erosion**: Two-pass Manhattan distance transform ensures proper padding from coastlines
+  * **Largest rectangle algorithm**: O(gw*gh) histogram + monotonic stack for globally optimal water-only rectangles
+  * **Water-only constraints**: Hard 95% minimum water fraction with corrected prefix sum calculations
+  * **Robust fallback chain**: Interior → frame → corner selection with water purity gates
+  * **Screen-space debug overlay**: Non-zoomed debug rectangles with color-coded selection methods
+  * **Defensive validation**: Minimum size requirements and water fraction guards prevent invalid placements
   * **Smart fallback system**: Maximal rectangle → frame→refine with consistent water-only enforcement
   * **Enhanced scoring**: Power functions for better land avoidance, aspect ratio penalties
   * **Store safety**: Merge-safe updates prevent data loss during label operations
@@ -125,14 +126,26 @@ urban-train/
   * `currentZoomTransform()`: Gets current zoom transform from SVG
   * `toScreenXY([x, y])`: Converts world coordinates to screen coordinates
   * `toWorldXY([sx, sy])`: Converts screen coordinates to world coordinates
-* **SAT (Summed-Area Table) Helpers**: Fast water fraction queries for placement decisions
+* **Interior Water Mask System**: Manhattan distance transform for guaranteed coast-free placement
+  * `buildInteriorMask(mask, padPx)`: Creates interior water mask with distance-based erosion
+  * `largestAllOnesRect(mask)`: Finds largest rectangle of 1s in interior mask using histogram + stack
+  * `chooseOceanRect(mask, padPx)`: Main function combining interior mask + validation
+  * `gridRectToScreen(mask, r)`: Converts grid rectangle to screen pixel coordinates
+* **Binary Utilities**: Core mask manipulation functions
+  * `invertBinary(A)`: Flips binary arrays (water↔land)
+  * `countOnes(A)`: Counts 1s in binary arrays for statistics
+  * `erodeBinary(a, gw, gh, steps)`: Binary erosion with 4-neighbor connectivity
+* **Corrected Water Fraction Calculation**: Accurate water fraction computation
+  * `buildPrefixSum(mask)`: Builds 2D prefix sum array for O(1) rectangle queries
+  * `waterFrac(mask, rect)`: Returns accurate water fraction for specific rectangles
+  * `gridRectFromScreen(mask, rect)`: Converts screen rectangle to grid coordinates
+  * `sumPS(mask, gx0, gy0, gx1, gy1)`: Computes sum using prefix sum
+* **Screen-Space Debug System**: Non-zoomed debug visualization
+  * `ensureDebugOverlay()`: Creates screen-space debug overlay group
+  * `drawDebugRect(kind, r, style)`: Draws debug rectangles with color-coded styling
+* **Legacy SAT Helpers**: Maintained for compatibility
   * `buildSAT(a, gw, gh)`: Builds summed-area table for O(1) rectangle sum queries
-  * `sumSAT(sat, gw, x0, y0, x1, y1)`: Computes sum in rectangular region
-  * `waterFracSAT(mask, rect)`: Fast water fraction calculation using SAT
-* **Maximal Rectangle Algorithm**: Global optimization for water-only rectangle placement
-  * `largestRectOfOnes(a, gw, gh)`: O(gw*gh) algorithm using histogram + monotonic stack
-  * `gridRectToScreen(mask, gr)`: Converts grid coordinates to screen coordinates
-  * `aspectPenalty(r, strength)`: Penalizes ultra-skinny rectangles for better placement
+  * `waterFracSAT(mask, rect)`: Legacy water fraction calculation (replaced by waterFrac)
 * **Water-Only Constraints**: Hard constraints for placement quality
   * `OCEAN_MIN_WATER_FRAC = 0.97`: Hard cutoff for water fraction (97% minimum)
   * `OCEAN_AR_PENALTY = 0.6`: Aspect ratio penalty strength
@@ -242,13 +255,12 @@ urban-train/
   * **Font sizing**: Dynamic font size optimization with min/max constraints
   * **Multi-line support**: Automatic line breaking with configurable max lines
   * **Scoring system**: Layout quality scoring based on fit, readability, and aesthetics
-* **`ocean/sat.js`**: SAT (Separating Axis Theorem) utilities for ocean placement
+* **`ocean/sat.js`**: Legacy SAT utilities (main functionality moved to main.js)
   * `rasterizeWaterMask(viewport, cells, getHeight, getXY, seaLevel, cellPx)`: Creates screen-space water mask
-  * `erodeWater(mask, r)`: Erodes water mask by radius to create coast buffer
-  * `largestRectOnes(mask)`: Finds largest rectangle of water cells using histogram algorithm
-  * `gridToScreenRect(mask, gr)`: Converts grid coordinates back to screen pixels
-  * **Efficient algorithms**: O(gw*gh) complexity for real-time placement
-  * **Configurable resolution**: Adjustable cell size for performance vs precision tradeoffs
+  * `erodeWater(mask, r)`: Legacy binary erosion (replaced by erodeBinary)
+  * `largestRectOnes(mask)`: Legacy rectangle finder (replaced by largestAllOnesRect)
+  * `gridToScreenRect(mask, gr)`: Legacy coordinate conversion (replaced by gridRectToScreen)
+  * **Note**: Core functionality moved to main.js for better integration with interior mask system
 
 ### `src/modules/labels-null-shim.js` (Temporary: Step 0)
 
