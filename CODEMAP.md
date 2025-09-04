@@ -27,6 +27,7 @@ urban-train/
 │   │   ├── autofit.js      # Fit view to land/world; post-layout hooks
 │   │   ├── rendering.js    # Polygon rendering
 │   │   ├── fonts.js        # Font theme helpers
+│   │   ├── geo.js          # Map coordinates & per-cell latitude (Step 4)
 │   │   └── refine.js       # Coastline refinement + rebuild cycle
 │   ├── labels/              # NEW: Labeling system (Step 1+)
 │   │   ├── schema.js       # Runtime validation + style lookup builder
@@ -310,6 +311,20 @@ urban-train/
 ### `src/modules/fonts.js`
 
 * `switchFont` (≈ 69), `getCurrentFont` (≈ 88), `listFonts` (≈ 104).
+
+### `src/modules/geo.js` (NEW: Step 4 - Map Coordinates)
+
+* **Map coordinate system**: Defines world-like geographic extents and assigns latitudes to polygons
+* `defineMapCoordinates({ width, height, centerLat, spanLat, centerLon, spanLon })`: Creates coordinate system with configurable center and span
+  * Default: 120° latitude span, 180° longitude span, centered at (0°, 0°)
+  * Returns: `{ width, height, latTop, latBottom, lonLeft, lonRight, kmPerPxAtEquator }`
+  * Uses Earth's equatorial circumference (40,075.017 km) for realistic scale calculations
+* `assignLatitudes(polygons, map)`: Assigns latitude to each polygon based on centroid Y position
+  * Handles edge cases: empty arrays, null polygons, malformed geometry
+  * Stores result in `poly.lat` property for each polygon
+  * Latitude decreases as Y increases (SVG coordinate system)
+* **Integration**: Called after height stats, before feature classification in main.js
+* **Future use**: Enables climate features (Step 5) and scale bar implementation
 
 ---
 

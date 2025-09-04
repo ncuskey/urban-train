@@ -80,6 +80,7 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction, getVisibleWorldBounds, padBounds, zoom } from "./modules/interaction.js";
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
+import { defineMapCoordinates, assignLatitudes } from './modules/geo.js';
 import { buildProtoAnchors } from "./labels/anchors.js";
 import { makeAnchorIndex } from "./labels/spatial-index.js";
 import { enrichAnchors } from "./labels/enrich.js";
@@ -1824,6 +1825,19 @@ async function generate(count) {
       }
       console.log(`${tag} height stats: count=${c} min=${min.toFixed(3)} max=${max.toFixed(3)} mean=${(sum/c).toFixed(3)}`);
     })('[post-refine]', polygons);
+
+    // Define default world coordinates & assign per-cell latitude (Step 4)
+    const mapCoords = defineMapCoordinates({ width: mapWidth, height: mapHeight });
+    assignLatitudes(polygons, mapCoords);
+    state.mapCoords = mapCoords;
+    // quick self-test for monotonic latitude range
+    {
+      const lats = polygons.map(p => p.lat).filter(Number.isFinite);
+      if (lats.length) {
+        const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+        console.debug('[coords]', mapCoords, { minLat, maxLat });
+      }
+    }
 
     // Clamp heights to [0,1] before feature classification
     {
