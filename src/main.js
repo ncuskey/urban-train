@@ -81,6 +81,7 @@ import { attachInteraction, getVisibleWorldBounds, padBounds, zoom } from "./mod
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
 import { defineMapCoordinates, assignLatitudes } from './modules/geo.js';
+import { assignTemperatures } from './modules/climate.js';
 import { buildProtoAnchors } from "./labels/anchors.js";
 import { makeAnchorIndex } from "./labels/spatial-index.js";
 import { enrichAnchors } from "./labels/enrich.js";
@@ -1846,6 +1847,16 @@ async function generate(count) {
       polygons.forEach((p, i) => { p.height = arr[i]; });
       // (Optional) quick sanity log
       // console.log('[pre-features] heights clamped');
+    }
+
+    // Step 5a — assign per-cell temperature (°C)
+    {
+      const stats = assignTemperatures(polygons, state.mapCoords, { seaLevel: sl });
+      if (stats.count > 0) {
+        console.debug('[climate:temp]', { count: stats.count, min: stats.min, mean: stats.mean, max: stats.max });
+      } else {
+        console.warn('[climate:temp] no cells processed');
+      }
     }
 
     // process the calculations

@@ -28,6 +28,7 @@ urban-train/
 │   │   ├── rendering.js    # Polygon rendering
 │   │   ├── fonts.js        # Font theme helpers
 │   │   ├── geo.js          # Map coordinates & per-cell latitude (Step 4)
+│   │   ├── climate.js      # Temperature assignment by latitude & altitude (Step 5a)
 │   │   └── refine.js       # Coastline refinement + rebuild cycle
 │   ├── labels/              # NEW: Labeling system (Step 1+)
 │   │   ├── schema.js       # Runtime validation + style lookup builder
@@ -325,6 +326,24 @@ urban-train/
   * Latitude decreases as Y increases (SVG coordinate system)
 * **Integration**: Called after height stats, before feature classification in main.js
 * **Future use**: Enables climate features (Step 5) and scale bar implementation
+
+### `src/modules/climate.js` (NEW: Step 5a - Temperature Assignment)
+
+* **Climate temperature model**: Assigns realistic temperature values to each polygon based on latitude and altitude
+* `assignTemperatures(polygons, map, { seaLevel, maxElevKm, lapseRateCperKm })`: Main temperature assignment function
+  * **Sea-level temperature**: Varies by latitude using piecewise-linear bands
+    * Equator (0°): 27°C
+    * Mid-latitudes (60°): 7°C  
+    * Poles (90°): -25°C
+  * **Altitude cooling**: Standard atmospheric lapse rate of 6.5°C per kilometer
+  * **Input requirements**: `polygons[*].lat` and `polygons[*].height` must be set
+  * **Output**: Adds `polygons[*].temp` field in Celsius
+  * **Statistics**: Returns `{ count, min, max, mean }` for debugging
+* `seaLevelTempAtLat(latDeg)`: Internal function calculating sea-level temperature at given latitude
+  * Uses piecewise-linear interpolation between key latitude bands
+  * Handles both northern and southern hemispheres symmetrically
+* **Integration**: Called after coordinate assignment and height clamping, before feature classification
+* **Future use**: Enables biome classification, river generation, and climate-aware labeling
 
 ---
 
