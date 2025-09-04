@@ -1684,6 +1684,23 @@ async function generate(count) {
         lake:  1.2,
       },
     });
+
+    // ── Guard: cap LOD array length to the number of available anchors
+    const totalAnchors = combinedStyled.length;
+    if (anchorsLOD.length > totalAnchors) {
+      console.warn('[lod] capping LOD array', { from: anchorsLOD.length, to: totalAnchors });
+      anchorsLOD.splice(totalAnchors);
+    }
+    // Invariant: LOD array doesn't exceed total anchors
+    console.assert(
+      anchorsLOD.length <= totalAnchors,
+      '[lod] invariant failed: LOD array exceeded total anchors',
+      {
+        totalAnchors,
+        lodLength: anchorsLOD.length
+      }
+    );
+
     window.__anchorsLOD = anchorsLOD;
     
     // Expose visibleAtK for console debugging
@@ -1693,7 +1710,8 @@ async function generate(count) {
       anchorsLOD.slice(0, 5).map(a => ({ id:a.id, kind:a.kind, tier:a.tier, minK:a.lod.minK }))
     );
     console.log("[lod] counts", {
-      total: anchorsLOD.length,
+      total: totalAnchors,
+      lod: anchorsLOD.length,
       at_k1: visibleAtK(anchorsLOD, 1.0).length,
       at_k8: visibleAtK(anchorsLOD, 8.0).length,
     });

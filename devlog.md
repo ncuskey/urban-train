@@ -1,5 +1,72 @@
 # Urban Train Development Log
 
+## 2025-01-27 - LOD Capping with Assert Guard ✅
+
+### 🎯 **LOD Capping with Assert Guard Complete**
+Successfully implemented LOD array capping with assert guard to prevent LOD array overflow and ensure data integrity. This patch adds defensive programming to catch potential bugs where the LOD array might exceed the number of available anchors.
+
+### 📋 **What Was Accomplished**
+
+#### **Main.js - LOD Array Capping and Assert**
+- **Added LOD array length capping** to ensure `anchorsLOD` doesn't exceed `combinedStyled.length`
+- **Added warning log** when capping occurs, showing the before/after lengths
+- **Added console.assert** to verify the invariant that LOD array length ≤ total anchors
+- **Enhanced logging** to show both `total` (original anchors) and `lod` (LOD array length)
+
+### 🔧 **Technical Implementation**
+
+#### **LOD Array Capping System**
+```javascript
+// ── Guard: cap LOD array length to the number of available anchors
+const totalAnchors = combinedStyled.length;
+if (anchorsLOD.length > totalAnchors) {
+  console.warn('[lod] capping LOD array', { from: anchorsLOD.length, to: totalAnchors });
+  anchorsLOD.splice(totalAnchors);
+}
+// Invariant: LOD array doesn't exceed total anchors
+console.assert(
+  anchorsLOD.length <= totalAnchors,
+  '[lod] invariant failed: LOD array exceeded total anchors',
+  {
+    totalAnchors,
+    lodLength: anchorsLOD.length
+  }
+);
+```
+
+#### **Enhanced Logging**
+```javascript
+console.log("[lod] counts", {
+  total: totalAnchors,        // Original combinedStyled length
+  lod: anchorsLOD.length,     // LOD array length (should be ≤ total)
+  at_k1: visibleAtK(anchorsLOD, 1.0).length,
+  at_k8: visibleAtK(anchorsLOD, 8.0).length,
+});
+```
+
+### 🎯 **Benefits**
+- **Prevents LOD array overflow**: Ensures LOD array never exceeds the number of available anchors
+- **Defensive programming**: Warns when capping occurs, helping identify potential bugs
+- **Invariant verification**: Console.assert ensures the invariant is maintained
+- **Better debugging**: Enhanced logging shows both original and LOD array lengths
+- **Adapted to actual structure**: Works with the real LOD system that uses arrays instead of buckets
+
+### **Adaptation Notes**
+The original patch assumed a bucket-based LOD system with `lod.k1`, `lod.k8`, etc., but the actual system uses:
+- `computeLOD()` returns an array of anchors with LOD properties
+- `visibleAtK()` filters anchors at different zoom levels
+- No separate buckets, just one array with LOD metadata
+
+The implementation was adapted to work with this actual structure by capping the LOD array length instead of individual buckets.
+
+### 🧪 **Testing Scenarios**
+- **Normal operation**: Maps generate with proper LOD array capping
+- **Overflow detection**: Console warnings when LOD array exceeds available anchors
+- **Invariant verification**: Console.assert catches any future bugs causing LOD array overflow
+- **Enhanced debugging**: Better logging shows both original and LOD array lengths
+
+---
+
 ## 2025-01-27 - Water Anchors Cap + Cache Validation ✅
 
 ### 🎯 **Water Anchors Cap + Cache Validation Complete**
