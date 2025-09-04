@@ -1,7 +1,7 @@
 // src/modules/climate.js
 // Minimal climate temperature model:
 //  - Sea-level temperature varies by latitude (warm equator -> cold poles)
-//  - Temperature drops with altitude (standard lapse rate, ~6.5°C/km)
+//  - Temperature drops with altitude (standard lapse rate, ~11.7°F/km)
 //
 // Inputs:
 //   polygons[*].lat   (degrees, set earlier by assignLatitudes)
@@ -9,15 +9,15 @@
 //   map: { width, height, latTop, latBottom, ... } (from defineMapCoordinates)
 //
 // Output:
-//   polygons[*].temp (°C)
+//   polygons[*].temp (°F)
 
 function seaLevelTempAtLat(latDeg) {
   // Piecewise-linear bands:
-  //   0°  -> 27°C (equator)
-  //  60°  ->  7°C (mid-lat)
-  //  90°  -> -25°C (poles)
+  //   0°  -> 81°F (equator)
+  //  60°  -> 45°F (mid-lat)
+  //  90°  -> -13°F (poles)
   const abs = Math.abs(latDeg);
-  const t0 = 27, t60 = 7, t90 = -25;
+  const t0 = 81, t60 = 45, t90 = -13;
   if (abs <= 60) {
     return t0 + (t60 - t0) * (abs / 60);
   } else {
@@ -28,7 +28,7 @@ function seaLevelTempAtLat(latDeg) {
 export function assignTemperatures(
   polygons,
   map,
-  { seaLevel = 0.2, maxElevKm = 5, lapseRateCperKm = 6.5 } = {}
+  { seaLevel = 0.2, maxElevKm = 5, lapseRateFperKm = 11.7 } = {}
 ){
   if (!Array.isArray(polygons) || !polygons.length) return {count: 0};
   let min = +Infinity, max = -Infinity, sum = 0, n = 0;
@@ -44,7 +44,7 @@ export function assignTemperatures(
     const altitudeKm = above * maxElevKm;
 
     const tSea = seaLevelTempAtLat(lat);
-    const t = tSea - altitudeKm * lapseRateCperKm;
+    const t = tSea - altitudeKm * lapseRateFperKm;
 
     p.temp = t;
     if (t < min) min = t;

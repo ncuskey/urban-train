@@ -330,14 +330,14 @@ urban-train/
 ### `src/modules/climate.js` (NEW: Step 5a - Temperature Assignment)
 
 * **Climate temperature model**: Assigns realistic temperature values to each polygon based on latitude and altitude
-* `assignTemperatures(polygons, map, { seaLevel, maxElevKm, lapseRateCperKm })`: Main temperature assignment function
+* `assignTemperatures(polygons, map, { seaLevel, maxElevKm, lapseRateFperKm })`: Main temperature assignment function
   * **Sea-level temperature**: Varies by latitude using piecewise-linear bands
-    * Equator (0°): 27°C
-    * Mid-latitudes (60°): 7°C  
-    * Poles (90°): -25°C
-  * **Altitude cooling**: Standard atmospheric lapse rate of 6.5°C per kilometer
+    * Equator (0°): 81°F
+    * Mid-latitudes (60°): 45°F  
+    * Poles (90°): -13°F
+  * **Altitude cooling**: Standard atmospheric lapse rate of 11.7°F per kilometer
   * **Input requirements**: `polygons[*].lat` and `polygons[*].height` must be set
-  * **Output**: Adds `polygons[*].temp` field in Celsius
+  * **Output**: Adds `polygons[*].temp` field in Fahrenheit
   * **Statistics**: Returns `{ count, min, max, mean }` for debugging
 * `seaLevelTempAtLat(latDeg)`: Internal function calculating sea-level temperature at given latitude
   * Uses piecewise-linear interpolation between key latitude bands
