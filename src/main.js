@@ -76,6 +76,54 @@ var __placementEpoch = 0;
 export function getPlacementEpoch() { return __placementEpoch; }
 export function bumpPlacementEpoch() { __placementEpoch += 1; return __placementEpoch; }
 
+// ── Safe viewport inset (keep labels off the wall)
+export function computeMapInsetPx(svgW, svgH) {
+  const m = Math.round(Math.min(svgW, svgH) * 0.02); // 2% of min dimension
+  return Math.max(8, Math.min(24, m));               // clamp [8..24] px
+}
+
+export function shrinkRect(rect, inset) {
+  const x = rect.x + inset, y = rect.y + inset;
+  const w = Math.max(0, rect.w - 2*inset), h = Math.max(0, rect.h - 2*inset);
+  return { x, y, w, h };
+}
+
+export function rectFromViewport(svgW, svgH) {
+  return { x: 0, y: 0, w: svgW, h: svgH };
+}
+
+// ── Zoom settle gate: resolves once k/x/y are stable for N frames or timeout
+async function waitForZoomSettle({ epsilon = 1e-4, stableFrames = 2, maxWait = 1500 } = {}) {
+  const svg = d3.select("svg").node();
+  if (!svg || !d3.zoomTransform) return;
+  let last = d3.zoomTransform(svg);
+  let stable = 0;
+  const start = performance.now();
+
+  return new Promise((resolve) => {
+    function tick() {
+      const now = performance.now();
+      const t = d3.zoomTransform(svg);
+      const dk = Math.abs((t.k ?? 0) - (last.k ?? 0));
+      const dx = Math.abs((t.x ?? 0) - (last.x ?? 0));
+      const dy = Math.abs((t.y ?? 0) - (last.y ?? 0));
+      if (dk < epsilon && dx < 0.5 && dy < 0.5) {
+        stable += 1;
+      } else {
+        stable = 0;
+      }
+      last = t;
+      if (stable >= stableFrames || (now - start) > maxWait) {
+        console.log("[autofit:gate] settled", { k: t.k, x: t.x, y: t.y, ms: Math.round(now - start) });
+        resolve();
+      } else {
+        requestAnimationFrame(tick);
+      }
+    }
+    requestAnimationFrame(tick);
+  });
+}
+
 // ── ephemeral placements by epoch (not persisted)
 const __placements = new Map(); // epoch -> { ocean?: {...}, seas?:[], ... }
 function placementsForCurrentEpoch() {
@@ -83,6 +131,71 @@ function placementsForCurrentEpoch() {
   if (!__placements.has(e)) __placements.set(e, {});
   return __placements.get(e);
 }
+
+// ── Step 2: draw the chosen ocean label (uses Step 1 output)
+function eraseOceanLabel() {
+  const { world } = ensureLabelLayers();
+  world.selectAll("g.ocean-label.final").remove();
+}
+
+function step2RenderOceanLabel() {
+  const bucket = placementsForCurrentEpoch();
+  const entry  = bucket?.ocean;
+  if (!entry || !entry.best?.ok) {
+    console.warn("[step2:ocean] No computed layout found. Run Step 1 first.");
+    return;
+  }
+  const { rect, best, k } = entry;
+  const { lines, fontPx } = best;
+  // Clamp anchor to rect inset
+  const pad = 4;
+  const cx = Math.max(rect.x + pad, Math.min(rect.x + rect.w - pad, best.anchor.cx));
+  const cy = Math.max(rect.y + pad, Math.min(rect.y + rect.h - pad, best.anchor.cy));
+  const lineH = Math.ceil(fontPx * 1.2); // keep in sync with Step 1 default
+
+  eraseOceanLabel(); // idempotent
+  const g = ensureOceanLabelGroup();
+  const node = g.append("g")
+    .attr("class", "ocean-label final")
+    .attr("transform", `translate(${cx},${cy}) scale(${1 / (k || 1)})`)
+    .style("pointer-events", "none")
+    .style("opacity", 0.95);
+
+  // Vertical centering for N lines: first line baseline at y0
+  const N = lines.length;
+  const y0 = -((N - 1) * lineH) / 2;
+
+  // Halo first (stroke), then fill. Keep classes so theme can override.
+  lines.forEach((t, i) => {
+    const y = y0 + i * lineH;
+    node.append("text")
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "central")
+      .attr("class", "label water ocean halo")
+      .style("font-style", "italic")
+      .style("letter-spacing", "0.6px")      // match Step 1 measure (px)
+      .style("font-size", `${fontPx}px`)
+      .style("paint-order", "stroke fill")
+      .style("stroke", "white")
+      .style("stroke-width", Math.max(1, Math.round(fontPx / 7)))
+      .style("stroke-linejoin", "round")
+      .text(t)
+      .attr("x", 0).attr("y", y);
+
+    node.append("text")
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "central")
+      .attr("class", "label water ocean fill")
+      .style("font-style", "italic")
+      .style("letter-spacing", "0.6px")
+      .style("font-size", `${fontPx}px`)
+      .text(t)
+      .attr("x", 0).attr("y", y);
+  });
+
+  console.log("[step2:ocean] rendered", { lines, fontPx, anchor: { cx, cy }, k });
+}
+
 function clearOldPlacements() {
   // keep only current epoch to avoid leaks
   const curr = getPlacementEpoch?.() ?? 0;
@@ -158,8 +271,13 @@ if (typeof window !== "undefined") {
     cancel: () => { try { cancelPendingPlacement(); } catch (e) { console.warn(e); } },
     // Step 1 inspection
     oceanBest: () => { const p = placementsForCurrentEpoch(); return p?.ocean || null; },
+    // Step 2 rendering
+    oceanRender: () => step2RenderOceanLabel(),
+    oceanErase:  () => eraseOceanLabel(),
+    // Zoom settle gate
+    waitForZoomSettle: (opts) => waitForZoomSettle(opts),
   });
-  console.log("[debug] window.LabelsDebug ready (step0 | epoch | bumpEpoch | cancel | oceanBest)");
+  console.log("[debug] window.LabelsDebug ready (step0 | epoch | bumpEpoch | cancel | oceanBest | oceanRender | oceanErase | waitForZoomSettle)");
 }
 
 // --- water config ---
@@ -403,23 +521,81 @@ function computeLandBBoxScreen(cells, getHeight, getXY, seaLevel) {
 /**
  * Build 4 frame rectangles by subtracting land bbox from viewport, choose the largest.
  */
-function chooseLargestFrameRect(viewportW, viewportH, landRect, margin = 8) {
-  if (!landRect) return { x: margin, y: margin, w: viewportW - 2*margin, h: viewportH - 2*margin };
-  const L = Math.max(0, landRect.x - margin);
-  const T = Math.max(0, landRect.y - margin);
-  const R = Math.min(viewportW, landRect.x + landRect.w + margin);
-  const B = Math.min(viewportH, landRect.y + landRect.h + margin);
+function chooseLargestFrameRect(viewportRect, landRect, margin = 8) {
+  const viewportW = viewportRect.w, viewportH = viewportRect.h;
+  const vX = viewportRect.x, vY = viewportRect.y;
+  if (!landRect) return { x: vX + margin, y: vY + margin, w: viewportW - 2*margin, h: viewportH - 2*margin };
+  // Clamp land rect into viewport
+  const L = Math.max(vX, landRect.x - margin);
+  const T = Math.max(vY, landRect.y - margin);
+  const R = Math.min(vX + viewportW, landRect.x + landRect.w + margin);
+  const B = Math.min(vY + viewportH, landRect.y + landRect.h + margin);
 
   const frames = [
-    { x: 0, y: 0, w: viewportW, h: T,                  side: "top"    },
-    { x: 0, y: B, w: viewportW, h: viewportH - B,      side: "bottom" },
-    { x: 0, y: T, w: L,            h: Math.max(0, B-T), side: "left"   },
-    { x: R, y: T, w: viewportW-R,  h: Math.max(0, B-T), side: "right"  },
+    { x: vX, y: vY, w: viewportW,    h: T - vY,                 side: "top"    },
+    { x: vX, y: B,  w: viewportW,    h: vY + viewportH - B,     side: "bottom" },
+    { x: vX, y: T,  w: L - vX,       h: Math.max(0, B - T),     side: "left"   },
+    { x: R,  y: T,  w: vX + viewportW - R, h: Math.max(0, B-T), side: "right"  },
   ].filter(r => r.w > 16 && r.h > 16);
 
   if (!frames.length) return null;
   frames.sort((a, b) => (b.w*b.h) - (a.w*a.h));
   return frames[0];
+}
+
+// If a frame is too skinny, generate sub-rect candidates and choose the best by layout score.
+function refineRectForLabel(rect, label, k, scorerOpts = {}) {
+  const AR_MIN = 0.6, AR_MAX = 2.0; // allow up to ~2:1 or 1:2; beyond this we try to refine
+  const ar = rect.w / Math.max(1e-6, rect.h);
+  const candidates = [rect];
+
+  const push = (r) => { if (r && r.w > 20 && r.h > 20) candidates.push(r); };
+
+  // Target more compact sub-rect centered inside the frame (limit major axis)
+  if (ar > AR_MAX) {
+    // too wide: limit width to AR_MAX * h
+    const maxW = Math.min(rect.w, AR_MAX * rect.h);
+    const x = rect.x + (rect.w - maxW) / 2;
+    push({ x, y: rect.y, w: maxW, h: rect.h });
+  } else if (ar < AR_MIN) {
+    // too tall: limit height to w / AR_MIN
+    const maxH = Math.min(rect.h, rect.w / AR_MIN);
+    const y = rect.y + (rect.h - maxH) / 2;
+    push({ x: rect.x, y, w: rect.w, h: maxH });
+  }
+
+  // 2×2 quadrants inside the frame
+  const qW = rect.w / 2, qH = rect.h / 2;
+  push({ x: rect.x,        y: rect.y,        w: qW, h: qH });
+  push({ x: rect.x + qW,   y: rect.y,        w: qW, h: qH });
+  push({ x: rect.x,        y: rect.y + qH,   w: qW, h: qH });
+  push({ x: rect.x + qW,   y: rect.y + qH,   w: qW, h: qH });
+
+  // Sliding windows along major axis (3 positions)
+  if (rect.w >= rect.h) {
+    const sw = Math.min(rect.w, Math.max(rect.h * 1.5, rect.w * 0.4));
+    const step = (rect.w - sw) / 2; // left, center, right
+    push({ x: rect.x,          y: rect.y, w: sw, h: rect.h });
+    push({ x: rect.x + step,   y: rect.y, w: sw, h: rect.h });
+    push({ x: rect.x + 2*step, y: rect.y, w: sw, h: rect.h });
+  } else {
+    const sh = Math.min(rect.h, Math.max(rect.w * 1.5, rect.h * 0.4));
+    const step = (rect.h - sh) / 2; // top, middle, bottom
+    push({ x: rect.x, y: rect.y,            w: rect.w, h: sh });
+    push({ x: rect.x, y: rect.y + step,     w: rect.w, h: sh });
+    push({ x: rect.x, y: rect.y + 2*step,   w: rect.w, h: sh });
+  }
+
+  // Score all candidates via Step-1 scorer; pick the best
+  let bestEntry = null;
+  for (const c of candidates) {
+    const fit = computeBestLayout(c, label, k, scorerOpts);
+    if (fit?.ok) {
+      const entry = { rect: c, best: fit };
+      if (!bestEntry || fit.score > bestEntry.best.score) bestEntry = entry;
+    }
+  }
+  return bestEntry || { rect, best: computeBestLayout(rect, label, k, scorerOpts) };
 }
 
 /**
@@ -1356,8 +1532,27 @@ async function generate(count) {
       lockZoomToAutofitLevel();
       
       // Now place ocean labels with the correct post-autofit bounds
-      // Defer to idle when possible to avoid blocking requestAnimationFrame
-      deferOceanPlacement(placeOceanLabelsAfterAutofit);
+      // Wait for zoom settle, then place (still cancellable by epoch)
+      (function scheduleOceanAfterAutofit() {
+        const epochAtSchedule = getPlacementEpoch?.() ?? 0;
+        console.log("[ocean] Waiting for zoom settle before placement…");
+        waitForZoomSettle({ epsilon: 1e-4, stableFrames: 2, maxWait: 1500 })
+          .then(() => {
+            const nowEpoch = getPlacementEpoch?.() ?? 0;
+            if (nowEpoch !== epochAtSchedule) {
+              console.log("[ocean] Skip placement (stale epoch after settle)", { epochAtSchedule, nowEpoch });
+              return;
+            }
+            deferOceanPlacement(() => {
+              const stillEpoch = getPlacementEpoch?.() ?? 0;
+              if (stillEpoch !== epochAtSchedule) {
+                console.log("[ocean] Skip idle callback (stale after settle defer)", { epochAtSchedule, stillEpoch });
+                return;
+              }
+              placeOceanLabelsAfterAutofit();
+            }, { timeout: 0, fallbackDelay: 0 }); // run next idle tick after settle
+          });
+      })();
       
     } catch (error) {
       console.warn('[autofit] Method 1 failed, falling back to Method 2:', error);
@@ -1370,8 +1565,50 @@ async function generate(count) {
         const tr = svgSel.transition().duration(600);
         
         // Set up transition event handlers
-        tr.on('end.placeOcean.autofit', () => deferOceanPlacement(placeOceanLabelsAfterAutofit));
-        tr.on('interrupt.placeOcean.autofit', () => deferOceanPlacement(placeOceanLabelsAfterAutofit)); // safety
+        tr.on('end.placeOcean.autofit', () => {
+          (function scheduleOceanAfterAutofit() {
+            const epochAtSchedule = getPlacementEpoch?.() ?? 0;
+            console.log("[ocean] Waiting for zoom settle before placement…");
+            waitForZoomSettle({ epsilon: 1e-4, stableFrames: 2, maxWait: 1500 })
+              .then(() => {
+                const nowEpoch = getPlacementEpoch?.() ?? 0;
+                if (nowEpoch !== epochAtSchedule) {
+                  console.log("[ocean] Skip placement (stale epoch after settle)", { epochAtSchedule, nowEpoch });
+                  return;
+                }
+                deferOceanPlacement(() => {
+                  const stillEpoch = getPlacementEpoch?.() ?? 0;
+                  if (stillEpoch !== epochAtSchedule) {
+                    console.log("[ocean] Skip idle callback (stale after settle defer)", { epochAtSchedule, stillEpoch });
+                    return;
+                  }
+                  placeOceanLabelsAfterAutofit();
+                }, { timeout: 0, fallbackDelay: 0 }); // run next idle tick after settle
+              });
+          })();
+        });
+        tr.on('interrupt.placeOcean.autofit', () => {
+          (function scheduleOceanAfterAutofit() {
+            const epochAtSchedule = getPlacementEpoch?.() ?? 0;
+            console.log("[ocean] Waiting for zoom settle before placement…");
+            waitForZoomSettle({ epsilon: 1e-4, stableFrames: 2, maxWait: 1500 })
+              .then(() => {
+                const nowEpoch = getPlacementEpoch?.() ?? 0;
+                if (nowEpoch !== epochAtSchedule) {
+                  console.log("[ocean] Skip placement (stale epoch after settle)", { epochAtSchedule, nowEpoch });
+                  return;
+                }
+                deferOceanPlacement(() => {
+                  const stillEpoch = getPlacementEpoch?.() ?? 0;
+                  if (stillEpoch !== epochAtSchedule) {
+                    console.log("[ocean] Skip idle callback (stale after settle defer)", { epochAtSchedule, stillEpoch });
+                    return;
+                  }
+                  placeOceanLabelsAfterAutofit();
+                }, { timeout: 0, fallbackDelay: 0 }); // run next idle tick after settle
+              });
+          })();
+        }); // safety
         
         // Start the autofit
         await window.fitLand();
@@ -1405,7 +1642,28 @@ async function generate(count) {
         // Lock zoom to prevent zooming out beyond autofit level
         lockZoomToAutofitLevel();
         
-        afterLayout(() => deferOceanPlacement(placeOceanLabelsAfterAutofit));
+        afterLayout(() => {
+          (function scheduleOceanAfterAutofit() {
+            const epochAtSchedule = getPlacementEpoch?.() ?? 0;
+            console.log("[ocean] Waiting for zoom settle before placement…");
+            waitForZoomSettle({ epsilon: 1e-4, stableFrames: 2, maxWait: 1500 })
+              .then(() => {
+                const nowEpoch = getPlacementEpoch?.() ?? 0;
+                if (nowEpoch !== epochAtSchedule) {
+                  console.log("[ocean] Skip placement (stale epoch after settle)", { epochAtSchedule, nowEpoch });
+                  return;
+                }
+                deferOceanPlacement(() => {
+                  const stillEpoch = getPlacementEpoch?.() ?? 0;
+                  if (stillEpoch !== epochAtSchedule) {
+                    console.log("[ocean] Skip idle callback (stale after settle defer)", { epochAtSchedule, stillEpoch });
+                    return;
+                  }
+                  placeOceanLabelsAfterAutofit();
+                }, { timeout: 0, fallbackDelay: 0 }); // run next idle tick after settle
+              });
+          })();
+        });
       }
     }
   }
@@ -1497,30 +1755,7 @@ async function generate(count) {
     deferOceanPlacement(placeOceanLabelsAfterAutofit, { timeout: 5000, fallbackDelay: 100 });
   };
   
-  // Old labeling system removed
-    
-    // Fallback: if the legacy store is empty, use the most recently built anchors
-    let oceans = oceanLabels;
-    let oceanCount = oceanLabels.length;
-    
-    if (oceanCount === 0) {
-      const cached = getLastWaterAnchors?.();
-      if (cached?.oceans?.length) {
-        console.log("[ocean] Fallback to cached water anchors:", { oceans: cached.oceans.length });
-        oceans = cached.oceans;
-        oceanCount = oceans.length;
-      } else {
-        console.warn("[ocean] No oceans available in store or cache — skipping ocean placement this frame.");
-        return; // Bail early; nothing to place
-      }
-    }
-    
-    console.log('[ocean] DEBUG: After autofit, featureLabels available:', {
-      stored: !!window.__featureLabels,
-      count: featureLabels.length,
-      oceanCount: oceanCount,
-      sample: oceans.slice(0, 2).map(l => ({ kind: l.kind, text: l.text }))
-    });
+  // Old labeling system removed - ocean placement now happens inside placeOceanLabelsAfterAutofit()
     
     // --- Shared labels store (debug-friendly) ---
     // Helper (global; keep in sync with labels.js logic)
@@ -1582,7 +1817,8 @@ async function generate(count) {
       console.log('[store] stabilized ids', meta.keys, { sample: store.slice(0,5).map(d => d.labelId) });
     })();
     
-    if (oceanCount > 0) {
+    // Ocean placement logic moved to placeOceanLabelsAfterAutofit() - now happens after zoom settle
+    if (false) { // Disabled - moved to placeOceanLabelsAfterAutofit()
       console.log('[ocean] 🎯 Placing ocean labels after autofit with correct bounds');
       
       // Get the viewport bounds in screen coordinates (for SAT-based placement)
@@ -1593,6 +1829,10 @@ async function generate(count) {
         svgWidth: mapWidth,
         svgHeight: mapHeight
       });
+      const _viewport = rectFromViewport(mapWidth, mapHeight);
+      const _insetPx  = computeMapInsetPx(mapWidth, mapHeight);
+      const _safeVP   = shrinkRect(_viewport, _insetPx);
+      console.log('[ocean] DEBUG: Safe viewport (inset)', { inset: _insetPx, safe: _safeVP });
       
       // Guard call order - don't run rectangle search until accessor exists
       if (typeof state.getCellAtXY !== 'function') {
@@ -1704,20 +1944,18 @@ async function generate(count) {
             : (window.DEFAULT_SEA_LEVEL || 0.20);
 
           const landRect = computeLandBBoxScreen(cells, getHeight, getXY, sl);
-          const frame = chooseLargestFrameRect(mapWidth, mapHeight, landRect, 10);
+          const frame = chooseLargestFrameRect(_safeVP, landRect, 10);
           if (frame) {
-            // Step 1: compute best layout for this rect (do not render final label yet)
-            const label = NA?.label || "Ocean";
-            const best = computeBestLayout(frame, label, k, {
-              maxPx: 36, minPx: 12, stepPx: 1,
-              padding: 10, letterSpacing: 0.6, family: "serif", lineHeight: 1.2, maxLines: 3
+            const refined = refineRectForLabel(frame, NA.label, k, {
+              maxPx: 36, minPx: 12, stepPx: 1, padding: 10, letterSpacing: 0.6, family: "serif", lineHeight: 1.2, maxLines: 3
             });
-            if (!best?.ok) {
-              console.warn("[step1:ocean] No layout fits rect; keeping center-fallback as a last resort.", { rect: frame, reason: best?.reason });
-            } else {
+            if (refined?.best?.ok) {
+              // Step-1 stash + (if you enabled) Step-2 render uses refined.rect
               const bucket = placementsForCurrentEpoch();
-              bucket.ocean = { rect: frame, best, k };
-              console.log("[step1:ocean:best]", { rect: frame, best });
+              bucket.ocean = { rect: refined.rect, best: refined.best, k };
+              console.log("[step1.5:ocean] refined frame→rect", { original: frame, refined: refined.rect, score: refined.best.score });
+              // Optional immediate render if you hooked it up:
+              if (typeof step2RenderOceanLabel === "function") step2RenderOceanLabel();
 
               // Debug draw: outline chosen rect + a center tick; do NOT render final text yet.
               (function debugDraw() {
@@ -1726,13 +1964,13 @@ async function generate(count) {
                 g.selectAll("line.ocean-layout-center").remove();
                 g.append("rect")
                   .attr("class", "ocean-layout-debug")
-                  .attr("x", frame.x).attr("y", frame.y)
-                  .attr("width", frame.w).attr("height", frame.h)
+                  .attr("x", refined.rect.x).attr("y", refined.rect.y)
+                  .attr("width", refined.rect.w).attr("height", refined.rect.h)
                   .style("fill", "none").style("stroke", "currentColor").style("stroke-width", 1).style("opacity", 0.4);
                 g.append("line")
                   .attr("class", "ocean-layout-center")
-                  .attr("x1", best.anchor.cx - 6).attr("y1", best.anchor.cy)
-                  .attr("x2", best.anchor.cx + 6).attr("y2", best.anchor.cy)
+                  .attr("x1", refined.best.anchor.cx - 6).attr("y1", refined.best.anchor.cy)
+                  .attr("x2", refined.best.anchor.cx + 6).attr("y2", refined.best.anchor.cy)
                   .style("stroke", "currentColor").style("opacity", 0.6);
               })();
             }
@@ -1755,6 +1993,7 @@ async function generate(count) {
             const bucket = placementsForCurrentEpoch();
             bucket.ocean = { rect: fallbackRect, best, k };
             console.log("[step1:ocean:best]", { rect: fallbackRect, best });
+            step2RenderOceanLabel(); // Optional: auto-render after Step 1
 
             // Debug draw: outline chosen rect + a center tick; do NOT render final text yet.
             (function debugDraw() {
@@ -1792,6 +2031,7 @@ async function generate(count) {
             const bucket = placementsForCurrentEpoch();
             bucket.ocean = { rect: pxRect, best, k };
             console.log("[step1:ocean:best]", { rect: pxRect, best });
+            step2RenderOceanLabel(); // Optional: auto-render after Step 1
 
             // Debug draw: outline chosen rect + a center tick; do NOT render final text yet.
             (function debugDraw() {
@@ -2065,8 +2305,52 @@ async function generate(count) {
   
   // Function definition for placeOceanLabelsAfterAutofit
   function placeOceanLabelsAfterAutofit() {
-    // This function is now implemented inline above
-    // The shim in labels-null-shim.js is no longer needed
+    // Clear any pre-existing debug marks before computing fresh ones
+    const g = ensureOceanLabelGroup();
+    g.selectAll("rect.ocean-layout-debug, line.ocean-layout-center, circle.debug-ocean-dot, rect.debug-ocean-rect").remove();
+    
+    // Fallback: if the legacy store is empty, use the most recently built anchors
+    let oceans = oceanLabels;
+    let oceanCount = oceanLabels.length;
+    
+    if (oceanCount === 0) {
+      const cached = getLastWaterAnchors?.();
+      if (cached?.oceans?.length) {
+        console.log("[ocean] Fallback to cached water anchors:", { oceans: cached.oceans.length });
+        oceans = cached.oceans;
+        oceanCount = oceans.length;
+      } else {
+        console.warn("[ocean] No oceans available in store or cache — skipping ocean placement this frame.");
+        return; // Bail early; nothing to place
+      }
+    }
+    
+    console.log('[ocean] DEBUG: After autofit, featureLabels available:', {
+      stored: !!window.__featureLabels,
+      count: featureLabels.length,
+      oceanCount: oceanCount,
+      sample: featureLabels.slice(0, 3).map(l => ({ kind: l.kind, text: l.text, x: l.x, y: l.y }))
+    });
+    
+    if (oceanCount > 0) {
+      console.log('[ocean] 🎯 Placing ocean labels after autofit with correct bounds');
+      
+      // Get the viewport bounds in screen coordinates (for SAT-based placement)
+      const viewportBounds = getViewportBounds(0);
+      
+      console.log('[ocean] DEBUG: Viewport bounds (screen coordinates):', {
+        bounds: viewportBounds,
+        svgWidth: mapWidth,
+        svgHeight: mapHeight
+      });
+      const _viewport = rectFromViewport(mapWidth, mapHeight);
+      const _insetPx  = computeMapInsetPx(mapWidth, mapHeight);
+      const _safeVP   = shrinkRect(_viewport, _insetPx);
+      console.log('[ocean] DEBUG: Safe viewport (inset)', { inset: _insetPx, safe: _safeVP });
+      
+      // TODO: Add SAT-based placement logic here
+      console.log('[ocean] SAT-based placement logic to be added');
+    }
   }
 }
 

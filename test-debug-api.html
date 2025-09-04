@@ -27,6 +27,9 @@
             <li><code>LabelsDebug.epoch()</code> - Get current placement epoch</li>
             <li><code>LabelsDebug.bumpEpoch()</code> - Increment placement epoch</li>
             <li><code>LabelsDebug.cancel()</code> - Cancel any pending placement work</li>
+            <li><code>LabelsDebug.oceanBest()</code> - Get current ocean placement data</li>
+            <li><code>LabelsDebug.oceanRender()</code> - Render ocean label from Step 1 data</li>
+            <li><code>LabelsDebug.oceanErase()</code> - Remove rendered ocean label</li>
         </ul>
     </div>
     
@@ -37,6 +40,7 @@
         <button class="test-button" onclick="testDebugAPI()">Test Debug API</button>
         <button class="test-button" onclick="testStep0()">Test Step 0 via API</button>
         <button class="test-button" onclick="testEpochControls()">Test Epoch Controls</button>
+        <button class="test-button" onclick="testStep2()">Test Step 2 (Ocean Render)</button>
         <button class="test-button" onclick="clearLog()">Clear Log</button>
     </div>
 
@@ -84,7 +88,7 @@
                 log('✅ LabelsDebug API found on window');
                 
                 // Check if all expected methods exist
-                const expectedMethods = ['step0', 'epoch', 'bumpEpoch', 'cancel'];
+                const expectedMethods = ['step0', 'epoch', 'bumpEpoch', 'cancel', 'oceanBest', 'oceanRender', 'oceanErase'];
                 const missingMethods = expectedMethods.filter(method => typeof api[method] !== 'function');
                 
                 if (missingMethods.length === 0) {
@@ -151,6 +155,51 @@
             } catch (error) {
                 log(`❌ Error during epoch controls test: ${error.message}`);
                 setStatus(`Epoch controls test failed: ${error.message}`, false);
+            }
+        };
+        
+        window.testStep2 = async function() {
+            log('=== Testing Step 2 (Ocean Render) ===');
+            
+            try {
+                const api = await waitForLabelsDebug();
+                
+                // First check if there's any ocean data
+                const oceanData = api.oceanBest();
+                log(`Ocean data available: ${oceanData ? 'Yes' : 'No'}`);
+                
+                if (!oceanData) {
+                    log('⚠️ No ocean data found. This is expected if Step 1 hasn\'t run yet.');
+                    log('Step 2 requires Step 1 to have computed ocean layout first.');
+                    setStatus('Step 2 test skipped - no ocean data available', true);
+                    return;
+                }
+                
+                log('Ocean data found:', oceanData);
+                
+                // Test erase first (should be safe even if nothing to erase)
+                log('Testing oceanErase()...');
+                api.oceanErase();
+                log('✅ oceanErase() completed');
+                
+                // Test render
+                log('Testing oceanRender()...');
+                api.oceanRender();
+                log('✅ oceanRender() completed');
+                
+                // Verify the label was created in the DOM
+                const oceanLabel = document.querySelector('#labels-world-ocean .ocean-label.final');
+                if (oceanLabel) {
+                    log('✅ Ocean label found in DOM');
+                    setStatus('Step 2 test passed! Ocean label rendered successfully.', true);
+                } else {
+                    log('❌ Ocean label not found in DOM after render');
+                    setStatus('Step 2 test failed - label not found in DOM', false);
+                }
+                
+            } catch (error) {
+                log(`❌ Error during Step 2 test: ${error.message}`);
+                setStatus(`Step 2 test failed: ${error.message}`, false);
             }
         };
         

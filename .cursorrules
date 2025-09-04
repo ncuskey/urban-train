@@ -9,6 +9,16 @@ _Last updated: 2025-08-27_
 5) **Labels:** Use the existing `names`, `labels`, and collision/zoom filtering. **No minimum size for lakes/islands** - even the smallest features get names. **Size-based zoom filtering** shows features based on area and zoom level. **Collision avoidance** uses spiral placement with quadtree optimization.
 6) **Autofit/Zoom:** Use `computeLandBBox` + `fitToLand` and apply transforms via the bound `zoom` behavior. Don't set transforms directly on groups.
 7) **Self-tests must pass.** Don't regress invariants in `selftest.js` (height in [0..1], reciprocal neighbors, etc.).
+8) **Always use todo lists.** For any multi-step coding task (3+ steps), use `todo_write` to create and manage a task list. Update progress as you complete each step. This ensures organization, completeness, and helps with stepwise progress tracking.
+
+---
+
+## Task Management
+- **Always use todo lists**: For any multi-step coding task (3+ steps), use `todo_write` to create and manage a task list
+- **Update progress**: Mark todos as completed as you finish each step  
+- **Break down complex tasks**: Split large changes into specific, actionable todo items
+- **Proactive organization**: Create todos at the start of work, not as an afterthought
+- **Stepwise progress**: Helps ensure completeness and allows for verification at each stage
 
 ---
 
