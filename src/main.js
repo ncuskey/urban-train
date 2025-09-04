@@ -67,6 +67,8 @@ import { greedyPlace } from "./labels/placement/collide.js";
 import { deferIdle, cancelIdle } from "./core/idle.js";
 import { computeBestLayout } from "./labels/ocean/layout.js";
 import { getLastWaterAnchors } from "./labels/anchors-water.js";
+import { rasterizeWaterMask, erodeWater, largestRectOnes, gridToScreenRect } from "./labels/ocean/sat.js";
+import { intersectRect, clampPointToRect, waterFractionInRect } from "./core/rect.js";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Step 0 — placement epoch & cleanup helpers
@@ -86,6 +88,55 @@ export function shrinkRect(rect, inset) {
   const x = rect.x + inset, y = rect.y + inset;
   const w = Math.max(0, rect.w - 2*inset), h = Math.max(0, rect.h - 2*inset);
   return { x, y, w, h };
+}
+
+// ── Debug overlay for chosen ocean rect (screen-space)
+let __debugBoxesOn = true; // dev default; toggle via LabelsDebug
+function ensureOceanDebugLayer() {
+  const root = d3.select("#labels");
+  let layer = root.select("#labels-debug-ocean");
+  if (layer.empty()) layer = root.append("g").attr("id", "labels-debug-ocean");
+  return layer;
+}
+function drawOceanDebugRect(rect, kind = "sat") {
+  const layer = ensureOceanDebugLayer();
+  layer.selectAll("rect.ocean-layout-debug").remove();
+  layer.selectAll("line.ocean-layout-center").remove();
+  if (!__debugBoxesOn) return;
+  layer.append("rect")
+    .attr("class", "ocean-layout-debug")
+    .attr("x", rect.x).attr("y", rect.y)
+    .attr("width", rect.w).attr("height", rect.h)
+    .style("fill", "none")
+    .style("stroke", "#22d3ee")                 // cyan for contrast
+    .style("stroke-width", 2)
+    .style("vector-effect", "non-scaling-stroke")
+    .style("opacity", 0.8);
+  // small center tick
+  const cx = rect.x + rect.w/2, cy = rect.y + rect.h/2;
+  layer.append("line")
+    .attr("class", "ocean-layout-center")
+    .attr("x1", cx-6).attr("y1", cy).attr("x2", cx+6).attr("y2", cy)
+    .style("stroke", "#22d3ee").style("stroke-width", 2)
+    .style("vector-effect", "non-scaling-stroke").style("opacity", .8);
+  console.log("[debug:ocean] drew rect", { kind, rect });
+}
+function clearOceanDebug() {
+  ensureOceanDebugLayer().selectAll("*").remove();
+}
+
+// draw safe viewport and land bbox (debug)
+function drawDebugBounds(safeVP, landRect) {
+  const layer = ensureOceanDebugLayer();
+  layer.selectAll("rect.debug-safe-vp").remove();
+  layer.selectAll("rect.debug-land-bbox").remove();
+  layer.append("rect").attr("class", "debug-safe-vp")
+    .attr("x", safeVP.x).attr("y", safeVP.y).attr("width", safeVP.w).attr("height", safeVP.h)
+    .style("fill","none").style("stroke","#60a5fa").style("stroke-width",1.5).style("vector-effect","non-scaling-stroke").style("opacity",0.6);
+  if (landRect) layer.append("rect").attr("class","debug-land-bbox")
+    .attr("x", landRect.x).attr("y", landRect.y).attr("width", landRect.w).attr("height", landRect.h)
+    .style("fill","none").style("stroke","#f59e0b").style("stroke-dasharray","4 3")
+    .style("stroke-width",1.5).style("vector-effect","non-scaling-stroke").style("opacity",0.7);
 }
 
 export function rectFromViewport(svgW, svgH) {
@@ -148,9 +199,7 @@ function step2RenderOceanLabel() {
   const { rect, best, k } = entry;
   const { lines, fontPx } = best;
   // Clamp anchor to rect inset
-  const pad = 4;
-  const cx = Math.max(rect.x + pad, Math.min(rect.x + rect.w - pad, best.anchor.cx));
-  const cy = Math.max(rect.y + pad, Math.min(rect.y + rect.h - pad, best.anchor.cy));
+  const { cx, cy } = clampPointToRect(best.anchor.cx, best.anchor.cy, rect, 4);
   const lineH = Math.ceil(fontPx * 1.2); // keep in sync with Step 1 default
 
   eraseOceanLabel(); // idempotent
@@ -276,8 +325,9 @@ if (typeof window !== "undefined") {
     oceanErase:  () => eraseOceanLabel(),
     // Zoom settle gate
     waitForZoomSettle: (opts) => waitForZoomSettle(opts),
+    debugBoxes:  (on) => { __debugBoxesOn = !!on; if (!on) clearOceanDebug(); return __debugBoxesOn; },
   });
-  console.log("[debug] window.LabelsDebug ready (step0 | epoch | bumpEpoch | cancel | oceanBest | oceanRender | oceanErase | waitForZoomSettle)");
+  console.log("[debug] window.LabelsDebug ready (step0 | epoch | bumpEpoch | cancel | oceanBest | oceanRender | oceanErase | waitForZoomSettle | debugBoxes)");
 }
 
 // --- water config ---
@@ -450,20 +500,6 @@ function drawOceanDebugDot(x, y, note = "") {
   if (note) console.log("[ocean][debug:dot]", { x, y, note });
 }
 
-function drawOceanDebugRect(r) {
-  const g = ensureOceanLabelGroup();
-  g.selectAll("rect.debug-ocean-rect").remove();
-  if (!r) return;
-  g.append("rect")
-    .attr("class", "debug-ocean-rect")
-    .attr("x", r.x).attr("y", r.y)
-    .attr("width", r.w).attr("height", r.h)
-    .style("fill", "none")
-    .style("stroke", "currentColor")
-    .style("stroke-width", 1)
-    .style("opacity", 0.6);
-  console.log("[ocean][debug:rect]", r);
-}
 
 function placeOceanFallbackLabel(anchor) {
   if (!anchor) return;
@@ -519,32 +555,50 @@ function computeLandBBoxScreen(cells, getHeight, getXY, seaLevel) {
 }
 
 /**
- * Build 4 frame rectangles by subtracting land bbox from viewport, choose the largest.
+ * Build 4 frame rectangles by subtracting land bbox from viewport, choose the best by water content.
  */
-function chooseLargestFrameRect(viewportRect, landRect, margin = 8) {
+function chooseBestFrameRect(viewportRect, landRect, mask, margin = 8) {
   const viewportW = viewportRect.w, viewportH = viewportRect.h;
   const vX = viewportRect.x, vY = viewportRect.y;
   if (!landRect) return { x: vX + margin, y: vY + margin, w: viewportW - 2*margin, h: viewportH - 2*margin };
-  // Clamp land rect into viewport
+
   const L = Math.max(vX, landRect.x - margin);
   const T = Math.max(vY, landRect.y - margin);
   const R = Math.min(vX + viewportW, landRect.x + landRect.w + margin);
   const B = Math.min(vY + viewportH, landRect.y + landRect.h + margin);
 
   const frames = [
-    { x: vX, y: vY, w: viewportW,    h: T - vY,                 side: "top"    },
-    { x: vX, y: B,  w: viewportW,    h: vY + viewportH - B,     side: "bottom" },
-    { x: vX, y: T,  w: L - vX,       h: Math.max(0, B - T),     side: "left"   },
-    { x: R,  y: T,  w: vX + viewportW - R, h: Math.max(0, B-T), side: "right"  },
+    { x: vX, y: vY, w: viewportW,             h: Math.max(0, T - vY),           side: "top"    },
+    { x: vX, y: B,  w: viewportW,             h: Math.max(0, vY+viewportH - B), side: "bottom" },
+    { x: vX, y: T,  w: Math.max(0, L - vX),   h: Math.max(0, B - T),             side: "left"   },
+    { x: R,  y: T,  w: Math.max(0, vX+viewportW - R), h: Math.max(0, B - T),     side: "right"  },
   ].filter(r => r.w > 16 && r.h > 16);
 
   if (!frames.length) return null;
-  frames.sort((a, b) => (b.w*b.h) - (a.w*a.h));
-  return frames[0];
+
+  // Score by water content * area, lightly penalize skinny AR, then pick max.
+  function arPenalty(r) {
+    const ar = r.w / Math.max(1, r.h);
+    const dev = Math.abs(Math.log2(ar));
+    return 1 / (1 + 0.6 * dev); // ∈ (0,1]; 1 if square-ish
+  }
+  let best = null;
+  for (const r of frames) {
+    const fr = intersectRect(r, viewportRect); // ensure inside safe viewport
+    if (fr.w < 16 || fr.h < 16) continue;
+    const wf = mask ? waterFractionInRect(mask, fr) : 1;
+    const area = fr.w * fr.h;
+    const score = wf * area * arPenalty(fr);
+    r.__score = score; r.__wf = wf; r.__rect = fr;
+    if (!best || score > best.__score) best = r;
+  }
+  if (!best) return null;
+  console.log("[ocean][frame:score]", frames.map(f => ({side: f.side, wf: +f.__wf.toFixed(2), score: Math.round(f.__score)})));
+  return best.__rect;
 }
 
 // If a frame is too skinny, generate sub-rect candidates and choose the best by layout score.
-function refineRectForLabel(rect, label, k, scorerOpts = {}) {
+function refineRectForLabel(rect, label, k, scorerOpts = {}, _safeVP = null, _satMask = null) {
   const AR_MIN = 0.6, AR_MAX = 2.0; // allow up to ~2:1 or 1:2; beyond this we try to refine
   const ar = rect.w / Math.max(1e-6, rect.h);
   const candidates = [rect];
@@ -589,10 +643,16 @@ function refineRectForLabel(rect, label, k, scorerOpts = {}) {
   // Score all candidates via Step-1 scorer; pick the best
   let bestEntry = null;
   for (const c of candidates) {
-    const fit = computeBestLayout(c, label, k, scorerOpts);
+    const ci = intersectRect(c, _safeVP); // keep inside safe viewport
+    if (ci.w < 20 || ci.h < 20) continue;
+    const fit = computeBestLayout(ci, label, k, scorerOpts);
     if (fit?.ok) {
-      const entry = { rect: c, best: fit };
-      if (!bestEntry || fit.score > bestEntry.best.score) bestEntry = entry;
+      // Prefer waterier rects if mask is available
+      const wf = (typeof waterFractionInRect === "function" && _satMask) ? waterFractionInRect(_satMask, ci) : 1;
+      const waterBonus = 1 + 0.5 * Math.min(1, wf);  // up to +50%
+      const score = fit.score * waterBonus;
+      const entry = { rect: ci, best: { ...fit, score }, wf };
+      if (!bestEntry || score > bestEntry.best.score) bestEntry = entry;
     }
   }
   return bestEntry || { rect, best: computeBestLayout(rect, label, k, scorerOpts) };
@@ -1944,11 +2004,11 @@ async function generate(count) {
             : (window.DEFAULT_SEA_LEVEL || 0.20);
 
           const landRect = computeLandBBoxScreen(cells, getHeight, getXY, sl);
-          const frame = chooseLargestFrameRect(_safeVP, landRect, 10);
+          const frame = chooseBestFrameRect(_safeVP, landRect, _satMask, 10);
           if (frame) {
             const refined = refineRectForLabel(frame, NA.label, k, {
               maxPx: 36, minPx: 12, stepPx: 1, padding: 10, letterSpacing: 0.6, family: "serif", lineHeight: 1.2, maxLines: 3
-            });
+            }, _safeVP, _satMask);
             if (refined?.best?.ok) {
               // Step-1 stash + (if you enabled) Step-2 render uses refined.rect
               const bucket = placementsForCurrentEpoch();
@@ -2306,8 +2366,7 @@ async function generate(count) {
   // Function definition for placeOceanLabelsAfterAutofit
   function placeOceanLabelsAfterAutofit() {
     // Clear any pre-existing debug marks before computing fresh ones
-    const g = ensureOceanLabelGroup();
-    g.selectAll("rect.ocean-layout-debug, line.ocean-layout-center, circle.debug-ocean-dot, rect.debug-ocean-rect").remove();
+    clearOceanDebug();
     
     // Fallback: if the legacy store is empty, use the most recently built anchors
     let oceans = oceanLabels;
@@ -2348,8 +2407,75 @@ async function generate(count) {
       const _safeVP   = shrinkRect(_viewport, _insetPx);
       console.log('[ocean] DEBUG: Safe viewport (inset)', { inset: _insetPx, safe: _safeVP });
       
-      // TODO: Add SAT-based placement logic here
-      console.log('[ocean] SAT-based placement logic to be added');
+      // Build screen-space water mask → erode by coast buffer → largest rect
+      const cells = window.__mesh?.cells || [];
+      const getHeight = (i) => window.__heights?.[i];
+      const getXY = (i) => window.__xy?.(i);
+      const sl = (typeof resolveSeaLevel === "function")
+        ? resolveSeaLevel(window.__mapState, window.__options)
+        : (window.DEFAULT_SEA_LEVEL || 0.20);
+
+      // Grid resolution & coastal buffer (in px)
+      const cellPx = 8;                 // coarser = faster; refine later if needed
+      const coastBufferPx = 12;         // keep label ~12px off coasts
+      const r = Math.max(1, Math.round(coastBufferPx / cellPx));
+
+      const mask = rasterizeWaterMask(_safeVP, cells, getHeight, getXY, sl, cellPx);
+      console.log("[ocean][sat:mask]", { gw: mask.gw, gh: mask.gh, cellPx });
+
+      erodeWater(mask, r);
+      const _satMask = mask; // expose to refiners in this scope
+      const gr = largestRectOnes(mask);
+
+      if (gr && gr.gw * gr.gh > 0) {
+        const satRect = gridToScreenRect(mask, gr);
+        const satInset = 2; // px
+        satRect.x += satInset; satRect.y += satInset;
+        satRect.w = Math.max(0, satRect.w - 2*satInset);
+        satRect.h = Math.max(0, satRect.h - 2*satInset);
+        console.log("[ocean][sat:hit]", { gr, satRect });
+
+        // Score & stash (Step 1 path)
+        const k = (window.__zoom && window.__zoom.k) || window.zoomK || 1;
+        const label = (window.__oceanName || "Ocean");
+        const best = computeBestLayout(satRect, label, k, {
+          maxPx: 36, minPx: 12, stepPx: 1,
+          padding: 10, letterSpacing: 0.6, family: "serif", lineHeight: 1.2, maxLines: 3
+        });
+
+        if (best?.ok) {
+          const bucket = placementsForCurrentEpoch();
+          bucket.ocean = { rect: satRect, best, k };
+          drawOceanDebugRect(satRect, "sat");
+          console.log("[step1:ocean:best]", { rect: satRect, best });
+          // Optional immediate render if you've enabled it:
+          if (typeof step2RenderOceanLabel === "function") step2RenderOceanLabel();
+          return;
+        }
+        console.warn("[ocean][sat] layout didn't fit; falling back to frame-refine.");
+      }
+
+      // SAT miss or no fit → use your existing frame + refine logic
+      const landRect = computeLandBBoxScreen(cells, getHeight, getXY, sl);
+      drawDebugBounds(_safeVP, landRect);
+      const frame = chooseBestFrameRect(_safeVP, landRect, _satMask, 10);
+      if (frame) {
+        const k = (window.__zoom && window.__zoom.k) || window.zoomK || 1;
+        const label = (window.__oceanName || "Ocean");
+        const refined = refineRectForLabel(frame, label, k, {
+          maxPx: 36, minPx: 12, stepPx: 1, padding: 10, letterSpacing: 0.6, family: "serif", lineHeight: 1.2, maxLines: 3
+        }, _safeVP, _satMask);
+        if (refined?.best?.ok) {
+          const bucket = placementsForCurrentEpoch();
+          bucket.ocean = { rect: refined.rect, best: refined.best, k };
+          drawOceanDebugRect(refined.rect, "frame-refine");
+          console.log("[step1.5:ocean] refined frame→rect", { original: frame, refined: refined.rect, score: refined.best.score });
+          if (typeof step2RenderOceanLabel === "function") step2RenderOceanLabel();
+          return;
+        }
+      }
+
+      console.warn("[ocean] ❌ No SAT or frame candidate produced a fit; skipping render.");
     }
   }
 }

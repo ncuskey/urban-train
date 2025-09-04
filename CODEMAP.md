@@ -14,7 +14,8 @@ urban-train/
 │   │   ├── rng.js          # Seedable RNG
 │   │   ├── timers.js       # Lightweight timing helpers
 │   │   ├── zoom-utils.js   # Reliable zoom state access (Step 7)
-│   │   └── idle.js         # Centralized idle scheduler with cancellation (Step 8)
+│   │   ├── idle.js         # Centralized idle scheduler with cancellation (Step 8)
+│   │   └── rect.js         # Rectangle utilities (intersect, clamp, water fraction)
 │   ├── modules/
 │   │   ├── geometry.js     # Poisson-disc sampling + Voronoi + neighbors
 │   │   ├── heightmap.js    # Seed blobs + diffuse heights; clamp 0..1
@@ -42,7 +43,10 @@ urban-train/
 │   │   ├── lod.js          # LOD bands + zoom filtering (Step 4)
 │   │   ├── water-split.js  # Water component topology + kind assignment (Step 3b)
 │   │   ├── anchors-water.js # Water-specific anchor building (Step 3b)
-│   │   └── debug-markers.js # QA dots + rectangles for debugging
+│   │   ├── debug-markers.js # QA dots + rectangles for debugging
+│   │   └── ocean/          # NEW: Ocean label placement system
+│   │       ├── layout.js   # Ocean label layout computation
+│   │       └── sat.js      # SAT utilities (water mask, erosion, largest rectangle)
 │   ├── render/
 │   │   └── layers.js       # SVG layer creation/ordering/cleanup
 │   └── selftest.js         # Sanity checks + badge
@@ -105,13 +109,24 @@ urban-train/
   * **Cancellation**: `.cancel()` method prevents duplicate executions
   * **Signal support**: AbortSignal for early cancellation
   * **Ocean placement**: Deferred to idle time to avoid blocking main thread
-* **Ocean Placement Resilience** (Step 8): Robust ocean label placement with fallback system
-  * **SAT-based placement**: Rectangle finding with viewport bounds and dynamic step sizing
-  * **Fallback labels**: When SAT fails, labels placed at anchor centers with counter-scaling
+* **Ocean Placement System** (Step 8): Advanced SAT-based ocean label placement with water-aware fallbacks
+  * **SAT-based placement**: Screen-space water mask rasterization with coast buffer erosion
+  * **Largest rectangle algorithm**: Histogram-based optimal rectangle finding (O(gw*gh))
+  * **Water-aware frame selection**: Chooses placement sides based on water content, not just area
+  * **Safe viewport clamping**: All placements respect inset boundaries with visual debug overlays
+  * **Rectangle utilities**: Intersect, clamp, and water fraction analysis for precise placement
+  * **Debug visualization**: Cyan rectangles show chosen areas, blue/orange show safe viewport/land bounds
+  * **Fallback system**: Frame→refine approach when SAT fails, with water-aware scoring
   * **Store safety**: Merge-safe updates prevent data loss during label operations
-  * **Cached anchors**: Fallback to cached water anchors when legacy store is empty
-  * **Debug instrumentation**: Comprehensive logging of SAT inputs, thresholds, and results
 * **Utilities**: `timeit` for coarse timings; `window.DEBUG` toggle.
+
+### `src/core/rect.js`
+
+* `intersectRect(a, b)`: Finds intersection of two rectangles, returns `{x, y, w, h}` or zero-area rect
+* `clampPointToRect(x, y, rect, pad)`: Clamps point coordinates within rectangle bounds with optional padding
+* `waterFractionInRect(mask, rect)`: Calculates water cell fraction within a screen-space rectangle
+* **SAT integration**: Works with SAT mask objects for water-aware placement analysis
+* **Coordinate conversion**: Handles screen-to-grid coordinate transformations
 
 ### `src/core/zoom-utils.js`
 
@@ -203,6 +218,18 @@ urban-train/
   * `clearQACandidates(svg)`: Removes QA rectangles
   * World coordinate positioning with zoom transform support
   * Non-scaling strokes for crisp rendering under zoom transforms
+* **`ocean/layout.js`**: Ocean label layout computation
+  * `computeBestLayout(rect, label, k, opts)`: Finds optimal text layout within rectangle bounds
+  * **Font sizing**: Dynamic font size optimization with min/max constraints
+  * **Multi-line support**: Automatic line breaking with configurable max lines
+  * **Scoring system**: Layout quality scoring based on fit, readability, and aesthetics
+* **`ocean/sat.js`**: SAT (Separating Axis Theorem) utilities for ocean placement
+  * `rasterizeWaterMask(viewport, cells, getHeight, getXY, seaLevel, cellPx)`: Creates screen-space water mask
+  * `erodeWater(mask, r)`: Erodes water mask by radius to create coast buffer
+  * `largestRectOnes(mask)`: Finds largest rectangle of water cells using histogram algorithm
+  * `gridToScreenRect(mask, gr)`: Converts grid coordinates back to screen pixels
+  * **Efficient algorithms**: O(gw*gh) complexity for real-time placement
+  * **Configurable resolution**: Adjustable cell size for performance vs precision tradeoffs
 
 ### `src/modules/labels-null-shim.js` (Temporary: Step 0)
 

@@ -1,5 +1,209 @@
 # Urban Train Development Log
 
+## 2025-01-27 - SAT Integration Complete: Advanced Ocean Placement with Water-Aware Fallbacks ✅
+
+### 🎯 **SAT Integration: Advanced Ocean Placement System Complete**
+Successfully implemented a comprehensive SAT (Separating Axis Theorem) based ocean label placement system with water-aware fallbacks, visual debugging, and robust rectangle utilities. The system now intelligently chooses ocean label placement areas based on actual water content rather than just geometric area, with comprehensive debug visualization and fallback mechanisms.
+
+### 📋 **What Was Accomplished**
+
+#### **1. SAT Utilities (`src/labels/ocean/sat.js`)**
+- **Water mask rasterization**: Converts screen-space terrain into grid-based water mask
+- **Coast buffer erosion**: Erodes water areas to keep labels away from coastlines
+- **Largest rectangle algorithm**: Histogram-based optimal rectangle finding (O(gw*gh) complexity)
+- **Coordinate conversion**: Seamless conversion between grid and screen coordinates
+- **Configurable resolution**: Adjustable cell size for performance vs precision tradeoffs
+
+#### **2. Rectangle Utilities (`src/core/rect.js`)**
+- **Rectangle intersection**: Finds overlapping areas between rectangles
+- **Point clamping**: Keeps points within rectangle bounds with optional padding
+- **Water fraction analysis**: Calculates water cell density within screen-space rectangles
+- **SAT integration**: Works directly with SAT mask objects for water analysis
+
+#### **3. Water-Aware Frame Selection**
+- **Intelligent side selection**: Chooses placement sides based on water content, not just area
+- **Aspect ratio optimization**: Lightly penalizes extremely skinny rectangles
+- **Safe viewport clamping**: Ensures all placements respect inset boundaries
+- **Comprehensive scoring**: `score = waterFraction × area × aspectRatioPenalty`
+
+#### **4. Enhanced Ocean Placement Pipeline**
+- **SAT-first approach**: Primary placement uses SAT-based rectangle finding
+- **Water-aware fallbacks**: Frame→refine approach considers water content when SAT fails
+- **Unified mask usage**: Both SAT and frame paths use the same water analysis
+- **Robust error handling**: Graceful fallbacks ensure labels are always placed
+
+#### **5. Visual Debug System**
+- **Debug overlay drawer**: Visualizes chosen placement rectangles with cyan outlines
+- **Bounds visualization**: Blue safe viewport and orange dashed land bbox overlays
+- **Toggle control**: `LabelsDebug.debugBoxes()` for showing/hiding debug overlays
+- **Comprehensive logging**: Detailed console output for placement decisions
+
+### 🔧 **Technical Implementation**
+
+#### **SAT Water Mask System**
+```javascript
+// src/labels/ocean/sat.js - Water mask rasterization
+export function rasterizeWaterMask(viewport, cells, getHeight, getXY, seaLevel, cellPx = 8) {
+  const gw = Math.max(1, Math.floor(viewport.w / cellPx));
+  const gh = Math.max(1, Math.floor(viewport.h / cellPx));
+  const a = new Uint8Array(gw * gh); // 1 = water, 0 = land/unknown
+  
+  // Rasterize cells into grid
+  for (let i = 0; i < cells.length; i++) {
+    const h = getHeight(i);
+    const isWater = Number.isFinite(h) && h <= seaLevel;
+    const xy = getXY(i);
+    if (isWater && xy) {
+      const gx = Math.floor((xy[0] - viewport.x) / cellPx);
+      const gy = Math.floor((xy[1] - viewport.y) / cellPx);
+      if (gx >= 0 && gy >= 0 && gx < gw && gy < gh) {
+        a[gy * gw + gx] = 1;
+      }
+    }
+  }
+  return { a, gw, gh, cellPx, viewport };
+}
+```
+
+#### **Largest Rectangle Algorithm**
+```javascript
+// src/labels/ocean/sat.js - Histogram-based largest rectangle
+export function largestRectOnes(mask) {
+  const { a, gw, gh } = mask;
+  const H = new Uint16Array(gw); // running heights
+  let best = { gx: 0, gy: 0, gw: 0, gh: 0, area: 0 };
+
+  for (let y = 0; y < gh; y++) {
+    // Update histogram
+    for (let x = 0; x < gw; x++) {
+      H[x] = a[y * gw + x] ? (H[x] + 1) : 0;
+    }
+    // Max rectangle in histogram (monotonic stack)
+    const stack = [];
+    for (let x = 0; x <= gw; x++) {
+      const h = x < gw ? H[x] : 0;
+      let start = x;
+      while (stack.length && h < stack[stack.length - 1].h) {
+        const { h: hh, i: ii } = stack.pop();
+        const width = x - ii;
+        const area = hh * width;
+        if (area > best.area) {
+          best = { gx: ii, gy: y - hh + 1, gw: width, gh: hh, area };
+        }
+        start = ii;
+      }
+      stack.push({ h, i: start });
+    }
+  }
+  return best.area > 0 ? best : null;
+}
+```
+
+#### **Water-Aware Frame Selection**
+```javascript
+// src/main.js - Intelligent frame selection
+function chooseBestFrameRect(viewportRect, landRect, mask, margin = 8) {
+  // Generate 4 frame rectangles (top, bottom, left, right)
+  const frames = [
+    { x: vX, y: vY, w: viewportW, h: Math.max(0, T - vY), side: "top" },
+    { x: vX, y: B, w: viewportW, h: Math.max(0, vY+viewportH - B), side: "bottom" },
+    { x: vX, y: T, w: Math.max(0, L - vX), h: Math.max(0, B - T), side: "left" },
+    { x: R, y: T, w: Math.max(0, vX+viewportW - R), h: Math.max(0, B - T), side: "right" }
+  ].filter(r => r.w > 16 && r.h > 16);
+
+  // Score by water content * area * aspect ratio penalty
+  let best = null;
+  for (const r of frames) {
+    const fr = intersectRect(r, viewportRect); // ensure inside safe viewport
+    if (fr.w < 16 || fr.h < 16) continue;
+    const wf = mask ? waterFractionInRect(mask, fr) : 1;
+    const area = fr.w * fr.h;
+    const score = wf * area * arPenalty(fr);
+    if (!best || score > best.__score) best = r;
+  }
+  return best?.__rect || null;
+}
+```
+
+#### **Visual Debug System**
+```javascript
+// src/main.js - Debug overlay visualization
+function drawDebugBounds(safeVP, landRect) {
+  const layer = ensureOceanDebugLayer();
+  // Blue safe viewport
+  layer.append("rect").attr("class", "debug-safe-vp")
+    .style("fill", "none").style("stroke", "#60a5fa")
+    .style("stroke-width", 1.5).style("vector-effect", "non-scaling-stroke");
+  // Orange dashed land bbox
+  if (landRect) layer.append("rect").attr("class", "debug-land-bbox")
+    .style("fill", "none").style("stroke", "#f59e0b")
+    .style("stroke-dasharray", "4 3").style("stroke-width", 1.5);
+}
+```
+
+### 🎨 **Visual Debug System**
+
+#### **Debug Overlay Colors**
+- **Blue solid**: Safe viewport (inset from screen edges)
+- **Orange dashed**: Land bounding box (computed from terrain data)
+- **Cyan solid**: Final chosen placement area (SAT or frame-based)
+- **Cyan center tick**: Exact label anchor point
+
+#### **Debug Controls**
+- `LabelsDebug.debugBoxes(true)` - Show all debug overlays
+- `LabelsDebug.debugBoxes(false)` - Hide all debug overlays
+- Console logging shows water fractions, scores, and placement decisions
+
+### 🚀 **Performance & Quality Improvements**
+
+#### **Algorithm Efficiency**
+- **O(gw*gh) complexity**: Linear time for largest rectangle finding
+- **Configurable resolution**: 8px cells provide good balance of speed vs precision
+- **Early exit optimizations**: Single-line fits win immediately
+- **Cached computations**: Water masks reused across placement attempts
+
+#### **Placement Quality**
+- **Water-aware selection**: Prefers areas with higher water content
+- **Aspect ratio optimization**: Avoids extremely skinny rectangles
+- **Coast buffer**: 12px erosion keeps labels away from coastlines
+- **Safe boundaries**: All placements respect viewport insets
+
+#### **Robustness**
+- **Multiple fallback paths**: SAT → frame→refine → anchor-based placement
+- **Error handling**: Graceful degradation when SAT fails
+- **Debug instrumentation**: Comprehensive logging for troubleshooting
+- **Visual feedback**: Immediate visual confirmation of placement decisions
+
+### 📊 **System Integration**
+
+#### **Unified Water Analysis**
+- Both SAT and frame-based paths use the same water mask
+- Consistent water fraction calculations across all placement methods
+- Shared rectangle utilities for intersection and clamping operations
+
+#### **Debug API Integration**
+- `LabelsDebug.debugBoxes()` controls all debug overlays
+- Console logging provides detailed placement decision information
+- Visual debugging makes algorithm behavior transparent
+
+#### **Performance Monitoring**
+- Comprehensive logging of SAT mask dimensions and processing time
+- Frame scoring shows water fractions and aspect ratio penalties
+- Debug overlays provide immediate visual feedback
+
+### 🎯 **Next Steps**
+
+The SAT-based ocean placement system is now complete with:
+- ✅ Water-aware placement using actual terrain data
+- ✅ Efficient algorithms for real-time performance
+- ✅ Comprehensive debug visualization
+- ✅ Robust fallback mechanisms
+- ✅ Unified rectangle utilities
+
+The system provides intelligent, water-aware ocean label placement that significantly improves placement quality while maintaining excellent performance and providing comprehensive debugging capabilities.
+
+---
+
 ## 2025-01-27 - Step 1 Complete: Ocean Label Layout Computation + Debug Visualization ✅
 
 ### 🎯 **Step 1: Ocean Label Layout Computation + Debug Visualization Complete**
