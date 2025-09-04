@@ -85,7 +85,7 @@ import { makeAnchorIndex } from "./labels/spatial-index.js";
 import { enrichAnchors } from "./labels/enrich.js";
 import { attachStyles } from "./labels/style-apply.js";
 import { computeWaterComponentsTopo, applyWaterKindsToAnchors } from "./labels/water-split.js";
-import { buildWaterAnchors } from "./labels/anchors-water.js";
+import { buildWaterAnchors, areWaterAnchorsValid } from "./labels/anchors-water.js";
 import { renderQAWaterAnchors, syncQAWaterRadius, renderQACandidates, clearQACandidates, renderQACollision } from "./labels/debug-markers.js";
 import { computeLOD, visibleAtK } from "./labels/lod.js";
 import { makeCandidates } from "./labels/placement/candidates.js";
@@ -1044,13 +1044,16 @@ window.reclassWater = (opts = {}) => {
       window.__anchorsStyled   = styled;
 
       // Rebuild water anchors after reclassification
-      const waterAnchors = buildWaterAnchors({
+      const waterAnchorsBundle = buildWaterAnchors({
         components: water.components,
         polygons: window.currentPolygons,
         mapW: mapW,
-        mapH: mapH
+        mapH: mapH,
+        seaLevel: sl
       });
+      const waterAnchors = waterAnchorsBundle.anchors;
       window.__waterAnchors = waterAnchors;
+      state.cachedWaterAnchors = waterAnchorsBundle; // stash bundle for deferred placement
 
       const count = k => refined.filter(a => a.kind === k).length;
       console.log("[water:tune]", {
@@ -1628,12 +1631,15 @@ async function generate(count) {
     }, water.metrics);
 
     // Build one anchor per water component (ocean, sea, lake)
-    const waterAnchors = buildWaterAnchors({
+    const waterAnchorsBundle = buildWaterAnchors({
       components: water.components,
       polygons: window.currentPolygons,
       mapW: mapWidth,
-      mapH: mapHeight
+      mapH: mapHeight,
+      seaLevel: sl
     });
+    const waterAnchors = waterAnchorsBundle.anchors;
+    state.cachedWaterAnchors = waterAnchorsBundle; // stash bundle for deferred placement
 
     const waterAnchorsStyled = attachStyles(waterAnchors);
 
@@ -1800,12 +1806,22 @@ async function generate(count) {
       }
       console.log(`${tag} height stats: count=${c} min=${min.toFixed(3)} max=${max.toFixed(3)} mean=${(sum/c).toFixed(3)}`);
     })('[post-refine]', polygons);
-    
+
+    // Clamp heights to [0,1] before feature classification
+    {
+      const arr = polygons.map(p => p.height ?? 0);
+      clamp01(arr);
+      polygons.forEach((p, i) => { p.height = arr[i]; });
+      // (Optional) quick sanity log
+      // console.log('[pre-features] heights clamped');
+    }
+
     // process the calculations
     markFeatures({
       diagram,
       polygons,
-      rng
+      rng,
+      seaLevel: sl
     });
     
     // Old labeling system removed
@@ -2681,13 +2697,35 @@ async function generate(count) {
     let oceanCount = oceanLabels.length;
     
     if (oceanCount === 0) {
-      const cached = getLastWaterAnchors?.();
-      if (cached?.oceans?.length) {
-        console.log("[ocean] Fallback to cached water anchors:", { oceans: cached.oceans.length });
-        oceans = cached.oceans;
+      // Resolve seaLevel from global state (same pattern as other deferred functions)
+      const seaLevel = (typeof resolveSeaLevel === "function")
+        ? resolveSeaLevel(window.__mapState, window.__options)
+        : (window.DEFAULT_SEA_LEVEL || 0.20);
+        
+      if (state.cachedWaterAnchors && areWaterAnchorsValid(state.cachedWaterAnchors, {
+          seaLevel: seaLevel,
+          polygonsCount: window.currentPolygons?.length ?? 0,
+          components: window.__waterComponents
+        })) {
+        console.log("[ocean] Using validated cached water anchors");
+        oceans = state.cachedWaterAnchors.anchors.filter(a => a.kind === 'ocean');
         oceanCount = oceans.length;
       } else {
-        console.warn("[ocean] No oceans available in store or cache — skipping ocean placement this frame.");
+        console.log("[ocean] Rebuilding water anchors (no cache or invalid)");
+        const bundle = buildWaterAnchors({ 
+          components: window.__waterComponents, 
+          polygons: window.currentPolygons, 
+          mapW: mapWidth, 
+          mapH: mapHeight, 
+          seaLevel: seaLevel 
+        });
+        state.cachedWaterAnchors = bundle;
+        oceans = bundle.anchors.filter(a => a.kind === 'ocean');
+        oceanCount = oceans.length;
+      }
+      
+      if (oceanCount === 0) {
+        console.warn("[ocean] No oceans available after rebuild — skipping ocean placement this frame.");
         return; // Bail early; nothing to place
       }
     }

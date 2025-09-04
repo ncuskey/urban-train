@@ -1,5 +1,101 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Water Anchors Cap + Cache Validation ✅
+
+### 🎯 **Water Anchors Cap + Cache Validation Complete**
+Successfully implemented robust water anchors capping and cache validation system to prevent stale anchors and over-emission. These patches ensure that water anchors are properly validated before reuse and capped to prevent excessive generation.
+
+### 📋 **What Was Accomplished**
+
+#### **1. Anchors-water.js - Anchor Capping System**
+- **Added `MAX_WATER_ANCHORS_PER_COMPONENT = 1`** constant to limit anchors per component
+- **Added `enforceAnchorCap()`** function to group anchors by component and keep only the best ones
+- **Added `hashComponentsSummary()`** function to create hash from component counts for cache validation
+- **Updated `buildWaterAnchors()`** function to accept `seaLevel` parameter and return `{anchors, meta}` bundle
+
+#### **2. Anchors-water.js - Cache Validation System**
+- **Added `areWaterAnchorsValid()`** function to validate cached anchors before reuse
+- **Validates seaLevel, polygonsCount, and componentsHash** to ensure cache is still valid
+- **Provides debug logging** when cache is invalid or when over-emission is detected
+- **Returns boolean** indicating whether cached anchors can be safely reused
+
+#### **3. Main.js - Enhanced Cache Management**
+- **Updated import** to include `areWaterAnchorsValid` function
+- **Modified both `buildWaterAnchors` calls** to pass `seaLevel` parameter and store meta bundle
+- **Enhanced cache validation** in `placeOceanLabelsAfterAutofit()` function
+- **Added fallback rebuild** when cache is invalid or missing
+- **Fixed scope issue** by resolving seaLevel from global state in deferred functions
+
+### 🔧 **Technical Implementation**
+
+#### **Anchor Capping System**
+```javascript
+function enforceAnchorCap(anchors, maxPerComp = MAX_WATER_ANCHORS_PER_COMPONENT) {
+  const byComp = new Map();
+  for (const a of anchors) {
+    const key = a.componentId ?? a.featureId ?? a.compId ?? a.id;
+    if (key == null) continue;
+    if (!byComp.has(key)) byComp.set(key, []);
+    byComp.get(key).push(a);
+  }
+  const kept = [];
+  for (const [, list] of byComp) {
+    list.sort((u, v) => (v.score ?? v.area ?? 0) - (u.score ?? u.area ?? 0));
+    kept.push(...list.slice(0, maxPerComp));
+  }
+  return kept;
+}
+```
+
+#### **Cache Validation System**
+```javascript
+export function areWaterAnchorsValid(cached, {seaLevel, polygonsCount, components}) {
+  if (!cached || !cached.meta) return false;
+  const want = {
+    seaLevel: seaLevel ?? 0.2,
+    polygonsCount: polygonsCount ?? 0,
+    componentsHash: hashComponentsSummary({
+      oceans: components?.oceans ?? 0,
+      seas: components?.seas ?? 0,
+      lakes: components?.lakes ?? 0,
+      total: components?.total ?? ((components?.oceans ?? 0) + (components?.seas ?? 0) + (components?.lakes ?? 0))
+    })
+  };
+  const ok = cached.meta.seaLevel === want.seaLevel
+          && cached.meta.polygonsCount === want.polygonsCount
+          && cached.meta.componentsHash === want.componentsHash;
+  if (!ok) {
+    console.debug('[water:anchors] cache invalid', {have: cached.meta, want});
+  }
+  return ok;
+}
+```
+
+#### **Scope Issue Fix**
+```javascript
+// Resolve seaLevel from global state (same pattern as other deferred functions)
+const seaLevel = (typeof resolveSeaLevel === "function")
+  ? resolveSeaLevel(window.__mapState, window.__options)
+  : (window.DEFAULT_SEA_LEVEL || 0.20);
+```
+
+### 🎯 **Benefits**
+- **Prevents stale anchors**: Cache validation ensures anchors match current seaLevel and polygon count
+- **Caps over-emission**: Limits anchors to 1 per component, preventing excessive anchor generation
+- **Better debugging**: Enhanced logging shows anchor counts, meta data, and validation status
+- **Graceful fallback**: Automatically rebuilds anchors when cache is invalid
+- **Performance**: Reuses valid cached anchors instead of rebuilding unnecessarily
+- **Defensive programming**: Warns when too many anchors are generated, helping catch bugs
+- **Scope safety**: Fixed deferred function scope issues by resolving seaLevel from global state
+
+### 🧪 **Testing Scenarios**
+- **Normal operation**: Maps generate with proper anchor capping and caching
+- **Cache validation**: Stale anchors are detected and rebuilt when seaLevel or polygon count changes
+- **Over-emission detection**: Console warnings when too many anchors are generated
+- **Deferred placement**: Ocean placement works correctly in idle callbacks with proper scope
+
+---
+
 ## 2025-01-27 - Sampling Guard + Neighbor IDs ✅
 
 ### 🎯 **Sampling Guard + Neighbor IDs Complete**

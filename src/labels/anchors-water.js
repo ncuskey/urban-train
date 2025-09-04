@@ -1,5 +1,31 @@
 // src/labels/anchors-water.js
 
+export const MAX_WATER_ANCHORS_PER_COMPONENT = 1;
+
+function hashComponentsSummary(summary) {
+  // summary: {oceans, seas, lakes, total}
+  return `${summary.oceans}|${summary.seas}|${summary.lakes}|${summary.total}`;
+}
+
+function enforceAnchorCap(anchors, maxPerComp = MAX_WATER_ANCHORS_PER_COMPONENT) {
+  // Group by componentId, keep top-scoring anchors (lowest label cost / highest area / your score field)
+  const byComp = new Map();
+  for (const a of anchors) {
+    // Expect a.componentId (or a.featureId). If your field is different, adjust the key below.
+    const key = a.componentId ?? a.featureId ?? a.compId ?? a.id;
+    if (key == null) continue;
+    if (!byComp.has(key)) byComp.set(key, []);
+    byComp.get(key).push(a);
+  }
+  const kept = [];
+  for (const [, list] of byComp) {
+    // Sort descending by your existing ranking metric; fall back to area, then stable
+    list.sort((u, v) => (v.score ?? v.area ?? 0) - (u.score ?? u.area ?? 0));
+    kept.push(...list.slice(0, maxPerComp));
+  }
+  return kept;
+}
+
 // Module-scope cache of the most recent water anchors.
 // Shape: { oceans: Anchor[], seas: Anchor[], lakes: Anchor[], total: number }
 let __lastWaterAnchors = null;
@@ -74,7 +100,7 @@ function polygonCentroid(points) {
  * Build one anchor per water component (ocean/sea/lake).
  * Returns the anchors array and also sets window.__waterAnchors.
  */
-export function buildWaterAnchors({ components = [], polygons = [], mapW = 640, mapH = 360 }) {
+export function buildWaterAnchors({ components = [], polygons = [], mapW = 640, mapH = 360, seaLevel }) {
   const mapA = mapW * mapH;
   const normAreaPx = a => {
     if (a == null) return 0;
@@ -179,13 +205,35 @@ export function buildWaterAnchors({ components = [], polygons = [], mapW = 640, 
     });
   }
 
-  window.__waterAnchors = anchors;
+  // Cap anchors per component (defensive)
+  const capped = enforceAnchorCap(anchors, MAX_WATER_ANCHORS_PER_COMPONENT);
+
+  // Meta for cache validation
+  const summary = {oceans: 0, seas: 0, lakes: 0, total: 0};
+  for (const a of capped) {
+    if (a.kind === 'ocean') summary.oceans++;
+    else if (a.kind === 'sea') summary.seas++;
+    else if (a.kind === 'lake') summary.lakes++;
+  }
+  summary.total = summary.oceans + summary.seas + summary.lakes;
+  
+  const meta = {
+    seaLevel: seaLevel ?? 0.2,
+    polygonsCount: Array.isArray(polygons) ? polygons.length : 0,
+    componentsHash: hashComponentsSummary(summary)
+  };
+
+  if (capped.length > (summary.total * MAX_WATER_ANCHORS_PER_COMPONENT)) {
+    console.warn('[water:anchors] over-emit detected; trimming', {emitted: anchors.length, kept: capped.length, summary, MAX_WATER_ANCHORS_PER_COMPONENT});
+  }
+
+  window.__waterAnchors = capped;
 
   const result = { 
-    oceans: anchors.filter(a => a.kind === 'ocean'), 
-    seas: anchors.filter(a => a.kind === 'sea'), 
-    lakes: anchors.filter(a => a.kind === 'lake'), 
-    total: anchors.length 
+    oceans: capped.filter(a => a.kind === 'ocean'), 
+    seas: capped.filter(a => a.kind === 'sea'), 
+    lakes: capped.filter(a => a.kind === 'lake'), 
+    total: capped.length 
   };
 
   console.log('[water:anchors] built',
@@ -195,9 +243,30 @@ export function buildWaterAnchors({ components = [], polygons = [], mapW = 640, 
       lakes:  result.lakes.length,
       total:  result.total
     },
-    { sample: anchors.slice(0, 5), used }
+    { count: capped.length, meta, sample: capped.slice(0, 5), used }
   );
 
   __lastWaterAnchors = result;
-  return anchors;
+  return {anchors: capped, meta};
+}
+
+export function areWaterAnchorsValid(cached, {seaLevel, polygonsCount, components}) {
+  if (!cached || !cached.meta) return false;
+  const want = {
+    seaLevel: seaLevel ?? 0.2,
+    polygonsCount: polygonsCount ?? 0,
+    componentsHash: hashComponentsSummary({
+      oceans: components?.oceans ?? 0,
+      seas: components?.seas ?? 0,
+      lakes: components?.lakes ?? 0,
+      total: components?.total ?? ((components?.oceans ?? 0) + (components?.seas ?? 0) + (components?.lakes ?? 0))
+    })
+  };
+  const ok = cached.meta.seaLevel === want.seaLevel
+          && cached.meta.polygonsCount === want.polygonsCount
+          && cached.meta.componentsHash === want.componentsHash;
+  if (!ok) {
+    console.debug('[water:anchors] cache invalid', {have: cached.meta, want});
+  }
+  return ok;
 }
