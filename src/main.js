@@ -40,7 +40,7 @@ function timeit(tag, fn) {
   const t0 = performance.now();
   const out = fn();
   const t1 = performance.now();
-  console.log(`[cost] ${tag}: ${(t1-t0).toFixed(1)} ms`);
+  // console.log(`[cost] ${tag}: ${(t1-t0).toFixed(1)} ms`);
   return out;
 }
 
@@ -52,14 +52,14 @@ function safeInsertBefore(parentSel, enterSel, tag, beforeSelector) {
   const beforeNode = beforeSelector ? parentSel.select(beforeSelector).node() : null;
 
   const sameParent = !!beforeNode && beforeNode.parentNode === parentNode;
-  console.log('[safeInsertBefore] parent=#' + (parentNode && parentNode.id),
-              { beforeSelector, beforeNodeTag: beforeNode && beforeNode.tagName, sameParent });
+  // console.log('[safeInsertBefore] parent=#' + (parentNode && parentNode.id),
+  //             { beforeSelector, beforeNodeTag: beforeNode && beforeNode.tagName, sameParent });
 
   if (sameParent) {
     // Per-group insert (D3 v5): pass a function returning the before node
     return enterSel.insert(tag, function() { return beforeNode; });
   } else {
-    console.warn('[safeInsertBefore] anchor invalid or not in parent; using append');
+    // console.warn('[safeInsertBefore] anchor invalid or not in parent; using append');
     return enterSel.append(tag);
   }
 }
@@ -84,7 +84,10 @@ import { refineCoastlineAndRebuild } from "./modules/refine.js";
 import { defineMapCoordinates, assignLatitudes, assignLongitudes } from './modules/geo.js';
 import { assignTemperatures, assignPrecipitation } from './modules/climate.js';
 import { generateRivers } from './modules/rivers.js';
-import { renderRivers } from './render/rivers.js';
+import { renderRiversEdges } from './render/rivers-edges.js';
+import { computeLakes } from './modules/lakes.js';
+import { renderLakes } from './render/lakes.js';
+import { computeWatersheds } from './modules/watersheds.js';
 import { buildProtoAnchors } from "./labels/anchors.js";
 import { makeAnchorIndex } from "./labels/spatial-index.js";
 import { enrichAnchors } from "./labels/enrich.js";
@@ -149,7 +152,7 @@ function drawOceanDebugRect(rect, kind = "sat") {
     .attr("x1", cx-6).attr("y1", cy).attr("x2", cx+6).attr("y2", cy)
     .style("stroke", "#22d3ee").style("stroke-width", 2)
     .style("vector-effect", "non-scaling-stroke").style("opacity", .8);
-  console.log("[debug:ocean] drew rect", { kind, rect });
+  // console.log("[debug:ocean] drew rect", { kind, rect });
 }
 function clearOceanDebug() {
   ensureOceanDebugLayer().selectAll("*").remove();
@@ -195,7 +198,7 @@ async function waitForZoomSettle({ epsilon = 1e-4, stableFrames = 2, maxWait = 1
       }
       last = t;
       if (stable >= stableFrames || (now - start) > maxWait) {
-        console.log("[autofit:gate] settled", { k: t.k, x: t.x, y: t.y, ms: Math.round(now - start) });
+        // console.log("[autofit:gate] settled", { k: t.k, x: t.x, y: t.y, ms: Math.round(now - start) });
         resolve();
       } else {
         requestAnimationFrame(tick);
@@ -302,14 +305,14 @@ function clearLabelDOM() {
   world.selectAll("g.ocean-label, text.label").remove();
   // Remove debug marks
   world.selectAll("circle.debug-ocean-dot, rect.debug-ocean-rect").remove();
-  console.log("[step0] Cleared world label DOM (kept containers)");
+  // console.log("[step0] Cleared world label DOM (kept containers)");
 }
 
 // Cancel any pending placement work (idle handles, timeouts).
 function cancelPendingPlacement() {
   try { if (typeof _oceanIdleHandle !== "undefined" && _oceanIdleHandle) { cancelIdle(_oceanIdleHandle); } } catch {}
   // Add other handles here if you introduce more schedulers later.
-  console.log("[step0] Canceled pending placement handles");
+  // console.log("[step0] Canceled pending placement handles");
 }
 
 // Reset store to an empty, normalized shape without clobbering helpers.
@@ -326,7 +329,7 @@ function resetLabelStoreClean() {
       window.__labelsStore.total = 0;
     }
   }
-  console.log("[step0] Store reset (oceans=0, nonOcean=0, total=0)");
+  // console.log("[step0] Store reset (oceans=0, nonOcean=0, total=0)");
 }
 
 // Public Step 0: bump epoch, cancel pending work, clear DOM, reset store.
@@ -336,7 +339,7 @@ export function step0ClearAfterAutofit() {
   clearLabelDOM();
   resetLabelStoreClean();
   clearOldPlacements();
-  console.log("[step0] Ready for fresh placement. epoch=", epoch);
+  // console.log("[step0] Ready for fresh placement. epoch=", epoch);
 }
 
 // ── Dev-only debug API (exposed to console)
@@ -351,7 +354,7 @@ if (typeof window !== "undefined") {
     epoch: () => getPlacementEpoch?.(),
     bumpEpoch: () => bumpPlacementEpoch?.(),
     // Convenience: cancel any pending scheduled placement now
-    cancel: () => { try { cancelPendingPlacement(); } catch (e) { console.warn(e); } },
+    cancel: () => { try { cancelPendingPlacement(); } catch (e) { /* console.warn(e); */ } },
     // Step 1 inspection
     oceanBest: () => { const p = placementsForCurrentEpoch(); return p?.ocean || null; },
     // Step 2 rendering
@@ -361,7 +364,7 @@ if (typeof window !== "undefined") {
     waitForZoomSettle: (opts) => waitForZoomSettle(opts),
     debugBoxes:  (on) => { __debugBoxesOn = !!on; if (!on) clearOceanDebug(); return __debugBoxesOn; },
   });
-  console.log("[debug] window.LabelsDebug ready (step0 | epoch | bumpEpoch | cancel | oceanBest | oceanRender | oceanErase | waitForZoomSettle | debugBoxes)");
+  // console.log("[debug] window.LabelsDebug ready (step0 | epoch | bumpEpoch | cancel | oceanBest | oceanRender | oceanErase | waitForZoomSettle | debugBoxes)");
 }
 
 // --- water config ---
@@ -420,7 +423,7 @@ export function setFeatureLabelsStore(next) {
     !Array.isArray(normNext.nonOcean) &&
     Object.keys(normNext).every(k => ["total", "ocean", "oceans", "nonOcean"].includes(k) && typeof normNext[k] !== "object");
   if (onlyNumbersNoArrays) {
-    console.warn("[store] ignored numeric-only payload (no arrays provided)", normNext);
+    // console.warn("[store] ignored numeric-only payload (no arrays provided)", normNext);
     return __labelsStore;
   }
 
@@ -1125,7 +1128,7 @@ const state = {
 // Build robust XY→cell accessor using simple nearest-neighbor search (D3 v5 compatible)
 function buildXYAccessor(cells) {
   if (!cells || cells.length === 0) {
-    console.warn('[accessor] No cells provided to buildXYAccessor');
+    // console.warn('[accessor] No cells provided to buildXYAccessor');
     return null;
   }
   
@@ -1307,7 +1310,7 @@ function afterGenerate() {
   // Also ensure the XY accessor is built for ocean label placement
   if (!state.getCellAtXY && window.currentPolygons) {
     state.getCellAtXY = buildXYAccessor(window.currentPolygons);
-    console.log(`[afterGenerate] Built XY accessor for ${window.currentPolygons.length} cells`);
+    // console.log(`[afterGenerate] Built XY accessor for ${window.currentPolygons.length} cells`);
   }
 }
 
@@ -1563,7 +1566,7 @@ async function generate(count) {
           if (h > max) max = h;
           sum += h; c++;
         }
-        console.log(`${tag} height stats: count=${c} min=${min.toFixed(3)} max=${max.toFixed(3)} mean=${(sum/c).toFixed(3)}`);
+        // console.log(`${tag} height stats: count=${c} min=${min.toFixed(3)} max=${max.toFixed(3)} mean=${(sum/c).toFixed(3)}`);
       })('[pre-refine]', polygons);
       
       // More aggressive spacing for noticeable refinement:
@@ -1590,7 +1593,7 @@ async function generate(count) {
         // Recompute neighbors after topology change
         detectNeighbors(diagram, polygons);
 
-        console.log(`[refine] Added ${refined.added} coastal points; polygons now: ${polygons.length}`);
+        // console.log(`[refine] Added ${refined.added} coastal points; polygons now: ${polygons.length}`);
       }
     }
     // =====================================================================
@@ -1600,8 +1603,8 @@ async function generate(count) {
     const anchorIndex = makeAnchorIndex(anchors);
     window.__anchors = anchors;
     window.__anchorIndex = anchorIndex;
-    console.log("[anchors] built", metrics, { sample: anchors.slice(0, 5) });
-    console.log("[anchors:index] size", anchorIndex.size());
+    // console.log("[anchors] built", metrics, { sample: anchors.slice(0, 5) });
+    // console.log("[anchors:index] size", anchorIndex.size());
     
     // Step 3: enrich anchors with kinds + attach styles (no rendering yet)
     const { anchors: enriched, metrics: enrichMetrics } =
@@ -1699,7 +1702,7 @@ async function generate(count) {
     // ── Guard: cap LOD array length to the number of available anchors
     const totalAnchors = combinedStyled.length;
     if (anchorsLOD.length > totalAnchors) {
-      console.warn('[lod] capping LOD array', { from: anchorsLOD.length, to: totalAnchors });
+      // console.warn('[lod] capping LOD array', { from: anchorsLOD.length, to: totalAnchors });
       anchorsLOD.splice(totalAnchors);
     }
     // Invariant: LOD array doesn't exceed total anchors
@@ -1717,15 +1720,15 @@ async function generate(count) {
     // Expose visibleAtK for console debugging
     window.visibleAtK = (arr, k) => visibleAtK(arr, k);
 
-    console.log("[lod] sample",
+    /* console.log("[lod] sample",
       anchorsLOD.slice(0, 5).map(a => ({ id:a.id, kind:a.kind, tier:a.tier, minK:a.lod.minK }))
-    );
-    console.log("[lod] counts", {
+    ); */
+    /* console.log("[lod] counts", {
       total: totalAnchors,
       lod: anchorsLOD.length,
       at_k1: visibleAtK(anchorsLOD, 1.0).length,
       at_k8: visibleAtK(anchorsLOD, 8.0).length,
-    });
+    }); */
 
     // ---- QA dots (respect LOD) ----
     // Expose an updater used by the zoom handler
@@ -1762,7 +1765,7 @@ async function generate(count) {
     // initial draw (pre-zoom) – matches your QA dots flow
     if (hasFlag('qaCandidates')) {
       window.syncQACandidates(1.0);
-      console.log("[qa] candidate rects @k=1.0:", (window.__candidates || []).length);
+      // console.log("[qa] candidate rects @k=1.0:", (window.__candidates || []).length);
     }
 
     // Expose clear function globally for QA testing
@@ -1800,7 +1803,7 @@ async function generate(count) {
       const svgNode = (typeof svg !== 'undefined' && svg.node) ? svg : d3.select('svg');
       renderQACollision?.(svgNode, placed, rejected);
 
-      console.log("[qa:collide] k=%s placed=%d rejected=%d", k.toFixed(2), placed.length, rejected.length);
+      // console.log("[qa:collide] k=%s placed=%d rejected=%d", k.toFixed(2), placed.length, rejected.length);
     };
 
     // initial draw (optional)
@@ -1808,13 +1811,13 @@ async function generate(count) {
       window.syncQACollision(1.0);
     }
 
-    console.log("[anchors:enrich] metrics", enrichMetrics);
-    console.log("[anchors:style] sample",
+    // console.log("[anchors:enrich] metrics", enrichMetrics);
+    /* console.log("[anchors:style] sample",
       styledAnchors.slice(0, 5).map(a => ({
         id: a.id, kind: a.kind, tier: a.tier,
         style: a.style && { category: a.style.category, tier: a.style.tier, size: a.style.size?.[a.tier] }
       }))
-    );
+    ); */
     
     // Build robust XY accessor after refine/Voronoi (when cells have x,y,height,featureType)
     state.getCellAtXY = buildXYAccessor(polygons);
@@ -1848,7 +1851,7 @@ async function generate(count) {
       if (lats.length && lons.length) {
         const minLat = Math.min(...lats), maxLat = Math.max(...lats);
         const minLon = Math.min(...lons), maxLon = Math.max(...lons);
-        console.debug('[coords]', mapCoords, { minLat, maxLat, minLon, maxLon });
+        // console.debug('[coords]', mapCoords, { minLat, maxLat, minLon, maxLon });
       }
     }
 
@@ -1865,9 +1868,9 @@ async function generate(count) {
     {
       const stats = assignTemperatures(polygons, state.mapCoords, { seaLevel: sl });
       if (stats.count > 0) {
-        console.debug('[climate:temp]', { count: stats.count, min: stats.min, mean: stats.mean, max: stats.max });
+        // console.debug('[climate:temp]', { count: stats.count, min: stats.min, mean: stats.mean, max: stats.max });
       } else {
-        console.warn('[climate:temp] no cells processed');
+        // console.warn('[climate:temp] no cells processed');
       }
     }
 
@@ -1879,13 +1882,20 @@ async function generate(count) {
       seaLevel: sl
     });
 
+    // Lakes (priority-flood over land): detect depressions and outlets
+    {
+      const stats = computeLakes(polygons, { seaLevel: sl });
+      console.debug(stats.msg);
+      renderLakes(polygons, d3.select('#lakes'));
+    }
+
     // Step 5b — assign per-cell precipitation (arbitrary units)
     {
       const stats = assignPrecipitation(polygons, state.mapCoords, { seaLevel: sl });
       if (stats.count > 0) {
-        console.debug('[climate:prec]', stats);
+        // console.debug('[climate:prec]', stats);
       } else {
-        console.warn('[climate:prec] no cells processed');
+        // console.warn('[climate:prec] no cells processed');
       }
     }
 
@@ -1893,7 +1903,18 @@ async function generate(count) {
     {
       const stats = generateRivers(polygons, { seaLevel: sl });
       console.debug('[rivers:gen]', stats);
-      renderRivers(polygons, d3.select('#rivers'));
+      renderRiversEdges(polygons, d3.select('#rivers'));
+    }
+
+    // Watersheds & orders (Strahler/Shreve) + discharge Q
+    {
+      const ws = computeWatersheds(polygons, state.mapCoords, { seaLevel: sl });
+      console.debug('[watersheds]', {
+        basins: ws.basins, sources: ws.sources, mouths: ws.mouths,
+        qSum: +ws.qSum.toFixed(2), qAtMouths: +ws.qAtMouths.toFixed(2)
+      });
+      // Re-render rivers (edge geometry) to use Q-based widths now that Q is available
+      renderRiversEdges(polygons, d3.select('#rivers'));
     }
 
     // Initialize / refresh the Layers panel (idempotent; safe on re-gen)
@@ -1966,15 +1987,15 @@ async function generate(count) {
   // OPTIONAL: auto-fit after generation
   const AUTO_FIT = true;
   if (AUTO_FIT) {
-    console.log('[autofit] Starting autofit to land...');
+    // console.log('[autofit] Starting autofit to land...');
     
     // Method 1: Promise-based autofit (preferred approach)
     try {
-      console.log('[autofit] 🎯 Method 1: Using Promise-based autofit...');
+      // console.log('[autofit] 🎯 Method 1: Using Promise-based autofit...');
       
       // Use the existing fitLand function which returns a Promise
       await window.fitLand();
-      console.log('[autofit] ✅ Promise-based autofit completed successfully');
+      // console.log('[autofit] ✅ Promise-based autofit completed successfully');
       
       // after autofit success:
       if (window.syncQADotsLOD)    window.syncQADotsLOD(getZoomScale());
@@ -2014,11 +2035,11 @@ async function generate(count) {
       })();
       
     } catch (error) {
-      console.warn('[autofit] Method 1 failed, falling back to Method 2:', error);
+      // console.warn('[autofit] Method 1 failed, falling back to Method 2:', error);
       
       // Method 2: Transition event handling
       try {
-        console.log('[autofit] 🔄 Method 2: Using transition event handling...');
+        // console.log('[autofit] 🔄 Method 2: Using transition event handling...');
         
         // Create a transition and set up event handlers
         const tr = svgSel.transition().duration(600);
@@ -2084,10 +2105,10 @@ async function generate(count) {
         lockZoomToAutofitLevel();
         
       } catch (error2) {
-        console.warn('[autofit] Method 2 failed, falling back to Method 3:', error2);
+        // console.warn('[autofit] Method 2 failed, falling back to Method 3:', error2);
         
         // Method 3: Direct call with afterLayout fallback
-        console.log('[autofit] 🔄 Method 3: Using afterLayout fallback...');
+        // console.log('[autofit] 🔄 Method 3: Using afterLayout fallback...');
         await window.fitLand();
         
         // after autofit success:
@@ -3058,7 +3079,7 @@ function toggleBlobCenters() {
 // Toggle label scaling mode - DISABLED: Now using per-label transforms
 function toggleLabelScaling() {
   if (window.DEBUG) {
-    console.log('Label scaling toggle disabled - now using per-label transform system');
+    // console.log('Label scaling toggle disabled - now using per-label transform system');
     console.log('Labels automatically maintain constant size with proper anchoring');
   }
 }

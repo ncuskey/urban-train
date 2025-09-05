@@ -69,7 +69,7 @@ export const FANTASY_FONTS = {
 export function switchFont(fontKey) {
   const font = FANTASY_FONTS[fontKey];
   if (!font) {
-    console.warn(`Unknown font key: ${fontKey}. Available:`, Object.keys(FANTASY_FONTS));
+    // console.warn(`Unknown font key: ${fontKey}. Available:`, Object.keys(FANTASY_FONTS));
     return false;
   }
   
@@ -77,7 +77,7 @@ export function switchFont(fontKey) {
   document.documentElement.style.setProperty('--label-font', font.family);
   document.documentElement.style.setProperty('--label-font-family', font.family);
   
-  console.log(`Switched to ${font.name}: ${font.description}`);
+  // console.log(`Switched to ${font.name}: ${font.description}`);
   return true;
 }
 
@@ -102,9 +102,9 @@ export function getCurrentFont() {
  * List all available fonts with descriptions
  */
 export function listFonts() {
-  console.log('Available fantasy fonts:');
+  // console.log('Available fantasy fonts:');
   for (const [key, font] of Object.entries(FANTASY_FONTS)) {
-    console.log(`  ${key}: ${font.name} - ${font.description}`);
+    // console.log(`  ${key}: ${font.name} - ${font.description}`);
   }
 }
 

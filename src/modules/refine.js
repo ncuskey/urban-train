@@ -40,7 +40,7 @@ export function refineCoastlineAndRebuild({
 
   if (!coastalEdges.length) return { samples, diagram, polygons, added: 0 };
 
-  console.log(`[refine] Found ${coastalEdges.length} coastal edges`);
+  // console.log(`[refine] Found ${coastalEdges.length} coastal edges`);
 
   // 2) Build quadtree for de-duplication
   const qt = d3.quadtree()
@@ -82,7 +82,7 @@ export function refineCoastlineAndRebuild({
   }
 
   if (newPoints.length < 10) {
-    console.log(`[refine] Skipping rebuild: only ${newPoints.length} new points`);
+    // console.log(`[refine] Skipping rebuild: only ${newPoints.length} new points`);
     return { samples, diagram, polygons, added: newPoints.length };
   }
 

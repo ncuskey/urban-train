@@ -224,7 +224,7 @@ export function buildWaterAnchors({ components = [], polygons = [], mapW = 640, 
   };
 
   if (capped.length > (summary.total * MAX_WATER_ANCHORS_PER_COMPONENT)) {
-    console.warn('[water:anchors] over-emit detected; trimming', {emitted: anchors.length, kept: capped.length, summary, MAX_WATER_ANCHORS_PER_COMPONENT});
+    // console.warn('[water:anchors] over-emit detected; trimming', {emitted: anchors.length, kept: capped.length, summary, MAX_WATER_ANCHORS_PER_COMPONENT});
   }
 
   window.__waterAnchors = capped;
@@ -236,15 +236,15 @@ export function buildWaterAnchors({ components = [], polygons = [], mapW = 640, 
     total: capped.length 
   };
 
-  console.log('[water:anchors] built',
-    {
-      oceans: result.oceans.length,
-      seas:   result.seas.length,
-      lakes:  result.lakes.length,
-      total:  result.total
-    },
-    { count: capped.length, meta, sample: capped.slice(0, 5), used }
-  );
+  // console.log('[water:anchors] built',
+  //   {
+  //     oceans: result.oceans.length,
+  //     seas:   result.seas.length,
+  //     lakes:  result.lakes.length,
+  //     total:  result.total
+  //   },
+  //   { count: capped.length, meta, sample: capped.slice(0, 5), used }
+  // );
 
   __lastWaterAnchors = result;
   return {anchors: capped, meta};
@@ -266,7 +266,7 @@ export function areWaterAnchorsValid(cached, {seaLevel, polygonsCount, component
           && cached.meta.polygonsCount === want.polygonsCount
           && cached.meta.componentsHash === want.componentsHash;
   if (!ok) {
-    console.debug('[water:anchors] cache invalid', {have: cached.meta, want});
+    // console.debug('[water:anchors] cache invalid', {have: cached.meta, want});
   }
   return ok;
 }

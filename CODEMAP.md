@@ -29,7 +29,9 @@ urban-train/
 │   │   ├── fonts.js        # Font theme helpers
 │   │   ├── geo.js          # Map coordinates & per-cell latitude (Step 4)
 │   │   ├── climate.js      # Temperature assignment by latitude & altitude (Step 5a)
+│   │   ├── lakes.js        # Priority-flood lake detection and outlet routing (Step 6)
 │   │   ├── rivers.js       # River generation: downhill routing + flux accumulation (Step 7)
+│   │   ├── watersheds.js   # Watershed analysis, Strahler/Shreve orders, discharge Q (Step 8)
 │   │   └── refine.js       # Coastline refinement + rebuild cycle
 │   ├── labels/              # NEW: Labeling system (Step 1+)
 │   │   ├── schema.js       # Runtime validation + style lookup builder
@@ -58,7 +60,9 @@ urban-train/
 │   │   └── scalar-legend.js  # Interactive legend for scalar overlays
 │   ├── render/
 │   │   ├── layers.js       # SVG layer creation/ordering/cleanup
-│   │   └── rivers.js       # River rendering: centroid-to-centroid lines with flux-based width
+│   │   ├── rivers.js       # River rendering: centroid-to-centroid lines with flux-based width
+│   │   ├── rivers-edges.js # River rendering: edge-following segments with discharge-based width
+│   │   └── lakes.js        # Lake rendering: polygon fills for priority-flood detected lakes
 │   └── selftest.js         # Sanity checks + badge
 ├── dev/                    # Sandboxes for local testing
 │   ├── test-text-metrics.html    # Text metrics testing (Step 7)
@@ -406,6 +410,30 @@ urban-train/
 * **Self-tests**: Optional geo monotonicity check verifies lat/lon alignment with x/y coordinates
 * **Future use**: Enables climate features (Step 5), scale bar implementation, and distance-based algorithms
 
+### `src/modules/lakes.js` (NEW: Step 6 - Priority-Flood Lakes)
+
+* **Lake detection system**: Uses priority-flood algorithm to detect closed depressions above sea level
+* `computeLakes(polygons, { seaLevel, eps })`: Main lake detection function
+  * **Priority-flood algorithm**: Min-heap based flood-fill from ocean cells outward
+  * **Spill height calculation**: Computes water level needed for each cell to drain to ocean
+  * **Lake identification**: Groups contiguous cells with same spill height into lake regions
+  * **Outlet detection**: Finds single outlet point for each lake where water escapes
+  * **Input requirements**: `polygons[*].height`, `polygons[*].neighbors` must be set
+  * **Output**: Adds `polygons[*].spillHeight`, `polygons[*].lakeId`, `polygons[*].isLake`, `polygons[*].lakeOutlet` fields
+* **Performance optimized**: Efficient min-heap implementation for large maps
+* **Integration**: Called after features, before rivers in main.js
+* **River integration**: Lake cells route directly to their outlets for realistic drainage
+
+### `src/render/lakes.js` (NEW: Step 6 - Lake Rendering)
+
+* **Lake visualization**: Renders lakes as polygon fills with light blue color
+* `renderLakes(polygons, gLakes)`: Main lake rendering function
+  * **Polygon-based rendering**: Fills lake cells with light blue color (#76c8ff)
+  * **Layer management**: Lakes render above land but below coastlines and rivers
+  * **D3 integration**: Uses data join pattern for efficient updates
+* **Visual styling**: 75% opacity fills with no stroke for clean appearance
+* **Layer integration**: Renders into existing `#lakes` group with layer panel support
+
 ### `src/modules/rivers.js` (NEW: Step 7 - River Generation)
 
 * **River generation system**: Creates realistic river networks through downhill routing and flux accumulation
@@ -431,6 +459,36 @@ urban-train/
   * **D3 integration**: Uses data join pattern for efficient updates
 * **Non-scaling stroke**: `vector-effect="non-scaling-stroke"` keeps lines readable at all zoom levels
 * **Layer integration**: Renders into existing `#rivers` group with layer panel support
+
+### `src/modules/watersheds.js` (NEW: Step 8 - Watershed Analysis)
+
+* **Watershed analysis system**: Computes drainage basins, river orders, and discharge calculations
+* `computeWatersheds(polygons, map, { seaLevel })`: Main watershed analysis function
+  * **Watershed identification**: Groups rivers by their drainage basins (mouth-based)
+  * **Strahler ordering**: Hierarchical river ordering where confluences increase order
+  * **Shreve ordering**: Additive ordering that sums upstream contributions
+  * **Discharge calculation**: Realistic discharge proxy using precipitation × area + upstream flow
+  * **Geographic scaling**: Converts pixel areas to km² using latitude-dependent scaling
+  * **Segment length**: Calculates river segment lengths in kilometers using haversine formula
+  * **Input requirements**: `polygons[*].isRiver`, `polygons[*].riverInDeg`, `polygons[*].down`, `polygons[*].lat`, `polygons[*].lon`, `polygons[*].height`, `polygons[*].prec`, `polygons[*].isLake` must be set
+  * **Output**: Adds `polygons[*].basinId`, `polygons[*].orderStrahler`, `polygons[*].orderShreve`, `polygons[*].Q`, `polygons[*].segLenKm` fields
+* **Topological processing**: Uses Kahn's algorithm for proper downstream propagation
+* **Mass balance tracking**: Validates discharge conservation and provides statistics
+* **Integration**: Called after rivers, before labeling in main.js
+
+### `src/render/rivers-edges.js` (NEW: Step 8 - Edge-Following River Rendering)
+
+* **Edge-following river visualization**: Renders rivers using shared Voronoi edges between cells
+* `renderRiversEdges(polygons, gRivers)`: Main edge-based river rendering function
+  * **Shared edge detection**: Finds common edges between adjacent Voronoi cells
+  * **Edge midpoint calculation**: Uses midpoints of shared edges for river path points
+  * **Tolerance-based matching**: Uses 3-decimal precision for robust edge matching
+  * **Discharge-based width**: River width scales from 0.8px to 3.4px based on discharge Q
+  * **Logarithmic scaling**: Uses log10 scaling for better dynamic range visualization
+  * **Fallback compatibility**: Falls back to flux if Q is not available
+* **Realistic river paths**: Rivers follow natural boundaries between cells instead of cutting through
+* **Smooth visualization**: Midpoint-based rendering creates natural-looking river courses
+* **Performance optimized**: Efficient edge detection and rendering for large river networks
 
 ### `src/modules/climate.js` (NEW: Step 5a/5b - Temperature & Precipitation)
 

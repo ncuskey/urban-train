@@ -15,7 +15,7 @@ export function deferIdle(cb, opts = {}) {
 
   const wrapped = (deadline) => {
     if (signal?.aborted) return;
-    try { cb(deadline); } catch (err) { console.error("[idle] callback error:", err); }
+    try { cb(deadline); } catch (err) { /* console.error("[idle] callback error:", err); */ }
   };
 
   if (hasRIC()) {

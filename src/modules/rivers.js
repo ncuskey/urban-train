@@ -58,7 +58,13 @@ export function generateRivers(polygons, {
       const p = polygons[i];
       const h = p.height;
       if (!Number.isFinite(h)) continue;
-      if (h < seaLevel) { p.down = -1; continue; } // water: treated as sinks/outlets
+      if (h < seaLevel) { p.down = -1; continue; } // ocean: sink
+
+      // Lake pass-through: route every lake cell directly to its lake outlet
+      if (p.isLake && Number.isFinite(p.lakeOutlet) && p.lakeOutlet >= 0) {
+        p.down = p.lakeOutlet;
+        continue;
+      }
 
       let best = -1;
       let bestH = h;
@@ -106,7 +112,7 @@ export function generateRivers(polygons, {
 
   for (let i = 0; i < polygons.length; i++) {
     const p = polygons[i];
-    if (p.height >= seaLevel && p.flux >= dynThreshold && p.down !== -1) {
+    if (p.height >= seaLevel && !p.isLake && p.flux >= dynThreshold && p.down !== -1) {
       p.isRiver = true;
     }
   }

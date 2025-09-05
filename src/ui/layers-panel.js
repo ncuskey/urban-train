@@ -14,6 +14,7 @@ import { renderScalarLegend } from "../debug/scalar-legend.js";
 
 const TARGET_SELECTOR = {
   ocean:   '[data-layer="ocean"], #ocean, .oceanLayer',
+  lakes:   '[data-layer="lakes"], #lakes',
   land:    '[data-layer="land"], #land, .mapCells, .islandBack',
   coast:   '[data-layer="coast"], #coast, .coastline, .lakecoast, .shallow',
   rivers:  '[data-layer="rivers"], #rivers',

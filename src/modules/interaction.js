@@ -9,7 +9,7 @@ const noisyZoom = (new URLSearchParams(location.search).get('flags') || "")
 // These will be replaced by the new modular labeling system
 function noopStub(...args) {
   if (window.DEBUG) {
-    console.log('[STUB] Label function called but not implemented:', args);
+    // console.log('[STUB] Label function called but not implemented:', args);
   }
   return null;
 }
@@ -75,10 +75,10 @@ export function attachInteraction({
   // Transform target (the group that contains the whole map)
   gTarget = d3.select('#world');
   if (gTarget.empty()) { 
-    console.error('[zoom] no #world found, trying fallbacks...');
+    // console.error('[zoom] no #world found, trying fallbacks...');
     gTarget = findZoomTarget();
     if (gTarget.empty()) {
-      console.error('[zoom] no transform target found. Falling back to first <g> in <svg>.');
+      // console.error('[zoom] no transform target found. Falling back to first <g> in <svg>.');
       gTarget = svg.select('g');
     }
   }
@@ -122,12 +122,16 @@ export function attachInteraction({
     if (window.syncQACandidates) window.syncQACandidates(t.k);
     if (window.syncQACollision) window.syncQACollision(t.k);
     
-    if (noisyZoom) console.debug('[zoom svg identity]', {
-      anchor: (window.state && window.state.ocean) ? window.state.ocean.anchor : svgSel.node().__oceanWorldAnchor,
-      svgId: svgSel.node().id || 'no-id',
-      svgNode: svgSel.node()
-    });
-    if (window.DBG?.labels) console.debug('[zoom]', t);
+    if (noisyZoom) {
+      /* console.debug('[zoom svg identity]', {
+        anchor: (window.state && window.state.ocean) ? window.state.ocean.anchor : svgSel.node().__oceanWorldAnchor,
+        svgId: svgSel.node().id || 'no-id',
+        svgNode: svgSel.node()
+      }); */
+    }
+    if (window.DBG?.labels) {
+      /* console.debug('[zoom]', t); */
+    }
   }
 
   zoom = d3.zoom()
@@ -298,12 +302,12 @@ window.forceZoomSanity = function() {
   const node = d3.select('svg').node();
   const z = node.__ZOOM__;
   const sel = d3.select(node);
-  if (!z) return console.error('No zoom behavior bound to svg');
+  if (!z) return /* console.error('No zoom behavior bound to svg'); */
 
-  console.log('scaleTo 2×...');
+  // console.log('scaleTo 2×...');
   sel.transition().duration(400).call(z.scaleTo, 2.0);
   setTimeout(() => {
-    console.log('translateTo center 400,300...');
+    // console.log('translateTo center 400,300...');
     sel.transition().duration(400).call(z.translateTo, 400, 300);
   }, 450);
 };
@@ -313,43 +317,43 @@ window.runZoomChecklist = function() {
   console.group('🔍 ZOOM CHECKLIST VERIFICATION');
   
   // 1. Check if attachInteraction() runs after layers are created
-  console.log('1️⃣ attachInteraction() timing:');
+  // console.log('1️⃣ attachInteraction() timing:');
   const viewbox = d3.select('.viewbox');
   const mapCells = d3.select('.mapCells');
   const labels = d3.select('#labels');
-  console.log('   ✅ Layers exist:', {
+  /* console.log('   ✅ Layers exist:', {
     viewbox: !viewbox.empty(),
     mapCells: !mapCells.empty(),
     labels: !labels.empty()
-  });
+  }); */
 
   // 2. Check if svg has zoom behavior
-  console.log('\n2️⃣ Zoom behavior binding:');
-  const svg = d3.select('svg');
-  const zoomBehavior = svg.node()?.__ZOOM__;
-  console.log('   ✅ Zoom behavior bound to svg:', !!zoomBehavior);
+  // console.log('\n2️⃣ Zoom behavior binding:');
+  const svgNode = d3.select('svg');
+  const zoomBehavior = svgNode.node()?.__ZOOM__;
+  // console.log('   ✅ Zoom behavior bound to svg:', !!zoomBehavior);
 
   // 3. Check if svg.node().__ZOOM_TARGET__ points to your map group
-  console.log('\n3️⃣ Zoom target group:');
-  const zoomTarget = svg.node().__ZOOM_TARGET__;
-  console.log('   ✅ __ZOOM_TARGET__ exists:', !!zoomTarget);
+  // console.log('\n3️⃣ Zoom target group:');
+  const zoomTarget = svgNode.node().__ZOOM_TARGET__;
+  // console.log('   ✅ __ZOOM_TARGET__ exists:', !!zoomTarget);
   if (zoomTarget) {
-    console.log('   🎯 Target element:', zoomTarget.tagName, zoomTarget.className);
-    console.log('   🎯 Target matches viewbox:', zoomTarget === viewbox.node());
+    // console.log('   🎯 Target element:', zoomTarget.tagName, zoomTarget.className);
+    // console.log('   🎯 Target matches viewbox:', zoomTarget === viewbox.node());
   }
 
   // 4. Test forceZoomSanity() moves the map
-  console.log('\n4️⃣ Programmatic zoom test:');
+  // console.log('\n4️⃣ Programmatic zoom test:');
   if (typeof window.forceZoomSanity === 'function') {
-    console.log('   ✅ forceZoomSanity() function exists');
+    // console.log('   ✅ forceZoomSanity() function exists');
   } else {
-    console.log('   ❌ forceZoomSanity() function not found');
+    // console.log('   ❌ forceZoomSanity() function not found');
   }
 
   // 5. Test updateCellsLOD(k) flips raster/vector as you zoom
-  console.log('\n5️⃣ LOD system test:');
+  // console.log('\n5️⃣ LOD system test:');
   if (typeof window.updateCellsLOD === 'function') {
-    console.log('   ✅ updateCellsLOD() function exists');
+    // console.log('   ✅ updateCellsLOD() function exists');
     
     // Test at different zoom levels
     const testLevels = [0.5, 1.0, 2.0, 3.0];
@@ -357,10 +361,10 @@ window.runZoomChecklist = function() {
       window.updateCellsLOD(k);
       const cellsDisplay = d3.select('.mapCells').style('display');
       const rasterDisplay = d3.select('#cellsRaster').style('display');
-      console.log(`   📊 Zoom ${k}: cells=${cellsDisplay}, raster=${rasterDisplay}`);
+      // console.log(`   📊 Zoom ${k}: cells=${cellsDisplay}, raster=${rasterDisplay}`);
     });
   } else {
-    console.log('   ❌ updateCellsLOD() function not found');
+    // console.log('   ❌ updateCellsLOD() function not found');
   }
 
   console.groupEnd();
@@ -378,7 +382,7 @@ window.runZoomChecklist = function() {
 window.debugPick = (sx, sy) => {
   const [wx, wy] = getCurrentTransform().invert([sx, sy]);
   const c = window.pickCellAt ? window.pickCellAt(wx, wy) : null;
-  console.log('pick', {sx, sy, wx, wy, id: c?.index, name: c?.featureName});
+  // console.log('pick', {sx, sy, wx, wy, id: c?.index, name: c?.featureName});
   return c;
 };
 
@@ -390,6 +394,6 @@ window.hudSanity = function() {
     const [mx,my] = d3.mouse(d3.select('svg').node());
     const wx = (mx - t.x)/t.k, wy = (my - t.y)/t.k;
     const c = window.pickCellAt ? window.pickCellAt(wx,wy) : null;
-    console.log('pick', {id:c && c.index, name:c && c.featureName});
+    // console.log('pick', {id:c && c.index, name:c && c.featureName});
   })();
 };

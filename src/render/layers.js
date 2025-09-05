@@ -50,6 +50,7 @@ export function ensureLayers(svg) {
 
   // Base layers (tag with data-layer)
   const ocean  = ensureGroup('ocean',  'ocean');
+  const lakes  = ensureGroup('lakes',  'lakes');
   const land   = ensureGroup('land',   'land');
   const coast  = ensureGroup('coast',  'coast');
   const rivers = ensureGroup('rivers', 'rivers');
@@ -76,7 +77,7 @@ export function ensureLayers(svg) {
   let hud = svgSel.select('#hud');
   if (hud.empty()) hud = svgSel.append('g').attr('id','hud');
 
-  return { viewport, world, map, labels, debug, ocean, land, coast, rivers, biomes };
+  return { viewport, world, map, labels, debug, ocean, lakes, land, coast, rivers, biomes };
 }
 
 export function ensureLabelSubgroups(svg) {

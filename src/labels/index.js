@@ -9,7 +9,7 @@ let _lookup = null;
 export function initLabelingStyle(tokens = STYLE_TOKENS) {
   const { ok, errors } = validateStyleTokens(tokens);
   if (!ok) {
-    console.error("[labels:style] Validation failed:", errors);
+    // console.error("[labels:style] Validation failed:", errors);
     throw new Error("Label style validation failed:\n" + errors.join("\n"));
   }
   _tokens = tokens;
@@ -17,7 +17,7 @@ export function initLabelingStyle(tokens = STYLE_TOKENS) {
   if (typeof window !== "undefined") {
     window.LabelStyle = { tokens: _tokens, lookup: _lookup, ok: true }; // handy for Playwright or console
   }
-  console.log(`[labels:style] OK — ${tokens.rules.length} rules, ${tokens.tiers.length} tiers.`);
+  // console.log(`[labels:style] OK — ${tokens.rules.length} rules, ${tokens.tiers.length} tiers.`);
   return { tokens: _tokens, lookup: _lookup };
 }
 

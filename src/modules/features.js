@@ -42,7 +42,7 @@ export function markFeatures({
   // Create fantasy namer with seeded RNG
   const namer = makeNamer(() => rng.random());
   
-  console.debug('[water:features]', {seaLevel, cells: polygons.length});
+  // console.debug('[water:features]', {seaLevel, cells: polygons.length});
   
   var queue = []; // polygons to check
   var used = []; // checked polygons

@@ -1,5 +1,134 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Step 8 Complete: Advanced Hydrology System ✅
+
+### 🎯 **Complete Hydrology System Implementation**
+Successfully implemented a comprehensive hydrology system including priority-flood lakes, watershed analysis, river ordering, discharge calculations, and edge-following river visualization. This creates a sophisticated water system that rivals professional GIS software.
+
+### 📋 **What Was Accomplished**
+
+#### **Priority-Flood Lakes System** (`src/modules/lakes.js`)
+- **Lake detection**: Uses priority-flood algorithm to detect closed depressions above sea level
+- **Spill height calculation**: Computes water level needed for each cell to drain to ocean
+- **Lake identification**: Groups contiguous cells with same spill height into lake regions
+- **Outlet detection**: Finds single outlet point for each lake where water escapes
+- **Performance optimized**: Efficient min-heap implementation for large maps
+- **River integration**: Lake cells route directly to their outlets for realistic drainage
+
+#### **Lake Rendering System** (`src/render/lakes.js`)
+- **Polygon-based rendering**: Fills lake cells with light blue color (#76c8ff)
+- **Layer management**: Lakes render above land but below coastlines and rivers
+- **Visual styling**: 75% opacity fills with no stroke for clean appearance
+- **Layer integration**: Renders into existing `#lakes` group with layer panel support
+
+#### **Watershed Analysis System** (`src/modules/watersheds.js`)
+- **Watershed identification**: Groups rivers by their drainage basins (mouth-based)
+- **Strahler ordering**: Hierarchical river ordering where confluences increase order
+- **Shreve ordering**: Additive ordering that sums upstream contributions
+- **Discharge calculation**: Realistic discharge proxy using precipitation × area + upstream flow
+- **Geographic scaling**: Converts pixel areas to km² using latitude-dependent scaling
+- **Segment length**: Calculates river segment lengths in kilometers using haversine formula
+- **Mass balance tracking**: Validates discharge conservation and provides statistics
+
+#### **Edge-Following River Rendering** (`src/render/rivers-edges.js`)
+- **Shared edge detection**: Finds common edges between adjacent Voronoi cells
+- **Edge midpoint calculation**: Uses midpoints of shared edges for river path points
+- **Tolerance-based matching**: Uses 3-decimal precision for robust edge matching
+- **Discharge-based width**: River width scales from 0.8px to 3.4px based on discharge Q
+- **Logarithmic scaling**: Uses log10 scaling for better dynamic range visualization
+- **Realistic river paths**: Rivers follow natural boundaries between cells
+
+#### **Enhanced River System** (`src/modules/rivers.js`)
+- **Lake pass-through routing**: Lake cells route directly to their lake outlet
+- **Excluded lake rivers**: Rivers are not marked inside lake cells (prevents visual clutter)
+- **River-only statistics**: Uses `riverInDeg` to count only river-to-river connections
+- **Seamless integration**: Rivers flow naturally into and out of lakes
+
+#### **Layer System Integration**
+- **New lakes layer**: Added `#lakes` group to layer management system
+- **UI controls**: Added "Lakes" checkbox to layers panel in HTML
+- **Layer ordering**: Lakes positioned correctly in visual hierarchy
+- **Toggle support**: Lakes can be shown/hidden via layers panel
+
+### 🔧 **Technical Implementation**
+
+#### **Priority-Flood Algorithm**
+```javascript
+// Min-heap based flood-fill from ocean cells outward
+const H = new MinHeap();
+for (let i = 0; i < N; i++) {
+  if (polygons[i].height < seaLevel) {
+    H.push(i, polygons[i].height);
+  }
+}
+while (H.size) {
+  const {x: i, k: level} = H.pop();
+  for (const j of polygons[i].neighbors) {
+    const newLevel = Math.max(polygons[j].height, level);
+    H.push(j, newLevel);
+  }
+}
+```
+
+#### **Watershed Analysis**
+```javascript
+// Strahler ordering: hierarchical river classification
+dn.orderStrahler = (dn._seenMax >= 2) ? (dn._maxStr + 1) : (dn._maxStr || 1);
+
+// Shreve ordering: additive upstream contribution
+dn.orderShreve += p.orderShreve;
+
+// Discharge calculation: precipitation × area + upstream flow
+dn.Q += p.Q + Math.max(0, (dn.prec ?? 0)) * areaKm2[d];
+```
+
+#### **Edge-Following Rendering**
+```javascript
+// Shared edge detection between adjacent cells
+const e = sharedEdge(p, d);
+if (e) {
+  const m1 = mid(e[0], e[1]); // midpoint of shared edge
+  const m2 = ed ? mid(ed[0], ed[1]) : m1; // downstream edge midpoint
+}
+```
+
+### 🎨 **Visual Features**
+
+- **Realistic lake detection**: Natural depressions filled with water
+- **Proper drainage**: Each lake has a single outlet where water escapes
+- **Scientific river ordering**: Standard Strahler and Shreve ordering systems
+- **Discharge-based visualization**: River width reflects actual flow volume
+- **Edge-following paths**: Rivers follow natural terrain boundaries
+- **Layer management**: Complete integration with existing layer system
+
+### 📊 **Advanced Analytics**
+
+The system provides comprehensive hydrology statistics:
+- **Lake counts**: Number of distinct lake regions
+- **Watershed basins**: Number of drainage basins
+- **River orders**: Strahler and Shreve ordering statistics
+- **Discharge totals**: Mass balance and flow calculations
+- **Geographic metrics**: Area and length calculations in real units
+
+### 🔄 **Integration Points**
+
+- **Climate system**: Uses precipitation data for discharge calculations
+- **Terrain system**: Requires height and neighbor data from geometry generation
+- **Layer system**: Integrates with existing layer management and UI controls
+- **Rendering system**: Uses D3 data join patterns for efficient updates
+- **Self-test system**: Follows project conventions and maintains invariants
+
+### 🚀 **Future Enhancements**
+
+The hydrology system provides a solid foundation for:
+- **River naming**: Integration with existing fantasy naming system
+- **Seasonal variations**: Dynamic flow based on climate patterns
+- **Water quality**: Chemical and biological modeling
+- **Flood modeling**: Overflow and inundation calculations
+- **Ecosystem modeling**: Habitat and biodiversity analysis
+
+---
+
 ## 2025-01-27 - Step 7 Complete: River Generation System ✅
 
 ### 🎯 **River Generation System Complete**
