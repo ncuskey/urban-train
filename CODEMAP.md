@@ -52,7 +52,9 @@ urban-train/
 │   ├── ui/                 # NEW: UI modules
 │   │   └── layers-panel.js # Layer visibility controls
 │   ├── debug/              # NEW: Debug renderers
-│   │   └── climate-layers.js # Temperature/precipitation debug visualizations
+│   │   ├── climate-layers.js # Temperature/precipitation debug visualizations
+│   │   ├── scalar-overlay.js # Scalar field visualization (height/temp/precip)
+│   │   └── scalar-legend.js  # Interactive legend for scalar overlays
 │   ├── render/
 │   │   └── layers.js       # SVG layer creation/ordering/cleanup
 │   └── selftest.js         # Sanity checks + badge
@@ -316,6 +318,43 @@ urban-train/
   * **Color mapping**: HSL with varying lightness based on precipitation intensity
   * **Data filtering**: Only renders cells with valid precipitation values
 * **Performance**: Uses D3 data join pattern for efficient updates, lazy rendering on first toggle
+
+### `src/debug/scalar-overlay.js` (NEW: Scalar Field Visualization)
+
+* **Scalar overlay renderer**: Colors land polygons by scalar field values (height, temperature, precipitation)
+  * `renderScalarOverlay(polygons, g, { field, seaLevel })`: Renders colored polygons for land cells
+  * **Field support**: "height", "temp", "prec" with appropriate color ramps
+  * **Color ramps**: Height (green→tan), Temperature (blue→yellow→red), Precipitation (white→blue)
+  * **Land filtering**: Only renders cells above sea level by default
+* **Color computation**: 
+  * `scalarColor(field, t)`: Returns HSL color for normalized value t ∈ [0,1]
+  * **Height**: Green to tan gradient (hue 110→80, saturation 60→80%, lightness 50→30%)
+  * **Temperature**: Blue to red via yellow (hue 240→0, saturation 85%, lightness 50%)
+  * **Precipitation**: White to blue (hue 210, saturation 80%, lightness 95→35%)
+* **Domain computation**:
+  * `computeScalarDomain(polygons, field, seaLevel)`: Calculates min/max/mean values for land cells
+  * **Statistics**: Returns `{ count, min, mean, max }` for legend generation
+  * **Data filtering**: Only includes land cells with valid scalar values
+* **Performance**: Uses D3 data join pattern with efficient polygon rendering
+* **Integration**: Called from layers panel when scalar overlay is enabled
+
+### `src/debug/scalar-legend.js` (NEW: Interactive Legend System)
+
+* **Legend renderer**: Generates inline SVG legends for scalar overlays
+  * `renderScalarLegend(polygons, seaLevel, field, container)`: Renders legend into DOM container
+  * **Visual elements**: Gradient bar, min/mean/max value labels, field title
+  * **Responsive design**: Shows/hides based on data availability
+* **Value formatting**:
+  * **Temperature**: Shows values with "°C" suffix (1 decimal place)
+  * **Precipitation**: Shows values with 2 decimal places
+  * **Height**: Shows values with 3 decimal places
+  * **Invalid values**: Shows "—" for NaN/undefined values
+* **SVG generation**: 
+  * **Gradient bar**: Linear gradient with 3 stops (0%, 50%, 100%) using scalar color function
+  * **Labels**: Min (left), mean (center), max (right) with proper text anchoring
+  * **Dimensions**: 160×44px with 6px padding and 10px bar height
+* **Accessibility**: Proper ARIA attributes and semantic structure
+* **Integration**: Called from layers panel when scalar overlay is enabled or field changes
 
 ### `src/render/layers.js`
 

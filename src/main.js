@@ -1406,7 +1406,16 @@ async function generate(count) {
     defs = svg.select("defs");
     
   // Ensure proper layer structure
-  const layers = ensureLayers(svg);
+  const { world, ocean, land, coast, rivers, labels } = ensureLayers(svg);
+  // Safety: normalize tags even if groups existed before this build
+  ocean?.attr('data-layer','ocean');
+  land?.attr('data-layer','land');
+  coast?.attr('data-layer','coast');
+  rivers?.attr('data-layer','rivers');
+  labels?.attr('data-layer','labels');
+  // If you have a biomes group established elsewhere:
+  d3.select('#biomes').attr('data-layer','biomes');
+  
   // Old labeling system removed - ensureLabelContainers temporarily disabled
   
   // One-time, non-zoomed container only for text measurement
@@ -1416,9 +1425,6 @@ async function generate(count) {
       .attr("class", "__measure")
       .style("pointer-events", "none");
   }
-  
-  // Use the world container for map elements
-  const world = layers.world;
   const islandBack = world.append("g").attr("class", "islandBack");
   const mapCells = world.append("g").attr("class", "mapCells");
   const oceanLayer = world.append("g").attr("class", "oceanLayer");
@@ -1879,7 +1885,7 @@ async function generate(count) {
     }
 
     // Initialize / refresh the Layers panel (idempotent; safe on re-gen)
-    initLayersPanel({ svg: d3.select("svg"), polygons });
+    initLayersPanel({ svg: d3.select("svg"), polygons, seaLevel });
     
     // Old labeling system removed
     

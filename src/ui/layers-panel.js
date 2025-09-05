@@ -9,16 +9,19 @@
 //   initLayersPanel({ svg: d3.select("svg"), polygons });
 
 import { renderTempDebug, renderPrecipDebug } from "../debug/climate-layers.js";
+import { renderScalarOverlay } from "../debug/scalar-overlay.js";
+import { renderScalarLegend } from "../debug/scalar-legend.js";
 
 const TARGET_SELECTOR = {
-  ocean:   "#ocean, .oceanLayer",                 // your ocean layer & legacy class
-  land:    "#land, .mapCells, .islandBack",       // land cells / backing
-  coast:   "#coast, .coastline, .lakecoast, .shallow",
-  rivers:  "#rivers",
-  labels:  "#labels",
-  temp:    "#layer-temp",
-  precip:  "#layer-precip",
-  biomes:  "#biomes"                               // placeholder (future)
+  ocean:   '[data-layer="ocean"], #ocean, .oceanLayer',
+  land:    '[data-layer="land"], #land, .mapCells, .islandBack',
+  coast:   '[data-layer="coast"], #coast, .coastline, .lakecoast, .shallow',
+  rivers:  '[data-layer="rivers"], #rivers',
+  labels:  '[data-layer="labels"], #labels',
+  temp:    '#layer-temp',
+  precip:  '#layer-precip',
+  scalar:  '#layer-scalar',
+  biomes:  '[data-layer="biomes"], #biomes'
 };
 
 function setVisible(selector, on) {
@@ -26,7 +29,7 @@ function setVisible(selector, on) {
   d3.selectAll(selector).style("display", on ? null : "none");
 }
 
-export function initLayersPanel({ svg, polygons }) {
+export function initLayersPanel({ svg, polygons, seaLevel }) {
   const panel = document.getElementById("layerPanel");
   if (!panel) return;
 
@@ -39,6 +42,12 @@ export function initLayersPanel({ svg, polygons }) {
 
   let gPrec = world.select("#layer-precip");
   if (gPrec.empty()) gPrec = world.append("g").attr("id", "layer-precip").attr("data-layer", "precip").style("display", "none");
+
+  let gScalar = world.select("#layer-scalar");
+  if (gScalar.empty()) gScalar = world.append("g").attr("id", "layer-scalar").attr("data-layer", "scalar").style("display", "none");
+
+  // Get legend container
+  const legendContainer = document.getElementById("scalarLegend");
 
   // Wire checkboxes
   panel.querySelectorAll('input[type="checkbox"][data-target]').forEach(cb => {
@@ -54,6 +63,15 @@ export function initLayersPanel({ svg, polygons }) {
         setVisible(selector, cb.checked);
       } else if (name === "precip") {
         if (cb.checked) renderPrecipDebug(polygons, gPrec);
+        setVisible(selector, cb.checked);
+      } else if (name === "scalar") {
+        if (cb.checked) {
+          const field = (panel.querySelector("#scalarField")?.value) || "height";
+          renderScalarOverlay(polygons, gScalar, { field, seaLevel });
+          renderScalarLegend(polygons, seaLevel, field, legendContainer);
+        } else {
+          if (legendContainer) legendContainer.style.display = "none";
+        }
         setVisible(selector, cb.checked);
       } else {
         setVisible(selector, cb.checked);
@@ -74,11 +92,28 @@ export function initLayersPanel({ svg, polygons }) {
         if (name === "temp") renderTempDebug(polygons, gTemp);
         if (name === "precip") renderPrecipDebug(polygons, gPrec);
       }
+      if (name === "scalar" && state) {
+        const field = (panel.querySelector("#scalarField")?.value) || "height";
+        renderScalarOverlay(polygons, gScalar, { field, seaLevel });
+        renderScalarLegend(polygons, seaLevel, field, legendContainer);
+      }
       setVisible(selector, state);
     });
   }
   hideAll?.addEventListener("click", () => setAll(false));
   showAll?.addEventListener("click", () => setAll(true));
+
+  // Re-render scalar overlay when field changes (if visible)
+  const fieldSel = panel.querySelector("#scalarField");
+  if (fieldSel) {
+    fieldSel.addEventListener("change", () => {
+      const visible = window.getComputedStyle(gScalar.node()).display !== "none";
+      if (visible) {
+        renderScalarOverlay(polygons, gScalar, { field: fieldSel.value, seaLevel });
+        renderScalarLegend(polygons, seaLevel, fieldSel.value, legendContainer);
+      }
+    });
+  }
 
   // Small debug hook
   window.LayerPanelDebug = { setVisible, TARGET_SELECTOR };

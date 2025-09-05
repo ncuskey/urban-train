@@ -39,12 +39,27 @@ export function ensureLayers(svg) {
   let world = viewport.select('#world');
   if (world.empty()) world = viewport.append('g').attr('id', 'world');
 
+  // Helper: ensure a child <g> exists, set id, and tag with data-layer
+  function ensureGroup(id, layerName = id) {
+    let g = world.select(`#${id}`);
+    if (g.empty()) g = world.append('g').attr('id', id);
+    // Always (re)tag with a canonical data-layer name
+    g.attr('data-layer', layerName);
+    return g;
+  }
+
+  // Base layers (tag with data-layer)
+  const ocean  = ensureGroup('ocean',  'ocean');
+  const land   = ensureGroup('land',   'land');
+  const coast  = ensureGroup('coast',  'coast');
+  const rivers = ensureGroup('rivers', 'rivers');
+  const labels = ensureGroup('labels', 'labels');
+  // If you have a biomes group already, tag it too (no-op otherwise)
+  const biomes = ensureGroup('biomes', 'biomes');
+
   // Ensure map & labels exist and are children of #world
   let map = world.select('#map');
   if (map.empty()) map = world.append('g').attr('id', 'map');
-
-  let labels = world.select('#labels');
-  if (labels.empty()) labels = world.append('g').attr('id', 'labels');
 
   // If labels accidentally lives outside #world, move it under #world
   const labelsNode = labels.node();
@@ -61,7 +76,7 @@ export function ensureLayers(svg) {
   let hud = svgSel.select('#hud');
   if (hud.empty()) hud = svgSel.append('g').attr('id','hud');
 
-  return { viewport, world, map, labels, debug };
+  return { viewport, world, map, labels, debug, ocean, land, coast, rivers, biomes };
 }
 
 export function ensureLabelSubgroups(svg) {

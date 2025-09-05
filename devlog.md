@@ -1,5 +1,122 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Scalar Overlay & Interactive Legend System ✅
+
+### 🎯 **Scalar Overlay & Interactive Legend System Complete**
+Successfully implemented a comprehensive scalar field visualization system with interactive legends. This adds powerful debugging and analysis capabilities for height, temperature, and precipitation data with real-time color-coded overlays and informative legends.
+
+### 📋 **What Was Accomplished**
+
+#### **Scalar Overlay System**
+- **Created `src/debug/scalar-overlay.js`**: Complete scalar field visualization renderer
+- **Field support**: Height, temperature, and precipitation with appropriate color schemes
+- **Color ramps**: 
+  - **Height**: Green → Tan gradient (elevation-based)
+  - **Temperature**: Blue → Yellow → Red gradient (cold to hot)
+  - **Precipitation**: White → Blue gradient (dry to wet)
+- **Land filtering**: Only renders cells above sea level for accurate terrain visualization
+- **Performance optimized**: Uses D3 data join pattern for efficient updates
+
+#### **Interactive Legend System**
+- **Created `src/debug/scalar-legend.js`**: Comprehensive legend renderer
+- **Visual elements**: Gradient bar, min/mean/max value labels, field identification
+- **Value formatting**: Appropriate precision for each field type (temp: 1 decimal + °C, precip: 2 decimals, height: 3 decimals)
+- **SVG generation**: Inline SVG with linear gradients and proper text anchoring
+- **Responsive design**: Shows/hides based on data availability with proper ARIA attributes
+
+#### **UI Integration**
+- **Enhanced layers panel**: Added scalar checkbox and field selector dropdown
+- **Real-time updates**: Legend updates instantly when switching between fields
+- **Bulk operations**: Integrated with "Show all"/"Hide all" functionality
+- **Field selection**: Dropdown with height, temperature, and precipitation options
+
+#### **Helper Functions & API**
+- **Exported `scalarColor()`**: Color computation function for consistent theming
+- **Exported `computeScalarDomain()`**: Statistics computation for legend generation
+- **Domain statistics**: Returns count, min, mean, max for comprehensive data analysis
+- **Modular design**: Clean separation between overlay rendering and legend generation
+
+### 🔧 **Technical Implementation**
+
+#### **Color System**
+```javascript
+// Height: Green to tan (elevation-based)
+const h = 110 - 30 * t, s = 60 + 20 * t, l = 40 + 10 * (1 - t);
+
+// Temperature: Blue to red via yellow (cold to hot)  
+const h = (1 - t) * 240; // 240=blue → 0=red
+
+// Precipitation: White to blue (dry to wet)
+const l = 95 - 60 * t; // Lightness variation
+```
+
+#### **Legend Generation**
+```javascript
+// SVG with gradient bar and value labels
+<linearGradient id="scalarGrad-${field}">
+  <stop offset="0%" stop-color="${scalarColor(field, 0)}"></stop>
+  <stop offset="50%" stop-color="${scalarColor(field, 0.5)}"></stop>
+  <stop offset="100%" stop-color="${scalarColor(field, 1)}"></stop>
+</linearGradient>
+```
+
+#### **Integration Points**
+- **Layers panel**: Checkbox enables/disables overlay, dropdown changes field
+- **Real-time updates**: Legend re-renders when field selection changes
+- **Data filtering**: Only processes land cells with valid scalar values
+- **Performance**: Lazy rendering and efficient D3 data joins
+
+### 🎨 **User Experience**
+
+#### **Visual Design**
+- **Consistent theming**: Matches existing layers panel styling
+- **Professional appearance**: Subtle background with proper contrast
+- **Clear labeling**: Field identification and value ranges
+- **Accessibility**: Proper ARIA attributes and semantic structure
+
+#### **Interaction Flow**
+1. **Enable scalar overlay**: Check "Scalar (cells)" checkbox
+2. **Select field**: Choose from height, temperature, or precipitation
+3. **View visualization**: See color-coded polygons with real-time legend
+4. **Switch fields**: Dropdown changes both overlay and legend instantly
+5. **Toggle visibility**: Checkbox shows/hides both overlay and legend
+
+### 📊 **Data Analysis Capabilities**
+
+#### **Height Visualization**
+- **Terrain analysis**: See elevation patterns and mountain ranges
+- **Color mapping**: Green (low) to tan (high) for intuitive elevation reading
+- **Land focus**: Only shows land cells for clear terrain visualization
+
+#### **Temperature Visualization**  
+- **Climate patterns**: Visualize temperature distribution across the map
+- **Color coding**: Blue (cold) to red (hot) with yellow (moderate) in between
+- **Latitude effects**: See how temperature varies with latitude and elevation
+
+#### **Precipitation Visualization**
+- **Weather patterns**: Understand precipitation distribution
+- **Color scheme**: White (dry) to blue (wet) for intuitive moisture reading
+- **Climate analysis**: Identify wet and dry regions
+
+### 🚀 **Performance & Integration**
+
+#### **Efficient Rendering**
+- **D3 data joins**: Efficient updates without full re-rendering
+- **Land filtering**: Only processes relevant cells for better performance
+- **Lazy loading**: Overlay only renders when first enabled
+
+#### **Modular Architecture**
+- **Clean separation**: Overlay rendering separate from legend generation
+- **Reusable functions**: Color and domain computation exported for other uses
+- **Consistent API**: Follows existing project patterns and conventions
+
+#### **Future Extensibility**
+- **Easy field addition**: Simple to add new scalar fields
+- **Custom color schemes**: Color functions can be easily modified
+- **Legend customization**: SVG generation allows for styling variations
+
+---
+
 ## 2025-01-27 - Layers Panel & Climate Debug Renderers ✅
 
 ### 🎯 **Layers Panel & Climate Debug Renderers Complete**

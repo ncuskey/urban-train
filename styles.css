@@ -354,7 +354,30 @@ text.place-label.ocean {
 .layers-panel label { display: block; margin: 4px 0; white-space: nowrap; }
 .layers-panel input { vertical-align: middle; margin-right: 6px; }
 .layers-panel .layers-row { display: flex; gap: 6px; margin-top: 6px; }
+.layers-panel .layers-field { display:flex; align-items:center; gap:6px; }
 .layers-panel button {
   font: inherit; padding: 2px 8px; border-radius: 6px; border: 1px solid #777; background: #2a2a35; color: #fff;
 }
 .layers-panel button:hover { filter: brightness(1.1); }
+
+/* Scalar legend */
+.layers-legend {
+  margin-top: 6px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  padding: 6px;
+  display: none; /* shown only when Scalar is enabled */
+}
+.layers-legend svg { display: block; }
+.layers-legend .legend-title {
+  font-weight: 600;
+  font-size: 12px;
+  opacity: .9;
+  margin-bottom: 4px;
+}
+.layers-legend .legend-label {
+  font-size: 10px;
+  fill: #eaeaf0;
+  opacity: .95;
+}

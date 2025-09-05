@@ -22,6 +22,7 @@ A web‑based fantasy map generator that builds Voronoi‑based worlds with real
   * **Robust scheduling**: Centralized idle scheduler with Safari-safe options handling and cancellation support.
   * **Store safety**: Merge-safe store updates prevent data loss during label operations.
 * **Interaction**: Smooth pan/zoom (D3 v5), HUD readouts, and a lightweight performance HUD.
+* **Debug visualizations**: Climate layers (temperature, precipitation) and scalar overlays with interactive legends.
 * **Performance**: Intelligent deferral of heavy operations to idle time, SAT caching, and raster scaling optimizations.
 * **Safety**: Defensive checks against NaN/Infinity, clamped zoom, and self‑tests.
 
@@ -41,7 +42,7 @@ python3 -m http.server 8000
 
 > Opening the file directly from `file://` can work, but a local server is more reliable for module imports.
 
-2. Open `index.html`. Use **Random map**, **Options**, and the checkboxes to explore.
+2. Open `index.html`. Use **Random map**, **Options**, and the **Layers panel** (top-right) to explore different map layers and debug visualizations.
 
 ### Development & CI
 
@@ -99,7 +100,13 @@ npm test
    Auto‑frame the map to land bounds; re‑flow labels post‑layout.
    Source: `src/modules/autofit.js` (`autoFitToWorld`, `fitToLand`, `afterLayout`).
 
-7. **Interaction & LOD**
+7. **Debug visualizations**
+   **Climate layers**: Temperature and precipitation debug renderers show colored overlays at cell centroids.
+   **Scalar overlays**: Interactive visualization of height, temperature, and precipitation data with color-coded polygons.
+   **Interactive legends**: Real-time legends show data ranges and color mappings for scalar overlays.
+   Source: `src/debug/climate-layers.js`, `src/debug/scalar-overlay.js`, `src/debug/scalar-legend.js`.
+
+8. **Interaction & LOD**
    D3 zoom sets transform; label system **counter‑scales** and updates visibility thresholds with zoom.
    **Tier-based LOD**: Labels classified into 4 tiers (1=ocean, 2=major, 3=standard, 4=minor) with zoom-based visibility.
    **Real-time filtering**: Labels appear/disappear based on zoom level and tier importance.

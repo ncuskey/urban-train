@@ -143,6 +143,16 @@
       <label><input type="checkbox" data-target="temp"> Temp (°C)</label>
       <label><input type="checkbox" data-target="precip"> Precip</label>
       <label><input type="checkbox" data-target="biomes"> Biomes</label>
+      <hr style="opacity:.25;margin:6px 0;">
+      <label><input type="checkbox" data-target="scalar"> Scalar (cells)</label>
+      <label class="layers-field">Field:
+        <select id="scalarField">
+          <option value="height">height</option>
+          <option value="temp">temp (°C)</option>
+          <option value="prec">precip</option>
+        </select>
+      </label>
+      <div id="scalarLegend" class="layers-legend" aria-hidden="true"></div>
       <div class="layers-row">
         <button type="button" id="layersHideAll">Hide all</button>
         <button type="button" id="layersShowAll">Show all</button>
