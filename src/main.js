@@ -83,6 +83,8 @@ import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './mod
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
 import { defineMapCoordinates, assignLatitudes, assignLongitudes } from './modules/geo.js';
 import { assignTemperatures, assignPrecipitation } from './modules/climate.js';
+import { generateRivers } from './modules/rivers.js';
+import { renderRivers } from './render/rivers.js';
 import { buildProtoAnchors } from "./labels/anchors.js";
 import { makeAnchorIndex } from "./labels/spatial-index.js";
 import { enrichAnchors } from "./labels/enrich.js";
@@ -1885,6 +1887,13 @@ async function generate(count) {
       } else {
         console.warn('[climate:prec] no cells processed');
       }
+    }
+
+    // Step 7 — Rivers (flow routing + accumulation)
+    {
+      const stats = generateRivers(polygons, { seaLevel: sl });
+      console.debug('[rivers:gen]', stats);
+      renderRivers(polygons, d3.select('#rivers'));
     }
 
     // Initialize / refresh the Layers panel (idempotent; safe on re-gen)

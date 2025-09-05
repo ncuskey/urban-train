@@ -1,5 +1,120 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Step 7 Complete: River Generation System ✅
+
+### 🎯 **River Generation System Complete**
+Successfully implemented a comprehensive river generation system that creates realistic river networks through downhill routing and flux accumulation. The system integrates seamlessly with the existing climate and terrain generation pipeline.
+
+### 📋 **What Was Accomplished**
+
+#### **River Generation Module** (`src/modules/rivers.js`)
+- **Downhill routing**: Each cell routes to its lowest neighbor using steepest descent algorithm
+- **Flux accumulation**: Multi-pass relaxation system (20 passes) accumulating flow from precipitation and base runoff
+- **Dynamic thresholding**: Rivers marked where flux >= 92nd percentile of land flux (configurable)
+- **Statistics tracking**: Accurate counting of sources, confluences, mouths, and segments
+- **River-only topology**: Uses `riverInDeg` to count only river-to-river connections for accurate network statistics
+- **Performance optimized**: Efficient for ~10k cells, deterministic with existing RNG
+
+#### **River Rendering System** (`src/render/rivers.js`)
+- **Centroid-to-centroid rendering**: Draws rivers as line segments between cell centers
+- **Flux-based width scaling**: River width scales from 0.6px to 2.8px based on flow volume
+- **Visual styling**: Blue rivers (#49a8ff) with rounded line caps and non-scaling stroke
+- **Layer management**: Automatically raises rivers above land/biomes/scalar overlays
+- **Zoom-independent visibility**: `vector-effect="non-scaling-stroke"` keeps lines readable at all zoom levels
+
+#### **Pipeline Integration** (`src/main.js`)
+- **Seamless integration**: Rivers generated after climate and features, before labeling
+- **Console logging**: Debug output shows river statistics (segments, sources, confluences, mouths, threshold)
+- **Layer panel support**: Rivers appear in existing layers toggle system
+
+#### **Layer Management Improvements** (`src/ui/layers-panel.js`)
+- **Scalar overlay compatibility**: Rivers and labels automatically stay above scalar overlays
+- **Dynamic layer ordering**: Ensures proper visual hierarchy when debug overlays are active
+- **User experience**: No more rivers disappearing behind overlays or becoming too thin when zoomed out
+
+### 🔧 **Technical Implementation**
+
+#### **River Generation Algorithm**
+```javascript
+// 1) Route downhill (steepest descent among neighbors)
+for (let i = 0; i < polygons.length; i++) {
+  const p = polygons[i];
+  if (h < seaLevel) { p.down = -1; continue; } // water: treated as sinks/outlets
+  let best = -1, bestH = h;
+  for (const j of p.neighbors) {
+    if (polygons[j].height < bestH) { bestH = polygons[j].height; best = j; }
+  }
+  p.down = best; // -1 if all neighbors are >= h (local pit / flat)
+}
+
+// 2) Accumulate flux topologically (multi-pass relaxation)
+for (let k = 0; k < 20; k++) {
+  for (let i = 0; i < polygons.length; i++) {
+    const p = polygons[i];
+    if (p.down >= 0) polygons[p.down].flux += p.flux * 0.05;
+  }
+}
+
+// 3) Mark rivers by dynamic threshold over land
+const dynThreshold = quantile(landFluxes, 0.92);
+for (let i = 0; i < polygons.length; i++) {
+  const p = polygons[i];
+  if (p.height >= seaLevel && p.flux >= dynThreshold && p.down !== -1) {
+    p.isRiver = true;
+  }
+}
+```
+
+#### **River Rendering Pipeline**
+```javascript
+// Centroid calculation and width scaling
+const width = v => 0.6 + 2.2 * norm(v); // 0.6..2.8 px
+const sel = gRivers.selectAll("line.river").data(data, d => d.i);
+sel.join(
+  enter => enter.append("line")
+    .attr("vector-effect", "non-scaling-stroke") // consistent width across zoom
+    .attr("stroke", "#49a8ff")
+    .attr("stroke-width", d => width(d.f))
+    .attr("stroke-linecap", "round")
+);
+```
+
+### 🎨 **Visual Features**
+
+- **Realistic river networks**: Rivers flow naturally from high elevations to ocean
+- **Variable width**: River thickness indicates flow volume and catchment size
+- **Consistent visibility**: Non-scaling stroke keeps rivers readable at all zoom levels
+- **Layer integration**: Rivers work seamlessly with existing layer management system
+- **Debug compatibility**: Rivers stay visible above scalar overlays and debug visualizations
+
+### 📊 **Statistics & Debugging**
+
+The system provides comprehensive statistics for debugging and analysis:
+- **Segments**: Total number of river cells
+- **Sources**: Rivers with no upstream river parents (riverInDeg === 0)
+- **Confluences**: Rivers with 2+ upstream river parents (riverInDeg >= 2)
+- **Mouths**: Rivers that drain into ocean or have no downhill neighbor
+- **Threshold**: Dynamic flux threshold used for river marking
+
+### 🔄 **Integration Points**
+
+- **Climate system**: Uses precipitation data from `assignPrecipitation()`
+- **Terrain system**: Requires height and neighbor data from geometry generation
+- **Layer system**: Integrates with existing `#rivers` group and layer panel
+- **Rendering system**: Uses D3 data join pattern for efficient updates
+- **Self-test system**: Follows project conventions and doesn't break existing invariants
+
+### 🚀 **Future Enhancements**
+
+The river system provides a solid foundation for future enhancements:
+- **River naming**: Could integrate with existing fantasy naming system
+- **River width refinement**: Could use more sophisticated width calculations
+- **River networks**: Could identify and name major river systems
+- **Water flow visualization**: Could show flow direction or velocity
+- **Seasonal variations**: Could vary river flow based on climate patterns
+
+---
+
 ## 2025-01-27 - Step 4 Complete: Longitude Assignment + Distance Helper ✅
 
 ### 🎯 **Geographic Coordinate System Complete**

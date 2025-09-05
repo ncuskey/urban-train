@@ -69,6 +69,9 @@ export function initLayersPanel({ svg, polygons, seaLevel }) {
           const field = (panel.querySelector("#scalarField")?.value) || "height";
           renderScalarOverlay(polygons, gScalar, { field, seaLevel });
           renderScalarLegend(polygons, seaLevel, field, legendContainer);
+          // Keep critical layers above the overlay
+          d3.select('#rivers').raise();
+          d3.select('#labels').raise();
         } else {
           if (legendContainer) legendContainer.style.display = "none";
         }
@@ -96,6 +99,8 @@ export function initLayersPanel({ svg, polygons, seaLevel }) {
         const field = (panel.querySelector("#scalarField")?.value) || "height";
         renderScalarOverlay(polygons, gScalar, { field, seaLevel });
         renderScalarLegend(polygons, seaLevel, field, legendContainer);
+        d3.select('#rivers').raise();
+        d3.select('#labels').raise();
       }
       setVisible(selector, state);
     });
@@ -111,6 +116,8 @@ export function initLayersPanel({ svg, polygons, seaLevel }) {
       if (visible) {
         renderScalarOverlay(polygons, gScalar, { field: fieldSel.value, seaLevel });
         renderScalarLegend(polygons, seaLevel, fieldSel.value, legendContainer);
+        d3.select('#rivers').raise();
+        d3.select('#labels').raise();
       }
     });
   }

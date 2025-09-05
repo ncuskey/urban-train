@@ -29,6 +29,7 @@ urban-train/
 │   │   ├── fonts.js        # Font theme helpers
 │   │   ├── geo.js          # Map coordinates & per-cell latitude (Step 4)
 │   │   ├── climate.js      # Temperature assignment by latitude & altitude (Step 5a)
+│   │   ├── rivers.js       # River generation: downhill routing + flux accumulation (Step 7)
 │   │   └── refine.js       # Coastline refinement + rebuild cycle
 │   ├── labels/              # NEW: Labeling system (Step 1+)
 │   │   ├── schema.js       # Runtime validation + style lookup builder
@@ -56,7 +57,8 @@ urban-train/
 │   │   ├── scalar-overlay.js # Scalar field visualization (height/temp/precip)
 │   │   └── scalar-legend.js  # Interactive legend for scalar overlays
 │   ├── render/
-│   │   └── layers.js       # SVG layer creation/ordering/cleanup
+│   │   ├── layers.js       # SVG layer creation/ordering/cleanup
+│   │   └── rivers.js       # River rendering: centroid-to-centroid lines with flux-based width
 │   └── selftest.js         # Sanity checks + badge
 ├── dev/                    # Sandboxes for local testing
 │   ├── test-text-metrics.html    # Text metrics testing (Step 7)
@@ -403,6 +405,32 @@ urban-train/
 * **Logging**: Enhanced coordinate logging shows `{ minLat, maxLat, minLon, maxLon }` ranges
 * **Self-tests**: Optional geo monotonicity check verifies lat/lon alignment with x/y coordinates
 * **Future use**: Enables climate features (Step 5), scale bar implementation, and distance-based algorithms
+
+### `src/modules/rivers.js` (NEW: Step 7 - River Generation)
+
+* **River generation system**: Creates realistic river networks through downhill routing and flux accumulation
+* `generateRivers(polygons, { seaLevel, baseRunoff, fluxQuantile, minSegments })`: Main river generation function
+  * **Downhill routing**: Each cell routes to its lowest neighbor (steepest descent)
+  * **Flux accumulation**: Multi-pass relaxation system accumulating flow from precipitation and base runoff
+  * **Dynamic thresholding**: Rivers marked where flux >= 92nd percentile of land flux (configurable)
+  * **Statistics tracking**: Counts sources, confluences, mouths, and segments
+  * **Input requirements**: `polygons[*].height`, `polygons[*].prec`, and `polygons[*].neighbors` must be set
+  * **Output**: Adds `polygons[*].down`, `polygons[*].flux`, `polygons[*].isRiver`, `polygons[*].isMouth`, `polygons[*].riverInDeg` fields
+* **River-only statistics**: Uses `riverInDeg` to count only river-to-river connections for accurate network topology
+* **Integration**: Called after climate and features, before labeling in main.js
+* **Performance**: 20-pass relaxation sufficient for ~10k cells, deterministic with existing RNG
+
+### `src/render/rivers.js` (NEW: Step 7 - River Rendering)
+
+* **River visualization**: Renders rivers as centroid-to-centroid line segments with flux-based width scaling
+* `renderRivers(polygons, gRivers)`: Main river rendering function
+  * **Centroid calculation**: Computes cell centers for line endpoints
+  * **Width scaling**: River width scales from 0.6px to 2.8px based on flow volume
+  * **Visual styling**: Blue rivers (#49a8ff) with rounded line caps and non-scaling stroke
+  * **Layer management**: Automatically raises rivers above land/biomes/scalar overlays
+  * **D3 integration**: Uses data join pattern for efficient updates
+* **Non-scaling stroke**: `vector-effect="non-scaling-stroke"` keeps lines readable at all zoom levels
+* **Layer integration**: Renders into existing `#rivers` group with layer panel support
 
 ### `src/modules/climate.js` (NEW: Step 5a/5b - Temperature & Precipitation)
 
