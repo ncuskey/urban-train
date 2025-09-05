@@ -83,11 +83,11 @@ import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './mod
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
 import { defineMapCoordinates, assignLatitudes, assignLongitudes } from './modules/geo.js';
 import { assignTemperatures, assignPrecipitation } from './modules/climate.js';
-import { generateRivers } from './modules/rivers.js';
-import { renderRiversCurves } from './render/rivers-curves.js';
+// STEP 7 — Rivers (Azgaar-style, clean pipeline)
+import { buildAzRivers } from './modules/hydro/rivers-az.js';
+import { renderRiversAz } from './render/rivers-az.js';
 import { computeLakes } from './modules/lakes.js';
 import { renderLakes } from './render/lakes.js';
-import { computeWatersheds } from './modules/watersheds.js';
 import { buildProtoAnchors } from "./labels/anchors.js";
 import { makeAnchorIndex } from "./labels/spatial-index.js";
 import { enrichAnchors } from "./labels/enrich.js";
@@ -1899,23 +1899,17 @@ async function generate(count) {
       }
     }
 
-    // Step 7 — Rivers (flow routing + accumulation)
-    {
-      const stats = generateRivers(polygons, { seaLevel: sl });
-      console.debug('[rivers:gen]', stats);
-      renderRiversCurves(polygons, d3.select('#rivers'), {seaLevel});
-    }
+    // Step 7 — Rivers (Azgaar-style, clean pipeline)
+    console.time('rivers:az');
+    const { chains, stats } = buildAzRivers(polygons, { seaLevel: sl });
+    console.timeEnd('rivers:az');
+    console.log('[rivers:az]', stats);
 
-    // Watersheds & orders (Strahler/Shreve) + discharge Q
-    {
-      const ws = computeWatersheds(polygons, state.mapCoords, { seaLevel: sl });
-      console.debug('[watersheds]', {
-        basins: ws.basins, sources: ws.sources, mouths: ws.mouths,
-        qSum: +ws.qSum.toFixed(2), qAtMouths: +ws.qAtMouths.toFixed(2)
-      });
-      // Re-render rivers (smooth polylines) to use Q-based widths now that Q is available
-      renderRiversCurves(polygons, d3.select('#rivers'), {seaLevel});
-    }
+    // Render Az rivers with chains
+    renderRiversAz(chains, {
+      gRivers: d3.select('#rivers'),
+      gShade: d3.select('#riversShade').empty() ? d3.select('#world').append('g').attr('id','riversShade') : d3.select('#riversShade')
+    });
 
     // Initialize / refresh the Layers panel (idempotent; safe on re-gen)
     initLayersPanel({ svg: d3.select("svg"), polygons, seaLevel });

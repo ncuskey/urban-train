@@ -381,3 +381,7 @@ text.place-label.ocean {
   fill: #eaeaf0;
   opacity: .95;
 }
+
+/* River styling */
+#riversShade .riverShade { pointer-events: none; }
+#rivers path.river      { pointer-events: none; }
