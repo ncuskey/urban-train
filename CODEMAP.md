@@ -382,7 +382,7 @@ urban-train/
 
 ### `src/modules/geo.js` (NEW: Step 4 - Map Coordinates)
 
-* **Map coordinate system**: Defines world-like geographic extents and assigns latitudes to polygons
+* **Map coordinate system**: Defines world-like geographic extents and assigns latitudes/longitudes to polygons
 * `defineMapCoordinates({ width, height, centerLat, spanLat, centerLon, spanLon })`: Creates coordinate system with configurable center and span
   * Default: 120° latitude span, 180° longitude span, centered at (0°, 0°)
   * Returns: `{ width, height, latTop, latBottom, lonLeft, lonRight, kmPerPxAtEquator }`
@@ -391,8 +391,18 @@ urban-train/
   * Handles edge cases: empty arrays, null polygons, malformed geometry
   * Stores result in `poly.lat` property for each polygon
   * Latitude decreases as Y increases (SVG coordinate system)
+* `assignLongitudes(polygons, map)`: Assigns longitude to each polygon based on centroid X position
+  * Handles edge cases: empty arrays, null polygons, malformed geometry
+  * Stores result in `poly.lon` property for each polygon
+  * Longitude increases as X increases (standard geographic convention)
+* `haversineKm(a, b)`: Calculates great-circle distance between two polygons in kilometers
+  * Uses haversine formula with Earth radius of 6,371 km
+  * Returns NaN for invalid inputs (missing lat/lon, non-finite values)
+  * Enables distance-based features and scale calculations
 * **Integration**: Called after height stats, before feature classification in main.js
-* **Future use**: Enables climate features (Step 5) and scale bar implementation
+* **Logging**: Enhanced coordinate logging shows `{ minLat, maxLat, minLon, maxLon }` ranges
+* **Self-tests**: Optional geo monotonicity check verifies lat/lon alignment with x/y coordinates
+* **Future use**: Enables climate features (Step 5), scale bar implementation, and distance-based algorithms
 
 ### `src/modules/climate.js` (NEW: Step 5a/5b - Temperature & Precipitation)
 

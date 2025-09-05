@@ -1,5 +1,106 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Step 4 Complete: Longitude Assignment + Distance Helper ✅
+
+### 🎯 **Geographic Coordinate System Complete**
+Successfully completed Step 4 by adding longitude assignment and distance calculation capabilities to the geographic coordinate system. This enables full lat/lon coordinate tracking and distance-based algorithms.
+
+### 📋 **What Was Accomplished**
+
+#### **Longitude Assignment System**
+- **Enhanced `src/modules/geo.js`**: Added `assignLongitudes()` function
+- **Centroid-based calculation**: Computes longitude per cell via centroid X position
+- **Robust error handling**: Handles empty arrays, null polygons, and malformed geometry
+- **Standard convention**: Longitude increases as X increases (geographic standard)
+- **Integration**: Called after latitude assignment in main generation pipeline
+
+#### **Distance Calculation Helper**
+- **Added `haversineKm(a, b)`**: Great-circle distance calculation between two polygons
+- **Haversine formula**: Uses Earth radius of 6,371 km for accurate distance calculations
+- **Input validation**: Returns NaN for invalid inputs (missing lat/lon, non-finite values)
+- **Performance optimized**: Efficient trigonometric calculations for real-time use
+
+#### **Enhanced Logging & Self-Tests**
+- **Updated coordinate logging**: Now shows `{ minLat, maxLat, minLon, maxLon }` ranges
+- **Geo monotonicity check**: Optional self-test verifies lat/lon alignment with x/y coordinates
+- **Sample-based validation**: Uses up to 200 polygon pairs for performance
+- **Diagnostic feedback**: Reports alignment fraction in self-test badge
+
+#### **Documentation Updates**
+- **Updated CODEMAP.md**: Comprehensive documentation of new geo functions
+- **Function descriptions**: Detailed parameter and return value documentation
+- **Integration notes**: Clear explanation of pipeline integration and future use cases
+
+### 🔧 **Technical Implementation**
+
+#### **Longitude Assignment Algorithm**
+```javascript
+// Assign per-cell longitude (degrees) via centroid X
+export function assignLongitudes(polygons, map) {
+  const { width, lonLeft, lonRight } = map;
+  const dLon = lonRight - lonLeft;
+  for (let i = 0; i < polygons.length; i++) {
+    const poly = polygons[i];
+    if (!poly || !poly.length) continue;
+    let x = 0, n = 0;
+    for (const p of poly) { if (p && p.length >= 2) { x += p[0]; n++; } }
+    if (!n) continue;
+    x /= n;
+    poly.lon = lonLeft + (x / width) * dLon;
+  }
+  return polygons;
+}
+```
+
+#### **Distance Calculation**
+```javascript
+// Great-circle distance between two cells (km)
+export function haversineKm(a, b) {
+  if (!a || !b || !Number.isFinite(a.lat) || !Number.isFinite(a.lon) || 
+      !Number.isFinite(b.lat) || !Number.isFinite(b.lon)) return NaN;
+  const toRad = d => d * Math.PI / 180;
+  const R = 6371; // Earth radius (km)
+  const phi1 = toRad(a.lat), phi2 = toRad(b.lat);
+  const dphi = toRad(b.lat - a.lat), dlambda = toRad(b.lon - a.lon);
+  const s = Math.sin(dphi/2)**2 + Math.cos(phi1)*Math.cos(phi2)*Math.sin(dlambda/2)**2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+```
+
+### 🎯 **Impact & Benefits**
+
+#### **Enhanced Geographic Capabilities**
+- **Full coordinate system**: Complete lat/lon tracking for all map cells
+- **Distance calculations**: Enables scale bars, proximity algorithms, and spatial analysis
+- **Realistic scaling**: Earth-accurate distance measurements for geographic features
+- **Debug capabilities**: Enhanced logging provides immediate feedback on coordinate ranges
+
+#### **Foundation for Future Features**
+- **Climate modeling**: Latitude/longitude enable realistic climate zone calculations
+- **Scale bars**: Distance calculations enable accurate scale bar implementation
+- **Spatial algorithms**: Proximity-based features and distance-aware label placement
+- **Geographic analysis**: Foundation for terrain analysis and feature relationships
+
+#### **Quality Assurance**
+- **Self-test integration**: Automatic validation of coordinate system correctness
+- **Monotonicity checks**: Ensures lat/lon align with expected x/y relationships
+- **Robust error handling**: Graceful handling of edge cases and malformed data
+- **Performance optimized**: Efficient algorithms suitable for real-time use
+
+### 🚀 **Next Steps**
+- **Climate integration**: Use lat/lon for realistic temperature and precipitation modeling
+- **Scale bar implementation**: Leverage distance calculations for accurate scale visualization
+- **Spatial algorithms**: Implement proximity-based features and distance-aware systems
+- **Geographic analysis**: Build terrain analysis tools using full coordinate system
+
+### 📊 **Verification**
+- **Console logging**: Enhanced `[coords]` output shows complete lat/lon ranges
+- **Distance testing**: `haversineKm()` function available for distance calculations
+- **Self-test badge**: Geo monotonicity check provides immediate validation feedback
+- **Documentation**: Comprehensive CODEMAP.md updates ensure maintainability
+
+---
+
 ## 2025-01-27 - Scalar Overlay & Interactive Legend System ✅
 
 ### 🎯 **Scalar Overlay & Interactive Legend System Complete**
