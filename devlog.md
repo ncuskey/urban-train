@@ -1,5 +1,123 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Complete Hydrology System Implementation ✅
+
+### 🎯 **New TypeScript Hydrology Engine**
+Implemented a complete, modular hydrology system in TypeScript that mirrors Azgaar's JSFiddle behavior. This provides a clean, type-safe foundation for procedural map generation with deterministic, seedable hydrology.
+
+### 📋 **What Was Accomplished**
+
+#### **Task 1 - Hydrology Scaffolding** (`src/hydrology/`)
+- **Constants module**: All hydrology thresholds and defaults from Azgaar's JSFiddle
+- **SeededRandom class**: Deterministic PRNG with LCG implementation for reproducible results
+- **Type definitions**: Comprehensive TypeScript interfaces for cells, parameters, and outputs
+- **Barrel exports**: Clean import interface via `src/hydrology/index.ts`
+
+#### **Task 2 - Height Seeding & Erosion** (`src/hydrology/heightSeeds.ts`, `src/hydrology/erosion.ts`)
+- **addBlob function**: BFS height spreading with radius decay and sharpness modulation
+- **Two types**: "island" (uses current cell height) vs "hill" (uses rolling height)
+- **Erosion functions**: `downcutCoastline` and `downcutRivers` with exact JSFiddle thresholds
+- **Feature clearing**: Clears featureType on touched cells as JSFiddle does
+
+#### **Task 3 - Precipitation & Flux Seeding** (`src/hydrology/precipitation.ts`)
+- **Wind system**: Randomizable wind directions (N/E/S/W) with fallback selection
+- **Ray marching**: Direction-specific marching with jitter (N:+y/±5x, E:-x/±5y, etc.)
+- **Precipitation logic**: Rain proportional to elevation, stops at ridges (height ≥ 0.6)
+- **Neighbor smoothing**: Averages precipitation with neighbors after marching
+- **Flux seeding**: Sets `cell.flux = cell.precipitation` for land cells
+
+#### **Task 4 - Depression Filling & Land Ordering** (`src/hydrology/depressions.ts`)
+- **Depression resolution**: Lifts pits to spill height + epsilon until stable
+- **Safety caps**: Prevents infinite loops with maxPasses = 100
+- **Land utilities**: `getLand()` and `getLandSortedDesc()` for routing preparation
+- **Statistics tracking**: Returns passes, totalLifts, and lastLiftCount
+
+#### **Task 5 - Flux Routing & River Generation** (`src/hydrology/flux.ts`)
+- **Downhill routing**: Flux flows to lowest neighbor (strictly downhill after depression filling)
+- **River spawning**: Creates sources when flux > 0.6 and no existing river
+- **River merging**: Keeps longer river ID on conflicts (by segment count)
+- **Ocean outlets**: Creates estuaries (single mouth) or deltas (multiple mouths based on flux > 15)
+- **Edge placement**: Uses GetEdgeMidpoint callback for precise coastline placement
+
+#### **Task 6 - Feature Marking & Coastlines** (`src/hydrology/features.ts`, `src/hydrology/coast.ts`)
+- **Connected components**: Flood-fills Ocean, Island, and Lake features with stable numbering
+- **Coastline building**: Collects land/water boundary segments and chains into closed rings
+- **Shallow marking**: Tags ocean neighbors as "shallow" for rendering effects
+- **Ring generation**: Robust algorithm for creating closed coastline rings
+
+#### **Task 7 - River Geometry** (`src/hydrology/rivers.ts`)
+- **Catmull-Rom curves**: Converts polylines to cubic Bézier segments (α=1)
+- **Meander injection**: Adds points at 1/3 and 2/3 with 0.4-0.7 random offset
+- **Width calculation**: `width = s/100 + localFlux/30` with capping and shadow width
+- **Flux sampling**: Uses FindCellAt callback for local flux values
+
+### 🔧 **Technical Implementation**
+
+#### **Complete Hydrology Pipeline**
+1. **Height seeding**: `addBlob()` for terrain elevation
+2. **Erosion**: `downcutCoastline()` and `downcutRivers()` for terrain shaping
+3. **Precipitation**: `calculatePrecipitation()` for wind-driven moisture
+4. **Depression filling**: `resolveDepressions()` to eliminate sinks
+5. **Flux routing**: `routeFluxAndRivers()` for water flow and river generation
+6. **Feature marking**: `markFeatures()` for connected component labeling
+7. **Coastline building**: `buildCoastlines()` for boundary ring generation
+8. **River geometry**: `buildRiverSegments()` for smooth curves and widths
+
+#### **Key Design Principles**
+- **Deterministic**: All functions use seeded RNG for reproducible results
+- **Modular**: Each task is self-contained with clear interfaces
+- **Type-safe**: Comprehensive TypeScript definitions throughout
+- **Azgaar-compatible**: Mirrors JSFiddle behavior and thresholds
+- **Callback-based**: Decouples from specific Voronoi implementations
+
+#### **Data Flow**
+```
+SeededRandom → Height Seeding → Erosion → Precipitation → 
+Depression Filling → Flux Routing → Feature Marking → 
+Coastline Building → River Geometry → BezierSegment[]
+```
+
+### 🧪 **Testing & Verification**
+- **Unit tests**: Comprehensive test coverage for all modules
+- **Logic verification**: JavaScript simulations confirm correct behavior
+- **TypeScript compilation**: All modules compile without errors
+- **Deterministic testing**: Same seed produces identical results
+- **Edge case handling**: Robust fallbacks for unusual conditions
+
+### 📁 **File Structure**
+```
+src/hydrology/
+├── constants.ts      # Hydrology thresholds and defaults
+├── rng.ts           # SeededRandom deterministic PRNG
+├── types.ts         # TypeScript interfaces and types
+├── heightSeeds.ts   # Height seeding and erosion
+├── precipitation.ts # Wind-driven precipitation
+├── depressions.ts   # Depression filling and land utilities
+├── flux.ts          # Flux routing and river generation
+├── features.ts      # Connected component marking
+├── coast.ts         # Coastline ring building
+├── rivers.ts        # River geometry and Bézier curves
+├── index.ts         # Barrel exports
+└── *.test.ts        # Unit tests for all modules
+```
+
+### 🎨 **Rendering Integration**
+The system outputs data structures ready for SVG rendering:
+- **BezierSegment[]**: Cubic Bézier curves with widths for river rendering
+- **Path[]**: Closed rings for island and lake coastlines
+- **Cell[]**: Enhanced with featureType, featureNumber, and flux data
+- **Shallow marking**: Ocean cells tagged for visual effects
+
+### 🔮 **Future Integration**
+This hydrology system provides the foundation for:
+- **Procedural map generation**: Complete terrain and water systems
+- **Climate simulation**: Wind patterns and precipitation modeling
+- **River networks**: Realistic drainage patterns and deltas
+- **Feature labeling**: Islands, lakes, and coastlines for naming
+- **Visual rendering**: Smooth curves and variable-width rivers
+
+---
+
 ## 2025-01-27 - Clean Az Rivers Pipeline Implementation ✅
 
 ### 🎯 **Complete Azgaar-style River System Overhaul**
