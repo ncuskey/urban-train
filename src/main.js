@@ -67,6 +67,7 @@ function safeInsertBefore(parentSel, enterSel, tag, beforeSelector) {
 import { RNG } from "./core/rng.js";
 import { Timers } from "./core/timers.js";
 import { ensureLayers } from "./render/layers.js";
+import { initLayersPanel } from "./ui/layers-panel.js";
 import "./core/zoom-utils.js";
 // ensureLabelSubgroups temporarily disabled until new labeling system arrives
 import { runSelfTests, renderSelfTestBadge, clamp01, ensureReciprocalNeighbors } from "./selftest.js";
@@ -1876,6 +1877,9 @@ async function generate(count) {
         console.warn('[climate:prec] no cells processed');
       }
     }
+
+    // Initialize / refresh the Layers panel (idempotent; safe on re-gen)
+    initLayersPanel({ svg: d3.select("svg"), polygons });
     
     // Old labeling system removed
     

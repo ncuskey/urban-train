@@ -104,9 +104,8 @@ export function add(start, type, {
           mod = 1;
         }
         polygons[e].height += height * mod;
-        if (polygons[e].height > 1) {
-          polygons[e].height = 1;
-        }
+        if (polygons[e].height > 1) polygons[e].height = 1;
+        if (polygons[e].height < 0) polygons[e].height = 0;
         polygons[e].featureType = undefined;
         queue.push(e);
         used.push(e);

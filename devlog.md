@@ -1,5 +1,126 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Layers Panel & Climate Debug Renderers ✅
+
+### 🎯 **Layers Panel & Climate Debug Renderers Complete**
+Successfully implemented a comprehensive layer visibility control system with climate debug visualizations. This adds a professional UI panel for toggling map layers and provides visual debugging tools for temperature and precipitation data.
+
+### 📋 **What Was Accomplished**
+
+#### **HTML Structure - Layers Panel**
+- **Added layers panel** to `index.html` with checkboxes for all major map layers
+- **Layer controls**: Ocean, Land, Coast, Rivers, Labels, Temp, Precip, Biomes
+- **Bulk controls**: "Hide all" and "Show all" buttons for quick layer management
+- **Accessibility**: Proper ARIA labels and semantic HTML structure
+- **Positioning**: Top-right corner with proper z-index layering
+
+#### **CSS Styling - Professional UI**
+- **Dark theme**: Semi-transparent background with rounded corners and shadow
+- **Typography**: Uses project's label font system with fallback
+- **Interactive elements**: Hover effects and proper button styling
+- **Layout**: Flexbox for button row, block-level labels with proper spacing
+- **User experience**: Disabled text selection for clean interaction
+
+#### **UI Module - Layer Visibility Controls**
+- **Created `src/ui/layers-panel.js`**: Comprehensive layer visibility switcher
+- **Target selectors**: Maps layer names to CSS selectors for existing SVG structure
+- **Event handling**: Checkbox changes trigger visibility updates and lazy debug rendering
+- **Debug layer creation**: Creates `#layer-temp` and `#layer-precip` groups under `#world`
+- **Bulk operations**: Hide all/show all functionality with proper state management
+- **Debug hook**: Exposes `window.LayerPanelDebug` for development access
+
+#### **Debug Renderers - Climate Visualizations**
+- **Created `src/debug/climate-layers.js`**: Temperature and precipitation debug renderers
+- **Temperature visualization**: Colored circles at cell centroids with blue→yellow→red ramp
+- **Precipitation visualization**: Colored squares at cell centroids with light→dark blue gradient
+- **Performance optimized**: Uses D3 data join pattern for efficient updates
+- **Lazy rendering**: Climate debug layers only render when first toggled on
+- **Data filtering**: Only renders cells with valid climate data
+
+#### **Integration - Main Application**
+- **Added import** for `initLayersPanel` in `src/main.js`
+- **Added initialization call** after climate assignment in generation pipeline
+- **Proper timing**: Called after temperature and precipitation assignment but before rendering
+- **Idempotent**: Safe to call multiple times during regeneration
+
+### 🔧 **Technical Implementation**
+
+#### **Layer Visibility System**
+```javascript
+const TARGET_SELECTOR = {
+  ocean:   "#ocean, .oceanLayer",
+  land:    "#land, .mapCells, .islandBack", 
+  coast:   "#coast, .coastline, .lakecoast, .shallow",
+  rivers:  "#rivers",
+  labels:  "#labels",
+  temp:    "#layer-temp",
+  precip:  "#layer-precip",
+  biomes:  "#biomes"
+};
+```
+
+#### **Climate Debug Rendering**
+```javascript
+// Temperature: Blue (cold) → Yellow (moderate) → Red (hot)
+function rampHsl(t) {
+  const h = (1 - t) * 240; // 240=blue → 0=red
+  return `hsl(${h}, 90%, 50%)`;
+}
+
+// Precipitation: Light blue (dry) → Dark blue (wet)
+const lightness = 70 - 50 * (precipitation / maxPrecipitation);
+```
+
+#### **Event-Driven Architecture**
+- **Checkbox events**: Trigger visibility updates and lazy debug rendering
+- **Bulk operations**: Efficiently manage all layers simultaneously
+- **State synchronization**: Maintains consistent UI state across operations
+
+### 🎨 **User Experience Features**
+
+#### **Professional UI Design**
+- **Consistent styling**: Matches existing project aesthetic
+- **Intuitive controls**: Clear labels and logical grouping
+- **Responsive feedback**: Hover effects and visual state changes
+- **Accessibility**: Proper ARIA labels and keyboard navigation support
+
+#### **Debug Visualization**
+- **Color-coded data**: Intuitive color schemes for temperature and precipitation
+- **Performance optimized**: Efficient rendering with D3 data joins
+- **Lazy loading**: Debug layers only render when needed
+- **Data validation**: Handles missing or invalid climate data gracefully
+
+### 🚀 **Benefits**
+
+#### **Development Workflow**
+- **Layer debugging**: Easy isolation of specific map components
+- **Climate visualization**: Visual verification of temperature and precipitation assignment
+- **Performance testing**: Ability to hide layers for performance analysis
+- **User customization**: Users can customize their map view
+
+#### **Code Organization**
+- **Modular architecture**: Clean separation between UI, debug, and core functionality
+- **Reusable components**: Layer panel can be extended for future features
+- **Maintainable code**: Clear interfaces and well-documented functions
+- **Debug-friendly**: Development hooks and comprehensive logging
+
+### 📁 **Files Modified/Created**
+- **Modified**: `index.html` - Added layers panel HTML structure
+- **Modified**: `styles.css` - Added layers panel styling
+- **Created**: `src/ui/layers-panel.js` - Layer visibility control system
+- **Created**: `src/debug/climate-layers.js` - Climate debug renderers
+- **Modified**: `src/main.js` - Integrated layers panel initialization
+- **Updated**: `CODEMAP.md` - Documented new modules and functionality
+
+### 🔍 **Testing & Verification**
+- **Layer toggling**: All layers can be individually shown/hidden
+- **Bulk operations**: Hide all/show all buttons work correctly
+- **Climate visualization**: Temperature and precipitation debug renderers display correctly
+- **Performance**: No impact on map generation or rendering performance
+- **Integration**: Works seamlessly with existing map generation pipeline
+
+---
+
 ## 2025-01-27 - LOD Capping with Assert Guard ✅
 
 ### 🎯 **LOD Capping with Assert Guard Complete**

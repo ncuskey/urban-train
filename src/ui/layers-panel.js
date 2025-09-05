@@ -1,0 +1,85 @@
+// src/ui/layers-panel.js
+// Tiny layer visibility switcher. Safe to call multiple times; it reuses the panel.
+//
+// Expects your SVG structure from ensureLayers (ids like #ocean, #land, #coast, #rivers, #labels),
+// plus optional debug layers we create (#layer-temp, #layer-precip).
+//
+// Usage from main.js:
+//   import { initLayersPanel } from "./ui/layers-panel.js";
+//   initLayersPanel({ svg: d3.select("svg"), polygons });
+
+import { renderTempDebug, renderPrecipDebug } from "../debug/climate-layers.js";
+
+const TARGET_SELECTOR = {
+  ocean:   "#ocean, .oceanLayer",                 // your ocean layer & legacy class
+  land:    "#land, .mapCells, .islandBack",       // land cells / backing
+  coast:   "#coast, .coastline, .lakecoast, .shallow",
+  rivers:  "#rivers",
+  labels:  "#labels",
+  temp:    "#layer-temp",
+  precip:  "#layer-precip",
+  biomes:  "#biomes"                               // placeholder (future)
+};
+
+function setVisible(selector, on) {
+  if (!selector) return;
+  d3.selectAll(selector).style("display", on ? null : "none");
+}
+
+export function initLayersPanel({ svg, polygons }) {
+  const panel = document.getElementById("layerPanel");
+  if (!panel) return;
+
+  // Ensure debug groups exist (empty until first render)
+  const world = d3.select("#world");
+  if (world.empty()) return; // world group created by ensureLayers
+
+  let gTemp = world.select("#layer-temp");
+  if (gTemp.empty()) gTemp = world.append("g").attr("id", "layer-temp").attr("data-layer", "temp").style("display", "none");
+
+  let gPrec = world.select("#layer-precip");
+  if (gPrec.empty()) gPrec = world.append("g").attr("id", "layer-precip").attr("data-layer", "precip").style("display", "none");
+
+  // Wire checkboxes
+  panel.querySelectorAll('input[type="checkbox"][data-target]').forEach(cb => {
+    const name = cb.getAttribute("data-target");
+    const selector = TARGET_SELECTOR[name];
+
+    // Initial state
+    setVisible(selector, cb.checked);
+
+    cb.addEventListener("change", () => {
+      if (name === "temp") {
+        if (cb.checked) renderTempDebug(polygons, gTemp);
+        setVisible(selector, cb.checked);
+      } else if (name === "precip") {
+        if (cb.checked) renderPrecipDebug(polygons, gPrec);
+        setVisible(selector, cb.checked);
+      } else {
+        setVisible(selector, cb.checked);
+      }
+    });
+  });
+
+  // Bulk buttons
+  const hideAll = document.getElementById("layersHideAll");
+  const showAll = document.getElementById("layersShowAll");
+  function setAll(state) {
+    panel.querySelectorAll('input[type="checkbox"][data-target]').forEach(cb => {
+      cb.checked = state;
+      const name = cb.getAttribute("data-target");
+      const selector = TARGET_SELECTOR[name];
+      if ((name === "temp" || name === "precip") && state) {
+        // lazily render on first time visible
+        if (name === "temp") renderTempDebug(polygons, gTemp);
+        if (name === "precip") renderPrecipDebug(polygons, gPrec);
+      }
+      setVisible(selector, state);
+    });
+  }
+  hideAll?.addEventListener("click", () => setAll(false));
+  showAll?.addEventListener("click", () => setAll(true));
+
+  // Small debug hook
+  window.LayerPanelDebug = { setVisible, TARGET_SELECTOR };
+}

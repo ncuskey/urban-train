@@ -337,3 +337,24 @@ text.place-label.ocean {
   font-feature-settings: "liga" 1, "kern" 1;
   letter-spacing: 0.02em;
 }
+
+.layers-panel {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(22, 22, 28, 0.8);
+  color: #f2f2f2;
+  font: 12px/1.4 var(--label-font, ui-sans-serif);
+  padding: 8px 10px;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+  z-index: 10;
+  user-select: none;
+}
+.layers-panel label { display: block; margin: 4px 0; white-space: nowrap; }
+.layers-panel input { vertical-align: middle; margin-right: 6px; }
+.layers-panel .layers-row { display: flex; gap: 6px; margin-top: 6px; }
+.layers-panel button {
+  font: inherit; padding: 2px 8px; border-radius: 6px; border: 1px solid #777; background: #2a2a35; color: #fff;
+}
+.layers-panel button:hover { filter: brightness(1.1); }

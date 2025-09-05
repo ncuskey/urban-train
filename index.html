@@ -132,6 +132,23 @@
         </div>
     </div>
 
+    <!-- Layers panel (debug/dev only) -->
+    <div id="layerPanel" class="layers-panel" role="group" aria-label="Map Layers">
+      <strong>Layers</strong>
+      <label><input type="checkbox" data-target="ocean" checked> Ocean</label>
+      <label><input type="checkbox" data-target="land" checked> Land (height)</label>
+      <label><input type="checkbox" data-target="coast" checked> Coastlines</label>
+      <label><input type="checkbox" data-target="rivers" checked> Rivers</label>
+      <label><input type="checkbox" data-target="labels" checked> Labels</label>
+      <label><input type="checkbox" data-target="temp"> Temp (°C)</label>
+      <label><input type="checkbox" data-target="precip"> Precip</label>
+      <label><input type="checkbox" data-target="biomes"> Biomes</label>
+      <div class="layers-row">
+        <button type="button" id="layersHideAll">Hide all</button>
+        <button type="button" id="layersShowAll">Show all</button>
+      </div>
+    </div>
+
     <script src="https://d3js.org/d3.v5.min.js"></script>
     <script type="module" src="src/main.js"></script>
 </body>

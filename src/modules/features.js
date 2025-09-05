@@ -36,10 +36,13 @@ function closestCellIndex(diagram, polygons, x, y) {
 export function markFeatures({
   diagram,
   polygons,
-  rng
+  rng,
+  seaLevel = 0.2
 }) {
   // Create fantasy namer with seeded RNG
   const namer = makeNamer(() => rng.random());
+  
+  console.debug('[water:features]', {seaLevel, cells: polygons.length});
   
   var queue = []; // polygons to check
   var used = []; // checked polygons
@@ -59,7 +62,7 @@ export function markFeatures({
     // Calculate ocean size (number of ocean cells)
     let oceanSize = 0;
     for (let i = 0; i < polygons.length; i++) {
-      if (polygons[i].height < 0.2) oceanSize++;
+      if (polygons[i].height < seaLevel) oceanSize++;
     }
     const oceanAreaNorm = oceanSize / totalArea;
     name = namer.ocean(oceanAreaNorm);
@@ -70,7 +73,7 @@ export function markFeatures({
     var i = queue[0];
     queue.shift();
     polygons[i].neighbors.forEach(function(e) {
-      if (used.indexOf(e) < 0 && polygons[e] && polygons[e].height < 0.2) {
+      if (used.indexOf(e) < 0 && polygons[e] && polygons[e].height < seaLevel) {
         polygons[e].featureType = type;
         polygons[e].featureName = name;
         queue.push(e);
@@ -89,18 +92,18 @@ export function markFeatures({
     return (!e.featureType);
   });
   while (unmarked.length > 0) {
-    if (unmarked[0].height >= 0.2) {
+    if (unmarked[0].height >= seaLevel) {
       type = "Island";
       number = island;
       island += 1;
-      greater = 0.2;
+      greater = seaLevel;
       less = 100; // just to omit exclusion
     } else {
       type = "Lake";
       number = lake;
       lake += 1;
       greater = -100; // just to omit exclusion
-      less = 0.2;
+      less = seaLevel;
     }
     
     // Calculate feature size and cluster size for naming

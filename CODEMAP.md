@@ -49,6 +49,10 @@ urban-train/
 │   │   └── ocean/          # NEW: Ocean label placement system
 │   │       ├── layout.js   # Ocean label layout computation
 │   │       └── sat.js      # SAT utilities (water mask, erosion, largest rectangle)
+│   ├── ui/                 # NEW: UI modules
+│   │   └── layers-panel.js # Layer visibility controls
+│   ├── debug/              # NEW: Debug renderers
+│   │   └── climate-layers.js # Temperature/precipitation debug visualizations
 │   ├── render/
 │   │   └── layers.js       # SVG layer creation/ordering/cleanup
 │   └── selftest.js         # Sanity checks + badge
@@ -80,6 +84,7 @@ urban-train/
   * `enrichAnchors()` (≈ 564): Enrich anchors with polygon context and kind classification (Step 3)
   * `attachStyles()` (≈ 567): Attach styles to anchors based on kind (Step 3)
   * `buildFeatureLabels(...)` (≈ 541) and `placeLabelsAvoidingCollisions(...)` (≈ 567/846/887) - via null shim
+  * `initLayersPanel({ svg, polygons })` (≈ 1882): Initialize layer visibility controls after climate assignment
   * `fitToLand` / `autoFitToWorld` usage appears via helpers and menu actions.
 * **Candidates System** (Step 5): LOD-aware candidate boxes for label placement
   * `window.syncQACandidates(k)`: Zoom-driven candidate updates with LOD filtering
@@ -288,6 +293,29 @@ urban-train/
 * `autoFitToWorld` (≈ 141): Variant for broader framing.
 * Also exposes `clampRectToBounds`, `computeLandBBox`.
 * **Ocean placement**: Integrated with deferred placement system to avoid blocking `requestAnimationFrame`.
+
+### `src/ui/layers-panel.js` (NEW: Layer Visibility Controls)
+
+* **Layer visibility switcher**: Toggle visibility of map layers via HTML checkboxes
+* `initLayersPanel({ svg, polygons })`: Initialize layer panel with event handlers
+  * **Target selectors**: Maps layer names to CSS selectors (ocean, land, coast, rivers, labels, temp, precip, biomes)
+  * **Debug layer creation**: Creates `#layer-temp` and `#layer-precip` groups under `#world`
+  * **Event handling**: Checkbox changes trigger visibility updates and lazy debug rendering
+  * **Bulk controls**: "Hide all" and "Show all" buttons for quick layer management
+  * **Debug hook**: Exposes `window.LayerPanelDebug` for development access
+* **Integration**: Called after climate assignment in main.js generation pipeline
+
+### `src/debug/climate-layers.js` (NEW: Climate Debug Renderers)
+
+* **Temperature debug renderer**: Visualizes temperature data as colored circles at cell centroids
+  * `renderTempDebug(polygons, g)`: Renders temperature dots with blue→yellow→red color ramp
+  * **Color mapping**: HSL-based ramp from blue (cold) to red (hot) via yellow (moderate)
+  * **Data filtering**: Only renders cells with valid temperature values
+* **Precipitation debug renderer**: Visualizes precipitation data as colored squares at cell centroids  
+  * `renderPrecipDebug(polygons, g)`: Renders precipitation squares with light→dark blue gradient
+  * **Color mapping**: HSL with varying lightness based on precipitation intensity
+  * **Data filtering**: Only renders cells with valid precipitation values
+* **Performance**: Uses D3 data join pattern for efficient updates, lazy rendering on first toggle
 
 ### `src/render/layers.js`
 
