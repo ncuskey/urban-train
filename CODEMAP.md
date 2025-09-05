@@ -327,7 +327,7 @@ urban-train/
 * **Integration**: Called after height stats, before feature classification in main.js
 * **Future use**: Enables climate features (Step 5) and scale bar implementation
 
-### `src/modules/climate.js` (NEW: Step 5a - Temperature Assignment)
+### `src/modules/climate.js` (NEW: Step 5a/5b - Temperature & Precipitation)
 
 * **Climate temperature model**: Assigns realistic temperature values to each polygon based on latitude and altitude
 * `assignTemperatures(polygons, map, { seaLevel, maxElevKm, lapseRateFperKm })`: Main temperature assignment function
@@ -342,7 +342,26 @@ urban-train/
 * `seaLevelTempAtLat(latDeg)`: Internal function calculating sea-level temperature at given latitude
   * Uses piecewise-linear interpolation between key latitude bands
   * Handles both northern and southern hemispheres symmetrically
-* **Integration**: Called after coordinate assignment and height clamping, before feature classification
+
+* **Precipitation model**: Assigns realistic precipitation values based on prevailing winds and orographic effects
+* `assignPrecipitation(polygons, map, { seaLevel, pickupRate, precipRate, orographicCoeff, humidityMax })`: Main precipitation assignment function
+  * **Prevailing wind patterns**:
+    * Easterlies (trades 0-30°, polar 60-90°): east→west winds
+    * Westerlies (mid-latitudes 30-60°): west→east winds
+  * **Latitude-based moisture factors**:
+    * ITCZ (0-5°): 1.5x moisture (very wet)
+    * Tropics (5-20°): 1.2x moisture (wet)
+    * Subtropical highs (20-35°): 0.6x moisture (dry/deserts)
+    * Westerlies (35-55°): 1.0x moisture (normal)
+    * Subpolar (55-70°): 0.9x moisture (slightly dry)
+    * Polar (70-90°): 0.6x moisture (dry)
+  * **Orographic effects**: Windward slopes get extra precipitation (1.5x coefficient)
+  * **Wind mechanics**: Sweeps rows in wind direction, picks up moisture over water, deposits on land
+  * **Output**: Adds `polygons[*].prec` field in arbitrary units
+  * **Statistics**: Returns `{ count, min, max, mean }` for debugging
+* `bandMoistureFactor(absLat)`: Internal function calculating moisture factor by latitude band
+* `prevailingWindX(absLat)`: Internal function determining wind direction by latitude
+* **Integration**: Temperature called after coordinate assignment, precipitation called after feature classification
 * **Future use**: Enables biome classification, river generation, and climate-aware labeling
 
 ---
