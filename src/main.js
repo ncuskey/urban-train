@@ -84,7 +84,7 @@ import { refineCoastlineAndRebuild } from "./modules/refine.js";
 import { defineMapCoordinates, assignLatitudes, assignLongitudes } from './modules/geo.js';
 import { assignTemperatures, assignPrecipitation } from './modules/climate.js';
 import { generateRivers } from './modules/rivers.js';
-import { renderRiversSmooth } from './render/rivers-smooth.js';
+import { renderRiversCurves } from './render/rivers-curves.js';
 import { computeLakes } from './modules/lakes.js';
 import { renderLakes } from './render/lakes.js';
 import { computeWatersheds } from './modules/watersheds.js';
@@ -1903,7 +1903,7 @@ async function generate(count) {
     {
       const stats = generateRivers(polygons, { seaLevel: sl });
       console.debug('[rivers:gen]', stats);
-      renderRiversSmooth(polygons, d3.select('#rivers'));
+      renderRiversCurves(polygons, d3.select('#rivers'), {seaLevel});
     }
 
     // Watersheds & orders (Strahler/Shreve) + discharge Q
@@ -1914,7 +1914,7 @@ async function generate(count) {
         qSum: +ws.qSum.toFixed(2), qAtMouths: +ws.qAtMouths.toFixed(2)
       });
       // Re-render rivers (smooth polylines) to use Q-based widths now that Q is available
-      renderRiversSmooth(polygons, d3.select('#rivers'));
+      renderRiversCurves(polygons, d3.select('#rivers'), {seaLevel});
     }
 
     // Initialize / refresh the Layers panel (idempotent; safe on re-gen)

@@ -108,12 +108,38 @@ export function generateRivers(polygons, {
   // 3) Mark rivers by dynamic threshold over land
   const landFluxes = [];
   for (const p of polygons) if (Number.isFinite(p.height) && p.height >= seaLevel) landFluxes.push(p.flux);
-  const dynThreshold = quantile(landFluxes, fluxQuantile) || 0;
+  
+  // Azgaar-style: aim for more tributaries via a lower quantile target
+  // Pick the quantile so that roughly ~8–12% of land cells become channels.
+  const targetFrac = 0.10; // default "tributary density"
+  const sorted = landFluxes.slice().sort((a,b)=>a-b);
+  const qIndex  = Math.max(0, Math.min(sorted.length-1, Math.floor((1 - targetFrac) * (sorted.length-1))));
+  let dynThreshold = sorted[qIndex];
+
+  // Headwater bias: if a cell is steep & wet, allow it to be a channel a bit earlier.
+  // (This mimics how Azgaar's flux threshold lets many small sources start in mountains.)
+  const steepBias = 0.90; // allow up to 10% reduction for very steep cells
+  const maxSlope  = 0.15; // tune to your slope scale; small and safe
+  
+  // Calculate mean precipitation for wet bias
+  const land = [];
+  for (let i = 0; i < polygons.length; i++) {
+    if (Number.isFinite(polygons[i].height) && polygons[i].height >= seaLevel) {
+      land.push(i);
+    }
+  }
+  const meanPrec = d3.mean(land.map(i => polygons[i].prec || 0)) || 0;
 
   for (let i = 0; i < polygons.length; i++) {
     const p = polygons[i];
-    if (p.height >= seaLevel && !p.isLake && p.flux >= dynThreshold && p.down !== -1) {
-      p.isRiver = true;
+    if (p.height >= seaLevel && !p.isLake && p.down !== -1) {
+      // modest slope-precip bias: if (flux is close) AND (slope high OR precip high), let it in
+      const dn = p.down >= 0 ? polygons[p.down] : null;
+      const slope = (dn ? Math.max(0, p.height - dn.height) : 0);
+      const near  = p.flux >= 0.8 * dynThreshold;      // within 20% of threshold
+      const steep = slope >= maxSlope;              // locally steep
+      const wet   = (p.prec ?? 0) >= 1.1 * meanPrec; // above-average precip
+      p.isRiver = (p.flux >= dynThreshold || (near && (steep || wet)));
     }
   }
 
