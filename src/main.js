@@ -81,7 +81,7 @@ import { attachInteraction, getVisibleWorldBounds, padBounds, zoom } from "./mod
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
 import { defineMapCoordinates, assignLatitudes } from './modules/geo.js';
-import { assignTemperatures } from './modules/climate.js';
+import { assignTemperatures, assignPrecipitation } from './modules/climate.js';
 import { buildProtoAnchors } from "./labels/anchors.js";
 import { makeAnchorIndex } from "./labels/spatial-index.js";
 import { enrichAnchors } from "./labels/enrich.js";
@@ -1866,6 +1866,16 @@ async function generate(count) {
       rng,
       seaLevel: sl
     });
+
+    // Step 5b — assign per-cell precipitation (arbitrary units)
+    {
+      const stats = assignPrecipitation(polygons, state.mapCoords, { seaLevel: sl });
+      if (stats.count > 0) {
+        console.debug('[climate:prec]', stats);
+      } else {
+        console.warn('[climate:prec] no cells processed');
+      }
+    }
     
     // Old labeling system removed
     
