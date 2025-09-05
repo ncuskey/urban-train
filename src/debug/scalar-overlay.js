@@ -10,8 +10,8 @@ export function scalarColor(field, t) {
   // t in [0..1]
   if (!Number.isFinite(t)) return "none";
   if (field === "height") {
-    // green→tan
-    const h = 110 - 30 * t, s = 60 + 20 * t, l = 40 + 10 * (1 - t);
+    // green→dark brown
+    const h = 110 - 50 * t, s = 60 + 30 * t, l = 45 - 15 * t;
     return `hsl(${h}, ${s}%, ${l}%)`;
   }
   if (field === "temp") {

@@ -81,7 +81,7 @@ import { drawPolygons, toggleBlur } from "./modules/rendering.js";
 import { attachInteraction, getVisibleWorldBounds, padBounds, zoom } from "./modules/interaction.js";
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
-import { defineMapCoordinates, assignLatitudes } from './modules/geo.js';
+import { defineMapCoordinates, assignLatitudes, assignLongitudes } from './modules/geo.js';
 import { assignTemperatures, assignPrecipitation } from './modules/climate.js';
 import { buildProtoAnchors } from "./labels/anchors.js";
 import { makeAnchorIndex } from "./labels/spatial-index.js";
@@ -1837,13 +1837,16 @@ async function generate(count) {
     // Define default world coordinates & assign per-cell latitude (Step 4)
     const mapCoords = defineMapCoordinates({ width: mapWidth, height: mapHeight });
     assignLatitudes(polygons, mapCoords);
+    assignLongitudes(polygons, mapCoords);
     state.mapCoords = mapCoords;
     // quick self-test for monotonic latitude range
     {
       const lats = polygons.map(p => p.lat).filter(Number.isFinite);
-      if (lats.length) {
+      const lons = polygons.map(p => p.lon).filter(Number.isFinite);
+      if (lats.length && lons.length) {
         const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-        console.debug('[coords]', mapCoords, { minLat, maxLat });
+        const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+        console.debug('[coords]', mapCoords, { minLat, maxLat, minLon, maxLon });
       }
     }
 

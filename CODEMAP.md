@@ -324,11 +324,11 @@ urban-train/
 * **Scalar overlay renderer**: Colors land polygons by scalar field values (height, temperature, precipitation)
   * `renderScalarOverlay(polygons, g, { field, seaLevel })`: Renders colored polygons for land cells
   * **Field support**: "height", "temp", "prec" with appropriate color ramps
-  * **Color ramps**: Height (green→tan), Temperature (blue→yellow→red), Precipitation (white→blue)
+  * **Color ramps**: Height (green→dark brown), Temperature (blue→yellow→red), Precipitation (white→blue)
   * **Land filtering**: Only renders cells above sea level by default
 * **Color computation**: 
   * `scalarColor(field, t)`: Returns HSL color for normalized value t ∈ [0,1]
-  * **Height**: Green to tan gradient (hue 110→80, saturation 60→80%, lightness 50→30%)
+  * **Height**: Green to dark brown gradient (hue 110→60, saturation 60→90%, lightness 45→30%)
   * **Temperature**: Blue to red via yellow (hue 240→0, saturation 85%, lightness 50%)
   * **Precipitation**: White to blue (hue 210, saturation 80%, lightness 95→35%)
 * **Domain computation**:
