@@ -84,6 +84,25 @@ export function runSelfTests(cache = {}, dom = {}) {
     out.push(ok(missing.length === 0, "SVG layers present", missing.length ? `missing: ${missing.join(", ")}` : ""));
   }
 
+  // Geo sanity (optional)
+  if (cache?.polygons && Array.isArray(cache.polygons) && cache.polygons.length) {
+    const polys = cache.polygons;
+    // take a small random sample
+    let aligned = 0, tested = 0;
+    for (let i = 0; i < Math.min(200, polys.length-1); i++) {
+      const a = polys[i], b = polys[i+1];
+      if (!a || !b || !Number.isFinite(a.lat) || !Number.isFinite(b.lat) || !Number.isFinite(a.lon) || !Number.isFinite(b.lon)) continue;
+      const approxY = (a[0]?.[1] ?? 0) - (b[0]?.[1] ?? 0); // very rough from first vertex
+      const approxX = (a[0]?.[0] ?? 0) - (b[0]?.[0] ?? 0);
+      if (approxY !== 0) { aligned += Math.sign(approxY) === Math.sign(b.lat - a.lat) ? 1 : 0; tested++; }
+      if (approxX !== 0) { aligned += Math.sign(approxX) === Math.sign(b.lon - a.lon) ? 1 : 0; tested++; }
+    }
+    if (tested) {
+      const frac = aligned / tested;
+      out.push(ok(frac > 0.5, 'Geo lat/lon monotonicity (rough)', `aligned=${aligned}/${tested}`));
+    }
+  }
+
   return out;
 }
 

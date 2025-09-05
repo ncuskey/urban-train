@@ -11,7 +11,7 @@ Successfully implemented a comprehensive scalar field visualization system with 
 - **Created `src/debug/scalar-overlay.js`**: Complete scalar field visualization renderer
 - **Field support**: Height, temperature, and precipitation with appropriate color schemes
 - **Color ramps**: 
-  - **Height**: Green → Dark Brown gradient (elevation-based)
+  - **Height**: Green → Bright Red gradient (elevation-based)
   - **Temperature**: Blue → Yellow → Red gradient (cold to hot)
   - **Precipitation**: White → Blue gradient (dry to wet)
 - **Land filtering**: Only renders cells above sea level for accurate terrain visualization
@@ -40,8 +40,8 @@ Successfully implemented a comprehensive scalar field visualization system with 
 
 #### **Color System**
 ```javascript
-// Height: Green to dark brown (elevation-based)
-const h = 110 - 50 * t, s = 60 + 30 * t, l = 45 - 15 * t;
+// Height: Green to bright red (elevation-based)
+const h = 110 - 110 * t, s = 60 + 40 * t, l = 45 + 10 * t;
 
 // Temperature: Blue to red via yellow (cold to hot)  
 const h = (1 - t) * 240; // 240=blue → 0=red
@@ -85,7 +85,7 @@ const l = 95 - 60 * t; // Lightness variation
 
 #### **Height Visualization**
 - **Terrain analysis**: See elevation patterns and mountain ranges
-- **Color mapping**: Green (low) to dark brown (high) for intuitive elevation reading
+- **Color mapping**: Green (low) to bright red (high) for intuitive elevation reading
 - **Land focus**: Only shows land cells for clear terrain visualization
 
 #### **Temperature Visualization**  
