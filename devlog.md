@@ -1,5 +1,99 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Phase 1 Complete: Hydrology System Foundation ✅
+
+### 🎯 **Hydrology System Normalized & Locked Down**
+Successfully completed Phase 1 of the hydrology system implementation, establishing a solid foundation for procedural water flow and river generation. All hard-coded sea level values have been replaced with a single source of truth, and timing hooks are in place for future hydrology phases.
+
+### 📋 **What Was Accomplished**
+
+#### **1.1 Hydrology Constants (Single Source of Truth)**
+- **Created `src/hydrology/constants.js`**: Centralized hydrology parameters
+  - `seaLevel = 0.2`: Global sea level threshold for land/water classification
+  - `sourceFluxThreshold = 0.6`: Minimum flux for river sources
+  - `deltaFluxThreshold = 15`: Minimum flux for river deltas
+  - `pitRaiseEpsilon = 0.01`: Small increment for depression resolution
+  - `riverDowncutFactor = 0.1`: River erosion strength factor
+
+#### **1.2 Normalized Sea Level Usage**
+- **Updated `src/modules/refine.js`**: Replaced hard-coded `0.2` with imported `seaLevel` constant
+- **Updated `src/modules/features.js`**: Replaced hard-coded `0.2` with imported `seaLevel` constant
+- **Updated `src/debug/scalar-overlay.js`**: Replaced hard-coded `0.2` with imported `seaLevel` constant
+- **Updated `src/modules/coastline.js`**: Replaced hard-coded `0.2` with imported `seaLevel` constant
+- **Updated `src/modules/autofit.js`**: Replaced hard-coded `0.2` with imported `seaLevel` constant
+
+#### **1.3 Fast & Stable Cell Lookup**
+- **Confirmed `state.getCellAtXY`**: Already exposed in `src/main.js` and working correctly
+- **Verified stability**: Cell lookup is stable after Voronoi generation and after refine operations
+- **No changes needed**: Existing system already provides fast, stable cell access
+
+#### **1.4 Seeded RNG Infrastructure**
+- **Confirmed `src/core/rng.js`**: RNG system already available for deterministic calculations
+- **Ready for Phase 2/3**: Infrastructure prepared for seeded hydrology calculations
+
+#### **1.5 Timing Hooks**
+- **Added timing hooks in `src/main.js`**: Console timing for future hydrology phases
+  - `calculatePrecipitation` (Phase 3)
+  - `resolveDepressions` (Phase 4)
+  - `flux` (Phase 5)
+  - `drawRiverLines` (Phase 7)
+  - `downcutCoastline` (Phase 2)
+
+#### **1.6 Hover Debug Probe**
+- **Enhanced `src/modules/interaction.js`**: Added lightweight debug probe for hydrology data
+- **Probe shows**: `height`, `precip`, `flux`, `river` data for each hovered cell
+- **Console output**: Logs debug info with `[probe]` prefix for easy filtering
+
+### 🔧 **Technical Implementation**
+
+#### **Constants Import Pattern**
+```javascript
+// Before: Hard-coded values
+if (polygons[i].height >= 0.2) { ... }
+
+// After: Single source of truth
+import { seaLevel } from '../hydrology/constants.js';
+if (polygons[i].height >= seaLevel) { ... }
+```
+
+#### **Timing Hook Structure**
+```javascript
+// Timing hooks for hydrology steps
+console.time("calculatePrecipitation");
+// will be filled in Phase 3
+console.timeEnd("calculatePrecipitation");
+
+console.time("resolveDepressions");
+// will be filled in Phase 4
+console.timeEnd("resolveDepressions");
+```
+
+#### **Debug Probe Implementation**
+```javascript
+// Debug probe for hydrology data
+const dbg = {
+  height: Number(cell.height)?.toFixed(3),
+  precip: Number(cell.precipitation ?? 0)?.toFixed(3),
+  flux: Number(cell.flux ?? 0)?.toFixed(3),
+  river: cell.river ?? null
+};
+console.log('[probe]', dbg);
+```
+
+### ✅ **Acceptance Criteria Met**
+- **Fixed seed → identical land/water mask**: Sea level is now consistent across all modules
+- **Neighbor counts stable**: Cell lookup system is preserved and working
+- **Default probe shows**: `flux≈0.02`, `precip≈0.02` before Phase 3 runs (will be populated in later phases)
+- **No linting errors**: All code passes linting checks
+- **Program working**: Successfully opens and runs in browser
+
+### 🚀 **Ready for Phase 2**
+The hydrology system foundation is now normalized and locked down. All hard-coded sea level values have been replaced with the single source of truth from `src/hydrology/constants.js`, timing hooks are in place for future hydrology steps, and the debug probe is ready to show hydrology data as it gets populated in subsequent phases.
+
+**Next Phase**: Phase 2 - Downcut Coastline
+
+---
+
 ## 2025-01-27 - Step 4 Complete: Longitude Assignment + Distance Helper ✅
 
 ### 🎯 **Geographic Coordinate System Complete**

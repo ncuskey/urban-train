@@ -2,6 +2,7 @@
 // NOTE: d3 is global if used; do not import it here.
 
 import { makeNamer } from './names.js';
+import { seaLevel } from '../hydrology/constants.js';
 
 // Local helper: robust "find cell index at (x,y)"
 function closestCellIndex(diagram, polygons, x, y) {
@@ -37,12 +38,12 @@ export function markFeatures({
   diagram,
   polygons,
   rng,
-  seaLevel = 0.2
+  seaLevel: _sea = seaLevel
 }) {
   // Create fantasy namer with seeded RNG
   const namer = makeNamer(() => rng.random());
   
-  console.debug('[water:features]', {seaLevel, cells: polygons.length});
+  console.debug('[water:features]', {seaLevel: _sea, cells: polygons.length});
   
   var queue = []; // polygons to check
   var used = []; // checked polygons
@@ -62,7 +63,7 @@ export function markFeatures({
     // Calculate ocean size (number of ocean cells)
     let oceanSize = 0;
     for (let i = 0; i < polygons.length; i++) {
-      if (polygons[i].height < seaLevel) oceanSize++;
+      if (polygons[i].height < _sea) oceanSize++;
     }
     const oceanAreaNorm = oceanSize / totalArea;
     name = namer.ocean(oceanAreaNorm);
@@ -73,7 +74,7 @@ export function markFeatures({
     var i = queue[0];
     queue.shift();
     polygons[i].neighbors.forEach(function(e) {
-      if (used.indexOf(e) < 0 && polygons[e] && polygons[e].height < seaLevel) {
+      if (used.indexOf(e) < 0 && polygons[e] && polygons[e].height < _sea) {
         polygons[e].featureType = type;
         polygons[e].featureName = name;
         queue.push(e);
@@ -92,18 +93,18 @@ export function markFeatures({
     return (!e.featureType);
   });
   while (unmarked.length > 0) {
-    if (unmarked[0].height >= seaLevel) {
+    if (unmarked[0].height >= _sea) {
       type = "Island";
       number = island;
       island += 1;
-      greater = seaLevel;
+      greater = _sea;
       less = 100; // just to omit exclusion
     } else {
       type = "Lake";
       number = lake;
       lake += 1;
       greater = -100; // just to omit exclusion
-      less = seaLevel;
+      less = _sea;
     }
     
     // Calculate feature size and cluster size for naming

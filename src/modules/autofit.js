@@ -1,6 +1,8 @@
 // src/modules/autofit.js
 // d3 is global
 
+import { seaLevel } from '../hydrology/constants.js';
+
 /**
  * Utility function to ensure layout is complete before measuring.
  * Uses double requestAnimationFrame for belt-and-suspenders approach.
@@ -48,14 +50,14 @@ export function clampRectToBounds(rect, bounds) {
  * If preferFeatureType is true, only includes featureType === 'Island';
  * otherwise falls back to height >= seaLevel.
  */
-export function computeLandBBox(polygons, { seaLevel = 0.2, preferFeatureType = true } = {}) {
+export function computeLandBBox(polygons, { seaLevel: _sea = seaLevel, preferFeatureType = true } = {}) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   let any = false;
 
   const isLand = (p) => {
     if (!p) return false;
     if (preferFeatureType && p.featureType != null) return p.featureType === 'Island';
-    return (p.height || 0) >= seaLevel;
+    return (p.height || 0) >= _sea;
   };
 
   for (let i = 0; i < polygons.length; i++) {
@@ -92,14 +94,14 @@ export function fitToLand({
   polygons,
   width,
   height,
-  seaLevel = 0.2,
+  seaLevel: _sea = seaLevel,
   preferFeatureType = true,
   margin = 0.08,     // 8% padding on all sides
   duration = 600
 }) {
   if (!svg || !polygons || !polygons.length) return Promise.resolve();
 
-  const bbox = computeLandBBox(polygons, { seaLevel, preferFeatureType });
+  const bbox = computeLandBBox(polygons, { seaLevel: _sea, preferFeatureType });
   if (!bbox) return Promise.resolve();
 
   // Guard against degenerate bbox

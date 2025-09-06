@@ -2,6 +2,7 @@
 // NOTE: d3 is global.
 
 import { buildVoronoi } from "./geometry.js";
+import { seaLevel } from "../hydrology/constants.js";
 
 export function refineCoastlineAndRebuild({
   samples,
@@ -9,7 +10,7 @@ export function refineCoastlineAndRebuild({
   polygons,
   mapWidth,
   mapHeight,
-  seaLevel = 0.2,
+  seaLevel: _sea = seaLevel,
   targetSpacing = 8,      // sensible default; will be overridden by main.js
   minSpacingFactor = 0.75 // avoid clustering new points too tightly
 }) {
@@ -23,8 +24,8 @@ export function refineCoastlineAndRebuild({
     const lh = polygons[li]?.height ?? 0;
     const rh = polygons[ri]?.height ?? 0;
 
-    const leftIsLand  = lh >= seaLevel;
-    const rightIsLand = rh >= seaLevel;
+    const leftIsLand  = lh >= _sea;
+    const rightIsLand = rh >= _sea;
     if (leftIsLand === rightIsLand) continue; // both land or both sea -> not coastal
 
     // Keep edges with valid endpoints

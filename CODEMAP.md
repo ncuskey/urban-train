@@ -55,6 +55,8 @@ urban-train/
 │   │   ├── climate-layers.js # Temperature/precipitation debug visualizations
 │   │   ├── scalar-overlay.js # Scalar field visualization (height/temp/precip)
 │   │   └── scalar-legend.js  # Interactive legend for scalar overlays
+│   ├── hydrology/          # NEW: Hydrology system (Phase 1+)
+│   │   └── constants.js    # Single source of truth for hydrology parameters
 │   ├── render/
 │   │   └── layers.js       # SVG layer creation/ordering/cleanup
 │   └── selftest.js         # Sanity checks + badge
@@ -145,6 +147,17 @@ urban-train/
   * `countOnes(A)`: Counts 1s in binary arrays for statistics
   * `erodeBinary(a, gw, gh, steps)`: Binary erosion with 4-neighbor connectivity
 * **Corrected Water Fraction Calculation**: Accurate water fraction computation
+* **Hydrology System** (Phase 1): Foundation for procedural water flow and river generation
+  * `src/hydrology/constants.js`: Single source of truth for hydrology parameters
+    * `seaLevel = 0.2`: Global sea level threshold for land/water classification
+    * `sourceFluxThreshold = 0.6`: Minimum flux for river sources
+    * `deltaFluxThreshold = 15`: Minimum flux for river deltas
+    * `pitRaiseEpsilon = 0.01`: Small increment for depression resolution
+    * `riverDowncutFactor = 0.1`: River erosion strength factor
+  * **Normalized sea level usage**: All modules now import from constants instead of hard-coding 0.2
+  * **Timing hooks**: Console timing for future hydrology phases (precipitation, depressions, flux, rivers)
+  * **Debug probe**: Hover system shows height/flux/precip/river data for each cell
+  * **Seeded RNG ready**: Infrastructure prepared for deterministic hydrology calculations
   * `buildPrefixSum(mask)`: Builds 2D prefix sum array for O(1) rectangle queries
   * `waterFrac(mask, rect)`: Returns accurate water fraction for specific rectangles
   * `gridRectFromScreen(mask, rect)`: Converts screen rectangle to grid coordinates

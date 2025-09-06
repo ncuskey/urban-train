@@ -191,6 +191,16 @@ export function attachInteraction({
             ? cell.featureName 
             : "no!";
             
+          // Debug probe for hydrology data
+          const dbg = {
+            height: Number(cell.height)?.toFixed(3),
+            precip: Number(cell.precipitation ?? 0)?.toFixed(3),
+            flux: Number(cell.flux ?? 0)?.toFixed(3),
+            river: cell.river ?? null
+          };
+          // Log debug info to console
+          console.log('[probe]', dbg);
+            
           // Update HUD with screen coordinates for crisp positioning
           updateHUD(cell, { screenX: mx, screenY: my, worldX: wx, worldY: wy, k: t.k });
         });
@@ -215,6 +225,16 @@ export function attachInteraction({
           featureEl.textContent = (cell.featureType && cell.featureName) 
             ? cell.featureName 
             : "no!";
+            
+          // Debug probe for hydrology data
+          const dbg = {
+            height: Number(cell.height)?.toFixed(3),
+            precip: Number(cell.precipitation ?? 0)?.toFixed(3),
+            flux: Number(cell.flux ?? 0)?.toFixed(3),
+            river: cell.river ?? null
+          };
+          // Log debug info to console
+          console.log('[probe]', dbg);
           
           // Update HUD with screen coordinates for crisp positioning
           updateHUD(cell, { screenX: mx, screenY: my, worldX: wx, worldY: wy, k: t.k });
