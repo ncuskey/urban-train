@@ -2,6 +2,8 @@
 // Colors each land polygon by a scalar field: "height" | "temp" | "prec"
 // Safe to call repeatedly (joins by index). Uses an SVG <polygon> per cell.
 
+import { seaLevel } from '../hydrology/constants.js';
+
 function toPoints(poly) {
   return poly.map(p => `${p[0]},${p[1]}`).join(" ");
 }
@@ -24,7 +26,7 @@ export function scalarColor(field, t) {
   return `hsl(210, 80%, ${l}%)`;
 }
 
-export function computeScalarDomain(polygons, field, seaLevel = 0.2) {
+export function computeScalarDomain(polygons, field, seaLevel = seaLevel) {
   let vals = [], sum = 0;
   for (const p of polygons) {
     if (!p || !p.length) continue;
@@ -37,7 +39,7 @@ export function computeScalarDomain(polygons, field, seaLevel = 0.2) {
   return { count: vals.length, min, mean, max };
 }
 
-export function renderScalarOverlay(polygons, g, { field = "height", seaLevel = 0.2 } = {}) {
+export function renderScalarOverlay(polygons, g, { field = "height", seaLevel = seaLevel } = {}) {
   if (!g || g.empty() || !Array.isArray(polygons)) return;
 
   const domain = computeScalarDomain(polygons, field, seaLevel);

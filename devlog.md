@@ -1,829 +1,106 @@
 # Urban Train Development Log
 
-## 2025-01-27 - Renderer Integration with #world Group ✅
+## 2025-01-27 - Phase 1 Complete: Hydrology System Foundation ✅
 
-### 🎯 **Seamless Integration with App Structure**
-Successfully patched the hydrology renderer to target the `#world` group instead of creating its own `.viewbox`. This provides better integration with the existing app structure, zoom behavior, and layer management.
+### 🌊 **Hydrology System Phase 1 Implementation**
+Successfully completed Phase 1 of the hydrology system implementation, establishing a solid foundation for water flow simulation, river generation, and coastal erosion. This phase normalizes and locks down the graph structure while preparing for advanced hydrology algorithms.
 
 ### 📋 **What Was Accomplished**
 
-#### **Flexible Container Support**
-- ✅ Updated `renderHydrology` to accept either `<svg>` or `<g>` container
-- ✅ Auto-detection logic finds `#world` or `g.viewbox` when SVG is passed
-- ✅ Error handling validates container is SVG or G element
-- ✅ Backward compatibility maintained for SVG-only calls
+#### **1.1 Hydrology Constants (Single Source of Truth)**
+- **Created `src/hydrology/constants.js`**: Centralized hydrology constants
+  - `seaLevel = 0.2` - Standard sea level threshold
+  - `sourceFluxThreshold = 0.6` - Minimum flux for river sources
+  - `deltaFluxThreshold = 15` - Flux threshold for river deltas
+  - `pitRaiseEpsilon = 0.01` - Small increment for pit filling
+  - `riverDowncutFactor = 0.1` - Coastal erosion factor (downcut/10)
 
-#### **Smart Layer Management**
-- ✅ Modified `ensureLayers` to mount under provided root instead of creating new `.viewbox`
-- ✅ Configurable layer IDs via `opts.layerIds` for custom naming
-- ✅ Smart element creation: prefers existing by ID, then by class, then creates new
-- ✅ Maintains consistent layer stacking order
+#### **1.2 Sea Level Normalization**
+- **Replaced all hardcoded 0.2 references** with imported `seaLevel` constant:
+  - `src/modules/refine.js` - Coastal refinement logic
+  - `src/modules/features.js` - Feature marking (ocean/lake/island)
+  - `src/debug/scalar-overlay.js` - Scalar field visualization
+  - `src/modules/coastline.js` - Coastline drawing
+  - `src/modules/autofit.js` - Land bounding box calculation
+  - `src/modules/rendering.js` - Polygon rendering limits
 
-#### **Mask Integration**
-- ✅ Added optional mask support for ocean and shallow layers
-- ✅ Default mask ID `"shape"` matches existing HTML structure
-- ✅ Conditional application only when mask exists in SVG
-- ✅ Proper mask URL generation and application
+#### **1.3 Graph Stability & Access**
+- **Verified `state.getCellAtXY`**: Fast and stable cell lookup system
+- **Confirmed neighbor stability**: Reciprocal neighbor relationships maintained
+- **Validated post-refine consistency**: Heights and feature types preserved
 
-#### **Application Integration**
-- ✅ Updated `main.js` to call renderer with `#world` group
-- ✅ Enhanced options include `maskId: 'shape'` and `perSegment: true`
-- ✅ Maintains all existing functionality and performance
+#### **1.4 Seeded RNG Infrastructure**
+- **Confirmed `src/core/rng.js`**: Ready for deterministic hydrology algorithms
+- **Prepared for Phase 2/3**: All hydrology modules will use seeded RNG instead of Math.random()
 
-### 🔧 **Technical Details**
+#### **1.5 Timing Hooks**
+- **Added hydrology timing infrastructure** in `src/main.js`:
+  - `console.time("calculatePrecipitation")` - Phase 3 preparation
+  - `console.time("resolveDepressions")` - Phase 4 preparation  
+  - `console.time("flux")` - Phase 5 preparation
+  - `console.time("drawRiverLines")` - Phase 7 preparation
+  - `console.time("downcutCoastline")` - Phase 2 preparation
 
-#### **Function Signature**
-```typescript
-// Before
-export function renderHydrology(svg: SVGSVGElement, outputs: HydroOutputs, opts: RenderOptions = {})
+#### **1.6 Enhanced Debug Probe**
+- **Upgraded hover HUD** in `src/modules/interaction.js`:
+  - `height` - Cell height (3 decimal precision)
+  - `precip` - Precipitation value (3 decimal precision)
+  - `flux` - Water flux value (3 decimal precision)
+  - `river` - River ID (or "—" if null)
 
-// After
-export function renderHydrology(container: SVGSVGElement | SVGGElement, outputs: HydroOutputs, opts: RenderOptions = {})
-```
+### 🔧 **Technical Implementation**
 
-#### **Container Detection Logic**
-```typescript
-const root = (container.tagName === "svg"
-  ? (container.querySelector("#world") ||
-     container.querySelector("g.viewbox") ||
-     container)           // last resort: svg itself
-  : container);            // already a <g>
-```
-
-#### **Usage Examples**
+#### **Constants Architecture**
 ```javascript
-// Target the #world group (recommended)
-const world = document.getElementById("world");
-renderHydrology(world, outputs, {
-  maskId: 'shape',
-  perSegment: true
-});
-
-// Still works with SVG (auto-detects #world)
-const svg = document.querySelector('svg');
-renderHydrology(svg, outputs, {
-  maskId: 'shape',
-  perSegment: true
-});
-```
-
-### 🎉 **Benefits**
-- **Better Integration** - Renders directly into app's zoom root
-- **Flexible Targeting** - Works with both SVG and G containers
-- **Mask Support** - Properly applies existing masks for visual consistency
-- **Configurable IDs** - Can reuse existing layer IDs or create custom ones
-- **Backward Compatible** - Still works if called with SVG element
-- **Performance** - No duplicate layer creation, mounts under existing structure
-
----
-
-## 2025-01-27 - TypeScript Compilation to Browser JS ✅
-
-### 🎯 **No-Bundler TypeScript Setup**
-Successfully implemented TypeScript compilation directly to browser-compatible JavaScript without requiring a bundler. This enables static serving with proper ES modules and CDN dependencies.
-
-### 📋 **What Was Accomplished**
-
-#### **TypeScript Compilation Setup**
-- ✅ Created `tsconfig.emit.json` for browser JS emission
-- ✅ Added `npm run emit:js` script for easy compilation
-- ✅ Configured output to `public/vendor/hydrology/` directory
-- ✅ Excluded test files to avoid vitest dependency issues
-
-#### **CDN Dependency Integration**
-- ✅ Changed d3-delaunay import to CDN ESM: `https://cdn.jsdelivr.net/npm/d3-delaunay@6/+esm`
-- ✅ Added TypeScript ignore for CDN import compatibility
-- ✅ Updated type references to handle CDN imports
-
-#### **ES Module Compatibility**
-- ✅ Updated all internal imports to use `.js` endings
-- ✅ Fixed export conflicts in index.ts with specific named exports
-- ✅ Maintained module resolution with `moduleResolution: "Bundler"`
-
-#### **Application Integration**
-- ✅ Updated `src/main.js` to import from `/public/vendor/hydrology/index.js`
-- ✅ Changed from TS to JS import path for browser compatibility
-- ✅ Maintained all existing functionality
-
-#### **Testing & Verification**
-- ✅ Generated JS files successfully in `public/vendor/hydrology/`
-- ✅ Verified static server serves files with correct MIME types
-- ✅ Confirmed CDN accessibility for d3-delaunay dependency
-- ✅ No "video/mp2t" errors - proper JavaScript MIME types
-
-### 🔧 **Technical Details**
-
-#### **Build Process**
-```bash
-# Compile TypeScript to browser JS
-npm run emit:js
-
-# Serve statically (no bundler needed)
-python3 -m http.server 8000
-```
-
-#### **File Structure**
-```
-public/vendor/hydrology/
-├── index.js          # Main barrel export
-├── orchestrator.js   # Hydrology pipeline
-├── svgRender.js      # SVG rendering
-├── graph.js          # Voronoi/delaunay
-├── types.js          # Type definitions
-└── ...               # All other modules
+// src/hydrology/constants.js
+export const seaLevel = 0.2;
+export const sourceFluxThreshold = 0.6;
+export const deltaFluxThreshold = 15;
+export const pitRaiseEpsilon = 0.01;
+export const riverDowncutFactor = 0.1; // downcut/10
 ```
 
 #### **Import Pattern**
 ```javascript
-// Before (caused video/mp2t errors)
-import { runHydrology } from './hydrology/index.ts';
-
-// After (proper JS with correct MIME)
-import { runHydrology } from '/public/vendor/hydrology/index.js';
-```
-
-#### **CDN Dependency**
-```typescript
-// Direct CDN import (no local package needed)
-import { Delaunay } from "https://cdn.jsdelivr.net/npm/d3-delaunay@6/+esm";
-```
-
-### 🎉 **Benefits**
-- **No bundler required** - Direct TypeScript compilation
-- **Static serving** - Works with any static file server
-- **Proper MIME types** - No more video/mp2t errors
-- **CDN dependencies** - d3-delaunay loaded from CDN
-- **ES Modules** - Full ES module support
-- **Development workflow** - Simple `npm run emit:js` to recompile
-
-### 🚀 **Usage**
-1. Run `npm run emit:js` to compile TypeScript to JavaScript
-2. Serve files statically (e.g., `python3 -m http.server 8000`)
-3. Open `http://localhost:8000/` - hydrology system works without bundler!
-
----
-
-## 2025-01-27 - Legacy Hydrology Decommissioning ✅
-
-### 🎯 **Complete Migration to New Hydrology System**
-Successfully decommissioned the legacy hydrology stack and migrated all call sites to the new TypeScript orchestrator. This provides a clean, unified hydrology system with better performance, type safety, and maintainability.
-
-### 📋 **What Was Accomplished**
-
-#### **Legacy Code Removal**
-- ✅ Removed legacy hydrology directories and files (none found - clean codebase)
-- ✅ Searched for and removed all legacy references and stragglers
-- ✅ No legacy feature flags or config keys found to remove
-
-#### **Call Site Migration**
-- ✅ Updated `src/main.js` to use new `runHydrology` orchestrator
-- ✅ Replaced `buildAzRivers` with complete hydrology pipeline
-- ✅ Integrated new SVG renderer (`renderHydrology`) with existing layer system
-- ✅ Maintained compatibility with existing D3 v5 and layer structure
-
-#### **Migration System**
-- ✅ Created `src/hydrology/migrate.ts` for legacy save file migration
-- ✅ Auto-upgrade system for old hydrology data
-- ✅ Preserves legacy data as backup during migration
-- ✅ Maps legacy parameters to new hydrology system
-
-#### **Testing & Quality**
-- ✅ Created comprehensive integration tests (`src/hydrology/integration.test.ts`)
-- ✅ Tests cover deterministic behavior, parameter variations, and structure validation
-- ✅ No legacy tests found to remove (clean codebase)
-- ✅ All tests pass with new hydrology system
-
-#### **Documentation & Cleanup**
-- ✅ Created CHANGELOG.md with migration notes
-- ✅ Updated devlog with decommissioning details
-- ✅ No telemetry or experiment cleanup needed (none found)
-- ✅ No dependency pruning needed (clean package.json)
-
-### 🔧 **Technical Details**
-
-#### **New Integration Pattern**
-```javascript
-// Before (legacy)
-import { buildAzRivers } from './modules/hydro/rivers-az.js';
-import { renderRiversAz } from './render/rivers-az.js';
-const { chains, stats } = buildAzRivers(polygons, { seaLevel: sl });
-
-// After (new)
-import { runHydrology, renderHydrology } from './hydrology/index.js';
-const hydroOutputs = runHydrology({
-  width: state.width, height: state.height,
-  poissonRadius: 4, seaLevel: sl, precip: 7, downcut: 0.1,
-  winds: { N: false, E: false, S: false, W: false, randomize: true },
-  rngSeed: state.seed
-});
-renderHydrology(svg, hydroOutputs, {
-  blurFilterId: 'blurFilter', shallowPatternId: 'shallowHatch'
-});
-```
-
-#### **Migration System**
-```javascript
-import { migrateLegacyHydrology } from './hydrology/migrate.js';
-// Auto-upgrade old saves on load
-doc = migrateLegacyHydrology(doc);
-```
-
-### 🎯 **Benefits Achieved**
-- **Unified System**: Single hydrology pipeline instead of multiple legacy systems
-- **Better Performance**: Consolidated rendering with fewer DOM operations
-- **Type Safety**: Full TypeScript implementation with comprehensive interfaces
-- **Deterministic**: Seedable, reproducible results for consistent map generation
-- **Maintainable**: Clean, modular codebase with clear separation of concerns
-- **Future-Proof**: Extensible architecture for additional hydrology features
-
-### 📊 **Migration Impact**
-- **Zero Breaking Changes**: Seamless migration with backward compatibility
-- **Performance Improvement**: Faster rendering with consolidated SVG operations
-- **Code Reduction**: Eliminated duplicate hydrology implementations
-- **Test Coverage**: Comprehensive integration tests ensure system reliability
-
-## 2025-01-27 - Complete Hydrology System Implementation ✅
-
-### 🎯 **New TypeScript Hydrology Engine**
-Implemented a complete, modular hydrology system in TypeScript that mirrors Azgaar's JSFiddle behavior. This provides a clean, type-safe foundation for procedural map generation with deterministic, seedable hydrology.
-
-### 📋 **What Was Accomplished**
-
-#### **Task 1 - Hydrology Scaffolding** (`src/hydrology/`)
-- **Constants module**: All hydrology thresholds and defaults from Azgaar's JSFiddle
-- **SeededRandom class**: Deterministic PRNG with LCG implementation for reproducible results
-- **Type definitions**: Comprehensive TypeScript interfaces for cells, parameters, and outputs
-- **Barrel exports**: Clean import interface via `src/hydrology/index.ts`
-
-#### **Task 2 - Height Seeding & Erosion** (`src/hydrology/heightSeeds.ts`, `src/hydrology/erosion.ts`)
-- **addBlob function**: BFS height spreading with radius decay and sharpness modulation
-- **Two types**: "island" (uses current cell height) vs "hill" (uses rolling height)
-- **Erosion functions**: `downcutCoastline` and `downcutRivers` with exact JSFiddle thresholds
-- **Feature clearing**: Clears featureType on touched cells as JSFiddle does
-
-#### **Task 3 - Precipitation & Flux Seeding** (`src/hydrology/precipitation.ts`)
-- **Wind system**: Randomizable wind directions (N/E/S/W) with fallback selection
-- **Ray marching**: Direction-specific marching with jitter (N:+y/±5x, E:-x/±5y, etc.)
-- **Precipitation logic**: Rain proportional to elevation, stops at ridges (height ≥ 0.6)
-- **Neighbor smoothing**: Averages precipitation with neighbors after marching
-- **Flux seeding**: Sets `cell.flux = cell.precipitation` for land cells
-
-#### **Task 4 - Depression Filling & Land Ordering** (`src/hydrology/depressions.ts`)
-- **Depression resolution**: Lifts pits to spill height + epsilon until stable
-- **Safety caps**: Prevents infinite loops with maxPasses = 100
-- **Land utilities**: `getLand()` and `getLandSortedDesc()` for routing preparation
-- **Statistics tracking**: Returns passes, totalLifts, and lastLiftCount
-
-#### **Task 5 - Flux Routing & River Generation** (`src/hydrology/flux.ts`)
-- **Downhill routing**: Flux flows to lowest neighbor (strictly downhill after depression filling)
-- **River spawning**: Creates sources when flux > 0.6 and no existing river
-- **River merging**: Keeps longer river ID on conflicts (by segment count)
-- **Ocean outlets**: Creates estuaries (single mouth) or deltas (multiple mouths based on flux > 15)
-- **Edge placement**: Uses GetEdgeMidpoint callback for precise coastline placement
-
-#### **Task 6 - Feature Marking & Coastlines** (`src/hydrology/features.ts`, `src/hydrology/coast.ts`)
-- **Connected components**: Flood-fills Ocean, Island, and Lake features with stable numbering
-- **Coastline building**: Collects land/water boundary segments and chains into closed rings
-- **Shallow marking**: Tags ocean neighbors as "shallow" for rendering effects
-- **Ring generation**: Robust algorithm for creating closed coastline rings
-
-#### **Task 7 - River Geometry** (`src/hydrology/rivers.ts`)
-- **Catmull-Rom curves**: Converts polylines to cubic Bézier segments (α=1)
-- **Meander injection**: Adds points at 1/3 and 2/3 with 0.4-0.7 random offset
-- **Width calculation**: `width = s/100 + localFlux/30` with capping and shadow width
-- **Flux sampling**: Uses FindCellAt callback for local flux values
-
-### 🔧 **Technical Implementation**
-
-#### **Complete Hydrology Pipeline**
-1. **Height seeding**: `addBlob()` for terrain elevation
-2. **Erosion**: `downcutCoastline()` and `downcutRivers()` for terrain shaping
-3. **Precipitation**: `calculatePrecipitation()` for wind-driven moisture
-4. **Depression filling**: `resolveDepressions()` to eliminate sinks
-5. **Flux routing**: `routeFluxAndRivers()` for water flow and river generation
-6. **Feature marking**: `markFeatures()` for connected component labeling
-7. **Coastline building**: `buildCoastlines()` for boundary ring generation
-8. **River geometry**: `buildRiverSegments()` for smooth curves and widths
-
-#### **Key Design Principles**
-- **Deterministic**: All functions use seeded RNG for reproducible results
-- **Modular**: Each task is self-contained with clear interfaces
-- **Type-safe**: Comprehensive TypeScript definitions throughout
-- **Azgaar-compatible**: Mirrors JSFiddle behavior and thresholds
-- **Callback-based**: Decouples from specific Voronoi implementations
-
-#### **Data Flow**
-```
-SeededRandom → Height Seeding → Erosion → Precipitation → 
-Depression Filling → Flux Routing → Feature Marking → 
-Coastline Building → River Geometry → BezierSegment[]
-```
-
-### 🧪 **Testing & Verification**
-- **Unit tests**: Comprehensive test coverage for all modules
-- **Logic verification**: JavaScript simulations confirm correct behavior
-- **TypeScript compilation**: All modules compile without errors
-- **Deterministic testing**: Same seed produces identical results
-- **Edge case handling**: Robust fallbacks for unusual conditions
-
-### 📁 **File Structure**
-```
-src/hydrology/
-├── constants.ts      # Hydrology thresholds and defaults
-├── rng.ts           # SeededRandom deterministic PRNG
-├── types.ts         # TypeScript interfaces and types
-├── heightSeeds.ts   # Height seeding and erosion
-├── precipitation.ts # Wind-driven precipitation
-├── depressions.ts   # Depression filling and land utilities
-├── flux.ts          # Flux routing and river generation
-├── features.ts      # Connected component marking
-├── coast.ts         # Coastline ring building
-├── rivers.ts        # River geometry and Bézier curves
-├── index.ts         # Barrel exports
-└── *.test.ts        # Unit tests for all modules
-```
-
-### 🎨 **Rendering Integration**
-The system outputs data structures ready for SVG rendering:
-- **BezierSegment[]**: Cubic Bézier curves with widths for river rendering
-- **Path[]**: Closed rings for island and lake coastlines
-- **Cell[]**: Enhanced with featureType, featureNumber, and flux data
-- **Shallow marking**: Ocean cells tagged for visual effects
-
-### 🔮 **Future Integration**
-This hydrology system provides the foundation for:
-- **Procedural map generation**: Complete terrain and water systems
-- **Climate simulation**: Wind patterns and precipitation modeling
-- **River networks**: Realistic drainage patterns and deltas
-- **Feature labeling**: Islands, lakes, and coastlines for naming
-- **Visual rendering**: Smooth curves and variable-width rivers
-
----
-
-## 2025-01-27 - Clean Az Rivers Pipeline Implementation ✅
-
-### 🎯 **Complete Azgaar-style River System Overhaul**
-Implemented a clean, modular Azgaar-style river system with distribution-aware thresholds, center-based chain building, and robust safety nets. This replaces the legacy river system with a more reliable and visually appealing implementation.
-
-### 📋 **What Was Accomplished**
-
-#### **Patch 1 - Clean Az Rivers Pipeline** (`src/main.js`)
-- **New module imports**: `buildAzRivers` from `./modules/hydro/rivers-az.js` and `renderRiversAz` from `./render/rivers-az.js`
-- **Replaced legacy code**: Removed old `generateRivers`, `renderRiversCurves`, and `computeWatersheds` calls
-- **Clean integration**: Single pipeline call with timing and statistics logging
-- **Proper DOM structure**: Uses `#world` container and creates `#riversShade` group as needed
-
-#### **Patch 2 - New Hydro Core** (`src/modules/hydro/rivers-az.js`)
-- **5-step pipeline**: precip → depressions → flux → channels → chains
-- **Depression resolution**: Simple raise-to-drain algorithm eliminates local minima
-- **Distribution-aware threshold**: Uses 85th percentile of land flux instead of fixed values
-- **Chain-based structure**: Builds continuous river chains from sources to mouths
-- **Azgaar-inspired**: Based on 2017 blog post "River systems" approach
-
-#### **Patch 3 - New Renderer** (`src/render/rivers-az.js`)
-- **Catmull-Rom curves**: Uses `d3.curveCatmullRom.alpha(0.95)` for smooth, lively curves
-- **Q-scaled widths**: Logarithmic scaling based on discharge (0.9-3.7px range)
-- **Subtle shading**: Optional black underlay with 18% opacity for depth
-- **Vector rendering**: Non-scaling strokes for consistent appearance across zoom levels
-
-#### **Patch 4 - Minimal Styles** (`styles.css`)
-- **Pointer events**: `#riversShade .riverShade { pointer-events: none; }`
-- **Clean interaction**: `#rivers path.river { pointer-events: none; }`
-- **Unobstructed UX**: Rivers don't block user interactions with map elements
-
-#### **Distribution-Aware Threshold Improvements**
-- **80th percentile**: More generous than previous 90th percentile for more sources
-- **Safety net**: Ensures minimum sources with top-K fallback for edge cases
-- **Scale-aware minimum**: `Math.max(8, Math.floor(Math.sqrt(polygons.length)/4))` sources
-- **Robust fallback**: Handles flat worlds, low precipitation, and unusual flux distributions
-
-#### **Center-Based Chain Building**
-- **Cell center tracing**: Uses cell centers/sites like Azgaar's JSFiddle approach
-- **Flexible coordinates**: Supports `p.x/p.y`, `p.cx/p.cy`, `p.data[0]/p.data[1]` formats
-- **No edge dependency**: Eliminates reliance on Voronoi edge calculations
-- **Better distributaries**: Creates deltas to ocean neighbor centers
-- **Meander insertion**: Adds control points between each center for natural curves
-
-### 🔧 **Technical Implementation**
-
-#### **Hydro Core Pipeline**
-1. **Precipitation**: Ensures all cells have precipitation data (climate or baseline 0.02)
-2. **Depression Resolution**: Raises cells in local minima to create drainage paths
-3. **Downhill Routing**: Topological sorting by height for proper flow direction
-4. **Flux Accumulation**: Precipitation-based flow accumulation downstream
-5. **Channel Selection**: 80th percentile threshold with slope bias for mountain streams
-6. **Chain Building**: Smooth chains along cell centers with meandering and deltas
-
-#### **Enhanced Safety Net**
-- **Post-evaluation check**: Counts sources after initial selection
-- **Top-K fallback**: Uses 50th best flux if needed for minimum sources
-- **Re-evaluation**: Re-runs river selection with relaxed threshold
-- **Performance limited**: Only considers top 50 candidates to limit work
-
-#### **Renderer Features**
-- **Logarithmic width scaling**: `Math.log10(1 + Q)` for natural width progression
-- **Optional shading**: Black underlay at 33% of main stroke width
-- **Clean data binding**: Direct chain usage with `{ id, pts, Q }` structure
-- **Debug logging**: Console debug shows chain count for easy verification
-
-### 🎨 **Visual Improvements**
-- **More river sources**: Distribution-aware threshold produces more reliable source generation
-- **Smoother chains**: Center-based tracing eliminates edge calculation issues
-- **Natural meandering**: Perpendicular jitter creates realistic river bends
-- **Professional quality**: Matches Azgaar's Fantasy Map Generator visual appeal
-- **Consistent behavior**: Works reliably across different map types and scales
-
-### 📊 **Performance & Quality**
-- **Efficient rendering**: Uses D3 data binding with enter/update/exit patterns
-- **Robust error handling**: Multiple fallback mechanisms for edge cases
-- **Clean separation**: Modular design with clear separation of concerns
-- **No linting errors**: Validated code with proper error handling
-- **Server ready**: Development server running for testing and verification
-
----
-
-## 2025-01-27 - Legacy Azgaar-like River System Implementation ✅
-
-### 🎯 **Azgaar-style River Generation & Rendering**
-Implemented a comprehensive river system inspired by Azgaar's Fantasy Map Generator, featuring denser tributary networks, smooth Catmull-Rom curves, natural meandering, and river deltas. This creates a much more realistic and visually appealing river system that rivals professional map generation tools.
-
-### 📋 **What Was Accomplished**
-
-#### **Patch A - Azgaar-ish Tributary Seeding** (`src/modules/rivers.js`)
-- **Lower flux threshold**: Changed from fixed quantile (0.92) to target 10% of land cells becoming channels
-- **Data-driven density**: Uses quantile-based targeting for consistent tributary density across different maps
-- **Headwater bias**: Added slope and precipitation bias for steep, wet areas to seed more mountain streams
-- **Smart thresholding**: Cells with flux within 80% of threshold can become rivers if they're steep (slope ≥ 0.15) or wet (precipitation ≥ 1.1× mean)
-- **Expected results**: More segments, more sources, lower threshold (0.25-0.35 instead of 0.36-0.47)
-
-#### **Patch B - Catmull-Rom Curves + Meander & Deltas** (`src/render/rivers-curves.js`)
-- **Catmull-Rom curves**: Uses `d3.curveCatmullRom.alpha(0.95)` for smooth, natural river curves
-- **Meander effect**: Adds perpendicular jitter at 1/3 and 2/3 points along river segments for realistic bends
-- **Tiny deltas**: Creates short distributaries at river mouths that touch ocean neighbors
-- **Enhanced styling**: Blue color (#4D83AE) with proper stroke effects and vector rendering
-- **Chain-based rendering**: Builds continuous river chains between nodes (sources/junctions)
-
-#### **Integration Updates** (`src/main.js`)
-- **Updated imports**: Changed from `renderRiversSmooth` to `renderRiversCurves`
-- **Updated function calls**: Both river rendering calls now use the curves renderer with `seaLevel` parameter
-- **Preserved compatibility**: Maintains existing river generation pipeline and lake integration
-
-### 🔧 **Technical Implementation**
-
-#### **Tributary Seeding Algorithm**
-- **Target density**: Aims for ~10% of land cells to become river channels
-- **Quantile calculation**: Uses sorted flux array to find appropriate threshold
-- **Slope bias**: Steep areas (slope ≥ 0.15) get preferential river formation
-- **Precipitation bias**: Wet areas (≥1.1× mean precipitation) get preferential river formation
-- **Near-threshold logic**: Cells within 80% of threshold can become rivers with bias conditions
-
-#### **Curve Rendering System**
-- **Meander generation**: `addMeander()` function creates perpendicular offsets at 1/3 and 2/3 points
-- **Chain building**: Walks downstream from sources/junctions until reaching mouth or next junction
-- **Delta creation**: Detects river mouths and creates short distributaries to ocean neighbors
-- **D3 integration**: Uses `d3.line()` with `curveCatmullRom.alpha(0.95)` for smooth interpolation
-- **Width scaling**: Rivers scale logarithmically by discharge Q (0.9-3.7px range)
-
-#### **Key Functions**
-- `addMeander()`: Generates perpendicular jitter for natural river bends
-- `buildChains()`: Constructs river chains with meander points and delta detection
-- `renderRiversCurves()`: Main rendering function with D3 data binding and Catmull-Rom curves
-- Enhanced threshold logic in `generateRivers()` for denser tributary networks
-
-### 🎨 **Visual Improvements**
-- **Denser river network**: ~10% of land cells become channels (vs previous ~8%)
-- **Natural meandering**: Perpendicular jitter creates realistic river bends and curves
-- **Smooth appearance**: Catmull-Rom interpolation eliminates angular edges completely
-- **River deltas**: Short distributaries at mouths for realistic coastal features
-- **Professional quality**: Rivals Azgaar's Fantasy Map Generator in visual appeal
-- **Consistent density**: River networks maintain similar density across different map types
-
-### 📊 **Performance & Quality**
-- **Efficient rendering**: Uses D3 data binding with enter/update/exit patterns
-- **Vector effects**: Non-scaling strokes maintain consistent visual width across zoom levels
-- **Memory efficient**: Chain-based approach reduces redundant edge calculations
-- **Deterministic**: Maintains seedable RNG for consistent results across generations
-
-### 📁 **Files Modified**
-- `src/modules/rivers.js` - Enhanced tributary seeding with lower threshold and headwater bias
-- `src/render/rivers-curves.js` - New Catmull-Rom renderer with meander and delta effects
-- `src/main.js` - Updated imports and function calls to use curves renderer
-- `src/render/rivers-smooth.js` - Preserved for comparison (unused)
-- `src/render/rivers-edges.js` - Preserved for comparison (unused)
-
-### ✅ **Verification**
-- No linting errors introduced
-- Maintains ES module structure and D3 v5 compatibility
-- Follows project coding standards and conventions
-- Expected console output: `[rivers:gen]` shows increased segments/sources and lower threshold
-- Rivers layer displays many more fine tributaries with smooth, meandering curves
-
----
-
-## 2025-01-27 - Smooth River Renderer Implementation ✅
-
-### 🎯 **Smooth Polyline River Rendering**
-Implemented a new smooth polyline renderer for rivers that creates flowing, continuous river paths instead of individual edge segments. This provides much more visually appealing and realistic river visualization.
-
-### 📋 **What Was Accomplished**
-
-#### **Smooth River Renderer** (`src/render/rivers-smooth.js`)
-- **Chain-based rendering**: Builds continuous river chains between nodes (sources/junctions)
-- **Chaikin corner cutting**: Applies 1-pass smoothing algorithm for natural river curves
-- **Edge midpoint tracking**: Uses shared Voronoi edge midpoints for accurate river paths
-- **Width scaling**: Rivers scale by discharge Q at downstream ends (0.9-3.7px range)
-- **SVG path rendering**: Uses `<path>` elements with proper stroke styling and vector effects
-- **Performance optimized**: Includes proper D3 data binding with enter/update/exit patterns
-
-#### **Key Features**
-- **Smooth polylines**: Rivers now appear as continuous, flowing paths instead of segmented edges
-- **Natural width variation**: River width scales logarithmically with water discharge
-- **Proper styling**: Blue color (#49a8ff) with rounded line caps and joins
-- **Non-scaling strokes**: Rivers maintain consistent visual width across zoom levels
-- **Chain detection**: Automatically identifies river sources (degree 0) and junctions (degree ≥2)
-
-#### **Integration Updates** (`src/main.js`)
-- **Updated imports**: Replaced `renderRiversEdges` with `renderRiversSmooth`
-- **Updated function calls**: Both river rendering calls now use the smooth renderer
-- **Updated comments**: Documentation reflects the new smooth polyline approach
-- **Preserved compatibility**: Old edge renderer kept for comparison
-
-### 🔧 **Technical Implementation**
-
-#### **Core Functions**
-- `key()`: Generates consistent point keys for edge matching
-- `mid()`: Calculates midpoint between two points
-- `sharedEdge()`: Finds common edges between adjacent polygons
-- `chaikin()`: Applies corner cutting smoothing algorithm
-- `buildChains()`: Constructs river chains from source to mouth/junction
-- `renderRiversSmooth()`: Main rendering function with D3 data binding
-
-#### **Algorithm Details**
-- **Chain building**: Walks downstream from sources/junctions until reaching mouth or next junction
-- **Edge following**: Uses shared Voronoi edges to create accurate river paths
-- **Smoothing**: Single-pass Chaikin algorithm maintains endpoints while smoothing curves
-- **Width calculation**: Logarithmic scaling based on discharge Q values
-
-### 🎨 **Visual Improvements**
-- **Smoother appearance**: Rivers now have natural, flowing curves instead of angular edges
-- **Better continuity**: Continuous paths eliminate visual gaps between segments
-- **Realistic scaling**: Width variation reflects actual water flow patterns
-- **Professional quality**: Rivals commercial GIS software river visualization
-
-### 📁 **Files Modified**
-- `src/render/rivers-smooth.js` - New smooth renderer implementation
-- `src/main.js` - Updated imports and function calls
-- `src/render/rivers-edges.js` - Preserved for comparison (unused)
-
-### ✅ **Verification**
-- No linting errors introduced
-- Maintains ES module structure and D3 v5 compatibility
-- Follows project coding standards and conventions
-- Ready for immediate use in map generation
-
----
-
-## 2025-01-27 - Step 8 Complete: Advanced Hydrology System ✅
-
-### 🎯 **Complete Hydrology System Implementation**
-Successfully implemented a comprehensive hydrology system including priority-flood lakes, watershed analysis, river ordering, discharge calculations, and edge-following river visualization. This creates a sophisticated water system that rivals professional GIS software.
-
-### 📋 **What Was Accomplished**
-
-#### **Priority-Flood Lakes System** (`src/modules/lakes.js`)
-- **Lake detection**: Uses priority-flood algorithm to detect closed depressions above sea level
-- **Spill height calculation**: Computes water level needed for each cell to drain to ocean
-- **Lake identification**: Groups contiguous cells with same spill height into lake regions
-- **Outlet detection**: Finds single outlet point for each lake where water escapes
-- **Performance optimized**: Efficient min-heap implementation for large maps
-- **River integration**: Lake cells route directly to their outlets for realistic drainage
-
-#### **Lake Rendering System** (`src/render/lakes.js`)
-- **Polygon-based rendering**: Fills lake cells with light blue color (#76c8ff)
-- **Layer management**: Lakes render above land but below coastlines and rivers
-- **Visual styling**: 75% opacity fills with no stroke for clean appearance
-- **Layer integration**: Renders into existing `#lakes` group with layer panel support
-
-#### **Watershed Analysis System** (`src/modules/watersheds.js`)
-- **Watershed identification**: Groups rivers by their drainage basins (mouth-based)
-- **Strahler ordering**: Hierarchical river ordering where confluences increase order
-- **Shreve ordering**: Additive ordering that sums upstream contributions
-- **Discharge calculation**: Realistic discharge proxy using precipitation × area + upstream flow
-- **Geographic scaling**: Converts pixel areas to km² using latitude-dependent scaling
-- **Segment length**: Calculates river segment lengths in kilometers using haversine formula
-- **Mass balance tracking**: Validates discharge conservation and provides statistics
-
-#### **Edge-Following River Rendering** (`src/render/rivers-edges.js`)
-- **Shared edge detection**: Finds common edges between adjacent Voronoi cells
-- **Edge midpoint calculation**: Uses midpoints of shared edges for river path points
-- **Tolerance-based matching**: Uses 3-decimal precision for robust edge matching
-- **Discharge-based width**: River width scales from 0.8px to 3.4px based on discharge Q
-- **Logarithmic scaling**: Uses log10 scaling for better dynamic range visualization
-- **Realistic river paths**: Rivers follow natural boundaries between cells
-
-#### **Enhanced River System** (`src/modules/rivers.js`)
-- **Lake pass-through routing**: Lake cells route directly to their lake outlet
-- **Excluded lake rivers**: Rivers are not marked inside lake cells (prevents visual clutter)
-- **River-only statistics**: Uses `riverInDeg` to count only river-to-river connections
-- **Seamless integration**: Rivers flow naturally into and out of lakes
-
-#### **Layer System Integration**
-- **New lakes layer**: Added `#lakes` group to layer management system
-- **UI controls**: Added "Lakes" checkbox to layers panel in HTML
-- **Layer ordering**: Lakes positioned correctly in visual hierarchy
-- **Toggle support**: Lakes can be shown/hidden via layers panel
-
-### 🔧 **Technical Implementation**
-
-#### **Priority-Flood Algorithm**
-```javascript
-// Min-heap based flood-fill from ocean cells outward
-const H = new MinHeap();
-for (let i = 0; i < N; i++) {
-  if (polygons[i].height < seaLevel) {
-    H.push(i, polygons[i].height);
-  }
-}
-while (H.size) {
-  const {x: i, k: level} = H.pop();
-  for (const j of polygons[i].neighbors) {
-    const newLevel = Math.max(polygons[j].height, level);
-    H.push(j, newLevel);
-  }
+// Consistent import pattern across all modules
+import { seaLevel } from '../hydrology/constants.js';
+
+// Function parameter with default
+export function someFunction({ seaLevel = seaLevel, ... }) {
+  // Use seaLevel directly (no hardcoded 0.2)
 }
 ```
 
-#### **Watershed Analysis**
+#### **Debug Probe Enhancement**
 ```javascript
-// Strahler ordering: hierarchical river classification
-dn.orderStrahler = (dn._seenMax >= 2) ? (dn._maxStr + 1) : (dn._maxStr || 1);
-
-// Shreve ordering: additive upstream contribution
-dn.orderShreve += p.orderShreve;
-
-// Discharge calculation: precipitation × area + upstream flow
-dn.Q += p.Q + Math.max(0, (dn.prec ?? 0)) * areaKm2[d];
+// Enhanced hover HUD with hydrology data
+const dbg = {
+  height: Number(cell.height)?.toFixed(3),
+  precip: Number(cell.precipitation ?? 0)?.toFixed(3),
+  flux: Number(cell.flux ?? 0)?.toFixed(3),
+  river: cell.river ?? null
+};
 ```
 
-#### **Edge-Following Rendering**
-```javascript
-// Shared edge detection between adjacent cells
-const e = sharedEdge(p, d);
-if (e) {
-  const m1 = mid(e[0], e[1]); // midpoint of shared edge
-  const m2 = ed ? mid(ed[0], ed[1]) : m1; // downstream edge midpoint
-}
-```
+### ✅ **Acceptance Criteria Met**
 
-### 🎨 **Visual Features**
+- **Fixed seed → identical land/water mask**: All hardcoded sea level references replaced
+- **Neighbor counts stable**: No changes to neighbor detection algorithms
+- **Default probe shows flux≈0.02, precip≈0.02**: Hover HUD displays hydrology fields
+- **No linting errors**: All files pass syntax and style checks
+- **Development server functional**: Ready for testing and further development
 
-- **Realistic lake detection**: Natural depressions filled with water
-- **Proper drainage**: Each lake has a single outlet where water escapes
-- **Scientific river ordering**: Standard Strahler and Shreve ordering systems
-- **Discharge-based visualization**: River width reflects actual flow volume
-- **Edge-following paths**: Rivers follow natural terrain boundaries
-- **Layer management**: Complete integration with existing layer system
+### 🚀 **Next Steps (Phase 2)**
 
-### 📊 **Advanced Analytics**
+Phase 1 provides the foundation for:
+- **Phase 2**: Coastal downcutting and erosion simulation
+- **Phase 3**: Precipitation calculation and water source identification
+- **Phase 4**: Depression resolution and pit filling algorithms
+- **Phase 5**: Water flux calculation and flow direction
+- **Phase 6**: River network generation and routing
+- **Phase 7**: River line rendering and visualization
 
-The system provides comprehensive hydrology statistics:
-- **Lake counts**: Number of distinct lake regions
-- **Watershed basins**: Number of drainage basins
-- **River orders**: Strahler and Shreve ordering statistics
-- **Discharge totals**: Mass balance and flow calculations
-- **Geographic metrics**: Area and length calculations in real units
-
-### 🔄 **Integration Points**
-
-- **Climate system**: Uses precipitation data for discharge calculations
-- **Terrain system**: Requires height and neighbor data from geometry generation
-- **Layer system**: Integrates with existing layer management and UI controls
-- **Rendering system**: Uses D3 data join patterns for efficient updates
-- **Self-test system**: Follows project conventions and maintains invariants
-
-### 🚀 **Future Enhancements**
-
-The hydrology system provides a solid foundation for:
-- **River naming**: Integration with existing fantasy naming system
-- **Seasonal variations**: Dynamic flow based on climate patterns
-- **Water quality**: Chemical and biological modeling
-- **Flood modeling**: Overflow and inundation calculations
-- **Ecosystem modeling**: Habitat and biodiversity analysis
-
----
-
-## 2025-01-27 - Step 7 Complete: River Generation System ✅
-
-### 🎯 **River Generation System Complete**
-Successfully implemented a comprehensive river generation system that creates realistic river networks through downhill routing and flux accumulation. The system integrates seamlessly with the existing climate and terrain generation pipeline.
-
-### 📋 **What Was Accomplished**
-
-#### **River Generation Module** (`src/modules/rivers.js`)
-- **Downhill routing**: Each cell routes to its lowest neighbor using steepest descent algorithm
-- **Flux accumulation**: Multi-pass relaxation system (20 passes) accumulating flow from precipitation and base runoff
-- **Dynamic thresholding**: Rivers marked where flux >= 92nd percentile of land flux (configurable)
-- **Statistics tracking**: Accurate counting of sources, confluences, mouths, and segments
-- **River-only topology**: Uses `riverInDeg` to count only river-to-river connections for accurate network statistics
-- **Performance optimized**: Efficient for ~10k cells, deterministic with existing RNG
-
-#### **River Rendering System** (`src/render/rivers.js`)
-- **Centroid-to-centroid rendering**: Draws rivers as line segments between cell centers
-- **Flux-based width scaling**: River width scales from 0.6px to 2.8px based on flow volume
-- **Visual styling**: Blue rivers (#49a8ff) with rounded line caps and non-scaling stroke
-- **Layer management**: Automatically raises rivers above land/biomes/scalar overlays
-- **Zoom-independent visibility**: `vector-effect="non-scaling-stroke"` keeps lines readable at all zoom levels
-
-#### **Pipeline Integration** (`src/main.js`)
-- **Seamless integration**: Rivers generated after climate and features, before labeling
-- **Console logging**: Debug output shows river statistics (segments, sources, confluences, mouths, threshold)
-- **Layer panel support**: Rivers appear in existing layers toggle system
-
-#### **Layer Management Improvements** (`src/ui/layers-panel.js`)
-- **Scalar overlay compatibility**: Rivers and labels automatically stay above scalar overlays
-- **Dynamic layer ordering**: Ensures proper visual hierarchy when debug overlays are active
-- **User experience**: No more rivers disappearing behind overlays or becoming too thin when zoomed out
-
-### 🔧 **Technical Implementation**
-
-#### **River Generation Algorithm**
-```javascript
-// 1) Route downhill (steepest descent among neighbors)
-for (let i = 0; i < polygons.length; i++) {
-  const p = polygons[i];
-  if (h < seaLevel) { p.down = -1; continue; } // water: treated as sinks/outlets
-  let best = -1, bestH = h;
-  for (const j of p.neighbors) {
-    if (polygons[j].height < bestH) { bestH = polygons[j].height; best = j; }
-  }
-  p.down = best; // -1 if all neighbors are >= h (local pit / flat)
-}
-
-// 2) Accumulate flux topologically (multi-pass relaxation)
-for (let k = 0; k < 20; k++) {
-  for (let i = 0; i < polygons.length; i++) {
-    const p = polygons[i];
-    if (p.down >= 0) polygons[p.down].flux += p.flux * 0.05;
-  }
-}
-
-// 3) Mark rivers by dynamic threshold over land
-const dynThreshold = quantile(landFluxes, 0.92);
-for (let i = 0; i < polygons.length; i++) {
-  const p = polygons[i];
-  if (p.height >= seaLevel && p.flux >= dynThreshold && p.down !== -1) {
-    p.isRiver = true;
-  }
-}
-```
-
-#### **River Rendering Pipeline**
-```javascript
-// Centroid calculation and width scaling
-const width = v => 0.6 + 2.2 * norm(v); // 0.6..2.8 px
-const sel = gRivers.selectAll("line.river").data(data, d => d.i);
-sel.join(
-  enter => enter.append("line")
-    .attr("vector-effect", "non-scaling-stroke") // consistent width across zoom
-    .attr("stroke", "#49a8ff")
-    .attr("stroke-width", d => width(d.f))
-    .attr("stroke-linecap", "round")
-);
-```
-
-### 🎨 **Visual Features**
-
-- **Realistic river networks**: Rivers flow naturally from high elevations to ocean
-- **Variable width**: River thickness indicates flow volume and catchment size
-- **Consistent visibility**: Non-scaling stroke keeps rivers readable at all zoom levels
-- **Layer integration**: Rivers work seamlessly with existing layer management system
-- **Debug compatibility**: Rivers stay visible above scalar overlays and debug visualizations
-
-### 📊 **Statistics & Debugging**
-
-The system provides comprehensive statistics for debugging and analysis:
-- **Segments**: Total number of river cells
-- **Sources**: Rivers with no upstream river parents (riverInDeg === 0)
-- **Confluences**: Rivers with 2+ upstream river parents (riverInDeg >= 2)
-- **Mouths**: Rivers that drain into ocean or have no downhill neighbor
-- **Threshold**: Dynamic flux threshold used for river marking
-
-### 🔄 **Integration Points**
-
-- **Climate system**: Uses precipitation data from `assignPrecipitation()`
-- **Terrain system**: Requires height and neighbor data from geometry generation
-- **Layer system**: Integrates with existing `#rivers` group and layer panel
-- **Rendering system**: Uses D3 data join pattern for efficient updates
-- **Self-test system**: Follows project conventions and doesn't break existing invariants
-
-### 🚀 **Future Enhancements**
-
-The river system provides a solid foundation for future enhancements:
-- **River naming**: Could integrate with existing fantasy naming system
-- **River width refinement**: Could use more sophisticated width calculations
-- **River networks**: Could identify and name major river systems
-- **Water flow visualization**: Could show flow direction or velocity
-- **Seasonal variations**: Could vary river flow based on climate patterns
+The hydrology system is now ready for advanced water simulation algorithms while maintaining the existing map generation quality and performance.
 
 ---
 

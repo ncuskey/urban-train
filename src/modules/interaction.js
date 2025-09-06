@@ -246,8 +246,16 @@ export function attachInteraction({
     const merged = enter.merge(tip)
       .attr('transform', `translate(${ctx.screenX + 12},${ctx.screenY + 12})`);
 
+    // Add hydrology debug probe
+    const dbg = {
+      height: Number(cell.height)?.toFixed(3),
+      precip: Number(cell.precipitation ?? 0)?.toFixed(3),
+      flux: Number(cell.flux ?? 0)?.toFixed(3),
+      river: cell.river ?? null
+    };
+    
     merged.select('text.hud-line')
-      .text(() => `Cell ${cell.index || '—'} • h=${cell.height?.toFixed?.(2) ?? '—'}`);
+      .text(() => `Cell ${cell.index || '—'} • h=${dbg.height} • p=${dbg.precip} • f=${dbg.flux} • r=${dbg.river || '—'}`);
 
     const bbox = merged.select('text.hud-line').node().getBBox();
     merged.select('rect')

@@ -2,6 +2,7 @@
 // NOTE: d3 is global.
 
 import { buildVoronoi } from "./geometry.js";
+import { seaLevel } from "../hydrology/constants.js";
 
 export function refineCoastlineAndRebuild({
   samples,
@@ -9,7 +10,7 @@ export function refineCoastlineAndRebuild({
   polygons,
   mapWidth,
   mapHeight,
-  seaLevel = 0.2,
+  seaLevel = seaLevel,
   targetSpacing = 8,      // sensible default; will be overridden by main.js
   minSpacingFactor = 0.75 // avoid clustering new points too tightly
 }) {

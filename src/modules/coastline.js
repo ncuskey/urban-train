@@ -1,6 +1,8 @@
 // js/modules/coastline.js
 // NOTE: d3 is global; do not import it here.
 
+import { seaLevel } from '../hydrology/constants.js';
+
 export function drawCoastline({
   polygons,
   diagram,
@@ -15,7 +17,7 @@ export function drawCoastline({
   d3.selectAll(".coastline").remove();
   var line = []; // array to store coasline edges
   for (var i = 0; i < polygons.length; i++) {
-    if (polygons[i].height >= 0.2) {
+    if (polygons[i].height >= seaLevel) {
       var cell = diagram.cells[i];
       cell.halfedges.forEach(function(e) {
         var edge = diagram.edges[e];
@@ -24,7 +26,7 @@ export function drawCoastline({
           if (ea === i) {
             ea = edge.right.index;
           }
-          if (polygons[ea] && polygons[ea].height < 0.2) {
+          if (polygons[ea] && polygons[ea].height < seaLevel) {
             var start = edge[0].join(" ");
             var end = edge[1].join(" ");
             if (polygons[ea].featureType === "Ocean") {

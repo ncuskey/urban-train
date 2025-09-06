@@ -1888,6 +1888,27 @@ async function generate(count) {
       renderLakes(polygons, d3.select('#lakes'));
     }
 
+    // Timing hooks for hydrology steps
+    console.time("calculatePrecipitation");
+    // will be filled in Phase 3
+    console.timeEnd("calculatePrecipitation");
+
+    console.time("resolveDepressions");
+    // will be filled in Phase 4
+    console.timeEnd("resolveDepressions");
+
+    console.time("flux");
+    // will be filled in Phase 5
+    console.timeEnd("flux");
+
+    console.time("drawRiverLines");
+    // will be filled in Phase 7
+    console.timeEnd("drawRiverLines");
+
+    console.time("downcutCoastline");
+    // will be called in Phase 2
+    console.timeEnd("downcutCoastline");
+
     // Step 5b — assign per-cell precipitation (arbitrary units)
     {
       const stats = assignPrecipitation(polygons, state.mapCoords, { seaLevel: sl });

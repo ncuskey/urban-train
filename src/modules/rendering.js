@@ -1,6 +1,8 @@
 // js/modules/rendering.js
 // NOTE: d3 is global; do not import it here.
 
+import { seaLevel } from '../hydrology/constants.js';
+
 export function drawPolygons({
   polygons,
   color,            // the existing d3 scale used for height coloring
@@ -19,7 +21,7 @@ export function drawPolygons({
       d3.selectAll(".mapCell").remove();
       // redraw the polygons based on new heights
       var grads = [],
-        limit = 0.2;
+        limit = seaLevel;
       if (seaInput.checked == true) {
         limit = 0;
       }
@@ -55,7 +57,7 @@ export function drawPolygons({
     d3.selectAll(".mapCell").remove();
     // redraw the polygons based on new heights
     var grads = [],
-      limit = 0.2;
+      limit = seaLevel;
     if (seaInput.checked == true) {
       limit = 0;
     }
@@ -97,7 +99,7 @@ function toggleBlur({
 }) {
   d3.selectAll(".blur").remove();
   if (blurInput.valueAsNumber > 0) {
-    var limit = 0.2;
+    var limit = seaLevel;
     if (seaInput.checked == true) {
       limit = 0;
     }

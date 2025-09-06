@@ -2,6 +2,7 @@
 // NOTE: d3 is global if used; do not import it here.
 
 import { makeNamer } from './names.js';
+import { seaLevel } from '../hydrology/constants.js';
 
 // Local helper: robust "find cell index at (x,y)"
 function closestCellIndex(diagram, polygons, x, y) {
@@ -37,7 +38,7 @@ export function markFeatures({
   diagram,
   polygons,
   rng,
-  seaLevel = 0.2
+  seaLevel = seaLevel
 }) {
   // Create fantasy namer with seeded RNG
   const namer = makeNamer(() => rng.random());
