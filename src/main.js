@@ -4,6 +4,12 @@ window.DEBUG = false;
 // Label system temporarily disabled - flags removed until new modules arrive
 window.labelFlags = {};
 
+// Dev flag for seeding and normalization after refine
+const DEV_SEED_AND_NORMALIZE = true; // set false when comparing seeds for strict parity
+
+// Dev flag for downcutting (keep false until 2.5)
+const DEV_DOWNCUT = false; // keep false until 2.5
+
 // ── Water-only selection knobs
 const OCEAN_SAFE_INSET_PX = 8;      // already used for safe viewport
 const OCEAN_MIN_WATER_FRAC = 0.92;  // slightly relaxed to reduce "no fit"
@@ -82,6 +88,8 @@ import { attachInteraction, getVisibleWorldBounds, padBounds, zoom } from "./mod
 import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './modules/autofit.js';
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
 import { defineMapCoordinates, assignLatitudes, assignLongitudes } from './modules/geo.js';
+import { add, normalizeHeights } from "./hydrology/erosion.js";
+import { islandStrength, hillStrength, blobFalloffExp } from "./hydrology/constants.js";
 import { assignTemperatures, assignPrecipitation } from './modules/climate.js';
 import { buildProtoAnchors } from "./labels/anchors.js";
 import { makeAnchorIndex } from "./labels/spatial-index.js";
@@ -1490,8 +1498,9 @@ async function generate(count) {
     return; // Exit early if polygons are not available
   }
   
-  // Store polygons globally for access by other functions
+  // Store polygons and samples globally for access by other functions
   window.currentPolygons = polygons;
+  window.currentSamples = samples;
   // Colors D3 interpolation
   const color = d3.scaleSequential(d3.interpolateSpectral);
   // Queue array  
@@ -1590,6 +1599,47 @@ async function generate(count) {
 
         console.log(`[refine] Added ${refined.added} coastal points; polygons now: ${polygons.length}`);
       }
+    }
+    // =====================================================================
+    
+    // === Cache Cell Sites (after refine, before seeding) ===============
+    (function ensureCellSites() {
+      const cells = polygons; // polygons are the cells in this context
+      // Prefer the original Voronoi sites if available
+      const sites = samples || null; // samples contain the original Voronoi sites
+      for (let i = 0; i < cells.length; i++) {
+        const c = cells[i];
+        if (c.site && Number.isFinite(c.site.x) && Number.isFinite(c.site.y)) continue;
+
+        // Try sources in order of fidelity
+        let x, y;
+        if (sites && sites[i] && Number.isFinite(sites[i][0]) && Number.isFinite(sites[i][1])) {
+          // samples are [x, y] arrays
+          x = sites[i][0]; y = sites[i][1];
+        } else if (Number.isFinite(c.x) && Number.isFinite(c.y)) {
+          // some pipelines keep x/y directly on the cell
+          x = c.x; y = c.y;
+        } else if (c.centroid && Number.isFinite(c.centroid.x) && Number.isFinite(c.centroid.y)) {
+          ({ x, y } = c.centroid);
+        } else if (typeof getCellXY === "function") {
+          ({ x, y } = getCellXY(i)); // project helper if present
+        } else {
+          // last resort: skip; add() will guard
+          continue;
+        }
+        c.site = { x, y };
+      }
+      console.debug("[accessor] Ensured cell.site for %o cells", cells.length);
+    })();
+    // =====================================================================
+    
+    // === Dev Seeding Pass (behind flag) =================================
+    if (DEV_SEED_AND_NORMALIZE) {
+      // deterministic seed center (use a stable index, not Math.random)
+      const seedCell = Math.floor(polygons.length / 2);
+      console.debug("[hydrology:seeding] add island at", seedCell, { islandStrength, hillStrength, blobFalloffExp });
+      add(seedCell, "island");
+      normalizeHeights();
     }
     // =====================================================================
     
@@ -1886,9 +1936,11 @@ async function generate(count) {
     // will be filled in Phase 7
     console.timeEnd("drawRiverLines");
 
-    console.time("downcutCoastline");
-    // will be called in Phase 2
-    console.timeEnd("downcutCoastline");
+    if (DEV_DOWNCUT) {
+      console.time("downcutCoastline");
+      // downcutCoastline(state, 0.02);
+      console.timeEnd("downcutCoastline");
+    }
 
     // process the calculations
     markFeatures({
@@ -3118,6 +3170,14 @@ window.pickCellAt = pickCellAt; // Make spatial picking functions accessible
 window.updateCellsRaster = updateCellsRaster; // Make raster functions accessible
 window.updateCellsLOD = updateCellsLOD; // Make LOD functions accessible
 window.afterGenerate = afterGenerate; // Make afterGenerate function accessible
+
+// Make erosion module accessible globally
+import('./hydrology/erosion.js').then(erosionModule => {
+  window.add = erosionModule.add;
+  window.normalizeHeights = erosionModule.normalizeHeights;
+  window.getState = erosionModule.getState;
+  console.log('[erosion] Module loaded - use add(start, type) to add seeding domes, normalizeHeights() to normalize, getState() to get current state');
+});
 
 // Test functions for the new naming system
 window.testNames = function() {

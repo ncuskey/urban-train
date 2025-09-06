@@ -1,5 +1,177 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Phase 2.1 Complete: Hydrology Seeding System ✅
+
+### 🎯 **Seeding Domes & Height Normalization Implemented**
+Successfully implemented the seeding dome system for hydrology Phase 2.1, including deterministic island/hill domes, height normalization, and robust site caching. The system is now ready for A/B testing between seeded+normalized states and future downcutting phases.
+
+### 📋 **What Was Accomplished**
+
+#### **2.1.1 Seeding Dome Constants**
+- **Extended `src/hydrology/constants.js`**: Added seeding dome parameters
+  - `blobFalloffExp = 2.0`: Falloff exponent for dome shape
+  - `islandStrength = 0.4`: Height strength for island domes
+  - `hillStrength = 0.2`: Height strength for hill domes
+
+#### **2.1.2 Erosion Module (`src/hydrology/erosion.js`)**
+- **Created complete erosion module**: Seeding domes and height normalization
+- **`add(start, type)` function**: Adds deterministic island or hill domes
+  - BFS traversal with distance-based falloff
+  - Formula: `height += strength * (1 - d/R)^exp * sharpness`
+  - Radius: 60px for islands, 30px for hills
+  - All heights clamped to [0,1] range
+- **`normalizeHeights(state)` function**: Min-max normalization to [0,1] range
+  - Handles missing state gracefully
+  - Updates both state heights and polygon heights
+  - Performance timing with console.time/timeEnd
+- **`getState()` helper**: Provides current state with heights, cells, and samples
+
+#### **2.1.3 Cell Site Caching**
+- **Added site caching in `src/main.js`**: Ensures all cells have `cell.site = {x, y}`
+- **Multi-source resolution**: Tries sources in order of fidelity
+  - Original Voronoi sites from samples array
+  - Direct x/y properties on cells
+  - Centroid coordinates if available
+  - Helper functions if present
+- **Post-refine timing**: Runs after coastal refinement, before seeding
+- **Graceful handling**: Skips cells without valid coordinates
+
+#### **2.1.4 Pipeline Integration**
+- **Wired seeding pass**: Added after refine step with dev flag control
+- **Deterministic seeding**: Uses `Math.floor(polygons.length / 2)` for stable center
+- **Dev flag**: `DEV_SEED_AND_NORMALIZE = true` (can be disabled for strict parity)
+- **Global exposure**: Functions available as `window.add()`, `window.normalizeHeights()`, `window.getState()`
+
+#### **2.1.5 Downcut Preparation**
+- **Added dev flag**: `DEV_DOWNCUT = false` to keep downcutting disabled until Phase 2.5
+- **Prepared timing hooks**: Ready for `downcutCoastline(state, 0.02)` when enabled
+- **A/B testing ready**: Can compare seeded+normalized vs seeded+normalized+downcut
+
+### 🔧 **Technical Implementation**
+
+#### **Seeding Dome Algorithm**
+```javascript
+// BFS traversal with distance-based falloff
+const visited = new Set([start]);
+const q = [start];
+h[start] = Math.min(1, h[start] + strength);
+
+while (q.length) {
+  const cell = q.shift();
+  const neigh = state.cells[cell]?.neighbors || [];
+  for (const n of neigh) {
+    if (visited.has(n)) continue;
+    visited.add(n);
+    
+    const s = getSiteOf(n);
+    if (!s) continue; // skip neighbors w/out coords
+    
+    const dx = s.x - startSite.x, dy = s.y - startSite.y;
+    const d = Math.hypot(dx, dy);
+    if (d > R) continue;
+    
+    const delta = strength * Math.pow(1 - d / R, exp) * sharpness;
+    h[n] = Math.min(1, h[n] + delta);
+    q.push(n);
+  }
+}
+```
+
+#### **Height Normalization**
+```javascript
+// Min-max normalization to [0,1] range
+let min = Infinity, max = -Infinity;
+for (let i = 0; i < h.length; i++) {
+  const v = h[i];
+  if (v < min) min = v;
+  if (v > max) max = v;
+}
+const range = Math.max(1e-9, (max - min));
+for (let i = 0; i < h.length; i++) {
+  h[i] = (h[i] - min) / range;
+  if (h[i] < 0) h[i] = 0;
+  if (h[i] > 1) h[i] = 1;
+}
+```
+
+#### **Site Caching**
+```javascript
+// Multi-source site resolution
+for (let i = 0; i < cells.length; i++) {
+  const c = cells[i];
+  if (c.site && Number.isFinite(c.site.x) && Number.isFinite(c.site.y)) continue;
+  
+  let x, y;
+  if (sites && sites[i] && Number.isFinite(sites[i][0]) && Number.isFinite(sites[i][1])) {
+    x = sites[i][0]; y = sites[i][1]; // samples are [x, y] arrays
+  } else if (Number.isFinite(c.x) && Number.isFinite(c.y)) {
+    x = c.x; y = c.y;
+  } else if (c.centroid && Number.isFinite(c.centroid.x) && Number.isFinite(c.centroid.y)) {
+    ({ x, y } = c.centroid);
+  } else {
+    continue; // skip cells without valid coordinates
+  }
+  c.site = { x, y };
+}
+```
+
+### 🎯 **Impact & Benefits**
+
+#### **Enhanced Hydrology Foundation**
+- **Deterministic seeding**: Consistent island domes for testing and development
+- **Height normalization**: Prevents height drift in subsequent pipeline steps
+- **Robust site access**: Reliable coordinate access for all hydrology operations
+- **Defensive coding**: Graceful handling of missing data and edge cases
+
+#### **Development Workflow**
+- **Console testing**: Easy manual testing with `add(100, "island")` and `normalizeHeights()`
+- **Dev flag control**: Can disable seeding for strict parity comparisons
+- **A/B testing ready**: Clean separation between seeded+normalized and future downcut states
+- **Performance monitoring**: Timing hooks for optimization and debugging
+
+#### **Pipeline Integration**
+- **Post-refine timing**: Seeding runs after coastal cells exist
+- **Pre-feature timing**: Normalization runs before feature classification
+- **Non-disruptive**: Doesn't change normal generation behavior when disabled
+- **Future-ready**: Prepared for Phase 2.5 downcutting integration
+
+### 🧪 **Testing & Verification**
+
+#### **Manual Testing**
+```javascript
+// Test seeding domes
+add(100, "island");  // Add island dome at cell 100
+add(50, "hill");     // Add hill dome at cell 50
+
+// Test normalization
+normalizeHeights();  // Normalize all heights to [0,1]
+
+// Verify results
+const heights = window.currentPolygons.map(p => p.height);
+console.log('Min:', Math.min(...heights)); // Should be 0
+console.log('Max:', Math.max(...heights)); // Should be 1
+```
+
+#### **Console Output**
+- `[accessor] Ensured cell.site for [number] cells`
+- `[hydrology:seeding] add island at [cell] {islandStrength: 0.4, hillStrength: 0.2, blobFalloffExp: 2}`
+- `[erosion] Added island dome at cell [number], affected ~[number] cells`
+- `[erosion] normalizeHeights min=... max=... range=...`
+
+### 🚀 **Next Steps**
+
+#### **Phase 2.5: Downcutting**
+- Enable `DEV_DOWNCUT = true` when ready
+- Implement `downcutCoastline(state, 0.02)` function
+- A/B test seeded+normalized vs seeded+normalized+downcut
+
+#### **Phase 3: Precipitation**
+- Implement precipitation calculation
+- Use seeded domes as elevation input
+- Integrate with existing timing hooks
+
+---
+
 ## 2025-01-27 - Phase 1 Complete: Hydrology System Foundation ✅
 
 ### 🎯 **Hydrology System Normalized & Locked Down**
