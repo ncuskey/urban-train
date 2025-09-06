@@ -30,19 +30,43 @@ A web‑based fantasy map generator that builds Voronoi‑based worlds with real
 
 ## Quick start
 
-**Requirements**: Any modern browser. No build step.
+**Requirements**: Any modern browser. TypeScript compilation step required for hydrology system.
 
-1. Serve the folder from a local static server (recommended):
+1. Compile TypeScript to browser JavaScript:
 
 ```bash
 cd urban-train
+npm run emit:js
+```
+
+2. Serve the folder from a local static server:
+
+```bash
 python3 -m http.server 8000
 # then open http://localhost:8000
 ```
 
-> Opening the file directly from `file://` can work, but a local server is more reliable for module imports.
+> The hydrology system uses TypeScript modules compiled to browser-compatible JavaScript. The `emit:js` command compiles TypeScript to `public/vendor/hydrology/` without requiring a bundler.
 
-2. Open `index.html`. Use **Random map**, **Options**, and the **Layers panel** (top-right) to explore different map layers and debug visualizations.
+3. Open `index.html`. Use **Random map**, **Options**, and the **Layers panel** (top-right) to explore different map layers and debug visualizations.
+
+### TypeScript Compilation
+
+The hydrology system is written in TypeScript and compiled to browser-compatible JavaScript:
+
+```bash
+# Compile TypeScript to JavaScript
+npm run emit:js
+
+# Files are output to public/vendor/hydrology/
+# No bundler required - direct TypeScript compilation
+```
+
+**Key features:**
+- **No bundler required** - Direct TypeScript compilation to ES modules
+- **CDN dependencies** - d3-delaunay loaded from CDN
+- **Static serving** - Works with any static file server
+- **Proper MIME types** - No video/mp2t errors
 
 ### Development & CI
 

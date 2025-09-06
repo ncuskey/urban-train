@@ -1,5 +1,5 @@
-import { Cell, CellId } from "./types";
-import { SeededRandom } from "./rng";
+import { Cell, CellId } from "./types.js";
+import { SeededRandom } from "./rng.js";
 
 /**
  * Options that mirror the JSFiddle sliders:

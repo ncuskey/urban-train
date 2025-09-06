@@ -1,6 +1,6 @@
-import { Cell, CellId, HydroParams, WindToggles } from "./types";
-import { SeededRandom } from "./rng";
-import { seaLevel } from "./constants";
+import { Cell, CellId, HydroParams, WindToggles } from "./types.js";
+import { SeededRandom } from "./rng.js";
+import { seaLevel } from "./constants.js";
 
 /**
  * Function signature required to locate the owning cell for a point.

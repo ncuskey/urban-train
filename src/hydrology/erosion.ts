@@ -1,8 +1,8 @@
-import { Cell } from "./types";
+import { Cell } from "./types.js";
 import {
   seaLevel,
   riverDowncutDivisor,
-} from "./constants";
+} from "./constants.js";
 
 /**
  * Coastline downcutting (verbatim behavior):

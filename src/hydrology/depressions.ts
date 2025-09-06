@@ -1,5 +1,5 @@
-import { Cell } from "./types";
-import { seaLevel, pitRaiseEpsilon } from "./constants";
+import { Cell } from "./types.js";
+import { seaLevel, pitRaiseEpsilon } from "./constants.js";
 
 /**
  * Return the subset of cells considered "land" (height >= seaLevel).

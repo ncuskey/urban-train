@@ -83,9 +83,8 @@ import { fitToLand, autoFitToWorld, afterLayout, clampRectToBounds } from './mod
 import { refineCoastlineAndRebuild } from "./modules/refine.js";
 import { defineMapCoordinates, assignLatitudes, assignLongitudes } from './modules/geo.js';
 import { assignTemperatures, assignPrecipitation } from './modules/climate.js';
-// STEP 7 — Rivers (Azgaar-style, clean pipeline)
-import { buildAzRivers } from './modules/hydro/rivers-az.js';
-import { renderRiversAz } from './render/rivers-az.js';
+// STEP 7 — Hydrology (New TypeScript orchestrator)
+import { runHydrology, renderHydrology } from '/public/vendor/hydrology/index.js';
 import { computeLakes } from './modules/lakes.js';
 import { renderLakes } from './render/lakes.js';
 import { buildProtoAnchors } from "./labels/anchors.js";
@@ -1899,16 +1898,32 @@ async function generate(count) {
       }
     }
 
-    // Step 7 — Rivers (Azgaar-style, clean pipeline)
-    console.time('rivers:az');
-    const { chains, stats } = buildAzRivers(polygons, { seaLevel: sl });
-    console.timeEnd('rivers:az');
-    console.log('[rivers:az]', stats);
+    // Step 7 — Hydrology (New TypeScript orchestrator)
+    console.time('hydrology:orchestrator');
+    const hydroOutputs = runHydrology({
+      width: mapWidth,
+      height: mapHeight,
+      poissonRadius: 4,
+      seaLevel: sl,
+      precip: 7,
+      downcut: 0.1,
+      winds: { N: false, E: false, S: false, W: false, randomize: true },
+      rngSeed: state.seed
+    });
+    console.timeEnd('hydrology:orchestrator');
+    console.log('[hydrology:orchestrator]', {
+      cells: hydroOutputs.cells.length,
+      coastIslands: hydroOutputs.coastIslands.length,
+      coastLakes: hydroOutputs.coastLakes.length,
+      riverSegments: hydroOutputs.riverSegments.length,
+      riversCount: hydroOutputs.meta.riversCount
+    });
 
-    // Render Az rivers with chains
-    renderRiversAz(chains, {
-      gRivers: d3.select('#rivers'),
-      gShade: d3.select('#riversShade').empty() ? d3.select('#world').append('g').attr('id','riversShade') : d3.select('#riversShade')
+    // Render hydrology with new SVG renderer
+    const svg = d3.select('svg');
+    renderHydrology(svg.node(), hydroOutputs, {
+      blurFilterId: 'blurFilter',
+      shallowPatternId: 'shallowHatch'
     });
 
     // Initialize / refresh the Layers panel (idempotent; safe on re-gen)

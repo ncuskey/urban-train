@@ -12,19 +12,6 @@ export * from "./coast.js";
 export * from "./orchestrator.js";
 export * from "./svgRender.js";
 export * from "./migrate.js";
-
 // Export flux and rivers with specific items to avoid conflicts
-export { 
-  routeFluxAndRivers,
-  type RouteResult,
-  type GetEdgeMidpoint,
-  type RiverPoint as FluxRiverPoint,
-  type RiverPointType as FluxRiverPointType
-} from "./flux.js";
-
-export {
-  buildRiverSegments,
-  type FindCellAt as RiversFindCellAt,
-  type RiverPoint as RiversRiverPoint,
-  type RiverPointType as RiversRiverPointType
-} from "./rivers.js";
+export { routeFluxAndRivers } from "./flux.js";
+export { buildRiverSegments } from "./rivers.js";

@@ -1,5 +1,5 @@
-import { BezierSegment, Cell, PathPoint } from "./types";
-import { SeededRandom } from "./rng";
+import { BezierSegment, Cell, PathPoint } from "./types.js";
+import { SeededRandom } from "./rng.js";
 
 /**
  * Find cell at arbitrary (x,y). Same idea as in precipitation:

@@ -1,5 +1,5 @@
-import { Cell, Path, PathPoint } from "./types";
-import { seaLevel } from "./constants";
+import { Cell, Path, PathPoint } from "./types.js";
+import { seaLevel } from "./constants.js";
 
 /**
  * Provide the exact shared edge (two endpoints) for neighboring cells a<->b.

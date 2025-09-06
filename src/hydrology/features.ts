@@ -1,5 +1,5 @@
-import { Cell, FeatureType } from "./types";
-import { seaLevel } from "./constants";
+import { Cell, FeatureType } from "./types.js";
+import { seaLevel } from "./constants.js";
 
 export type NameProvider = (kind: FeatureType, number: number) => string | undefined;
 

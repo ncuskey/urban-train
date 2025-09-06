@@ -1,6 +1,6 @@
-import { seaLevel, sourceFluxThreshold, deltaFluxThreshold } from "./constants";
-import { Cell, CellId } from "./types";
-import { getLandSortedDesc } from "./depressions";
+import { seaLevel, sourceFluxThreshold, deltaFluxThreshold } from "./constants.js";
+import { Cell, CellId } from "./types.js";
+import { getLandSortedDesc } from "./depressions.js";
 
 /**
  * A river polyline is built from these points (source, course, delta, estuary),

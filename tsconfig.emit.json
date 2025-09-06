@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "outDir": "public/vendor/hydrology",
+    "rootDir": "src/hydrology",
+    "strict": false,
+    "declaration": false,
+    "sourceMap": false,
+    "skipLibCheck": true,
+    "allowJs": false
+  },
+  "include": ["src/hydrology/**/*.ts"],
+  "exclude": ["src/hydrology/**/*.test.ts"]
+}
