@@ -1920,10 +1920,12 @@ async function generate(count) {
     });
 
     // Render hydrology with new SVG renderer
-    const svg = d3.select('svg');
-    renderHydrology(svg.node(), hydroOutputs, {
+    const world = document.getElementById("world"); // zoom root from interaction.js
+    renderHydrology(world, hydroOutputs, {
       blurFilterId: 'blurFilter',
-      shallowPatternId: 'shallowHatch'
+      shallowPatternId: 'shallowHatch',
+      maskId: 'shape',           // use existing mask
+      perSegment: true           // keep Azgaar-accurate widths
     });
 
     // Initialize / refresh the Layers panel (idempotent; safe on re-gen)

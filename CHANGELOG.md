@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Flexible renderer targeting** - Accepts SVG or G containers, auto-detects #world
+- **Mask integration** - Optional mask support for ocean/shallow layers
+- **Configurable layer IDs** - Custom layer naming via opts.layerIds
 - **TypeScript compilation to browser JS** - No bundler required
 - **CDN dependency support** - d3-delaunay loaded from CDN
 - **Per-segment river rendering** - Azgaar-accurate river widths
@@ -16,6 +19,10 @@ All notable changes to this project will be documented in this file.
 - Comprehensive integration tests for hydrology system
 
 ### Changed
+- **Renderer integration** - Now targets #world group instead of creating .viewbox
+- **Container flexibility** - renderHydrology accepts SVG or G containers
+- **Layer mounting** - Mounts under provided root with smart element detection
+- **Main.js integration** - Calls renderer with #world group for better app integration
 - **Build process** - Added `npm run emit:js` for TypeScript compilation
 - **Import paths** - Updated to use compiled JS from `/public/vendor/hydrology/`
 - **River rendering** - Per-segment rendering with individual stroke widths

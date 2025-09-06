@@ -1,5 +1,82 @@
 # Urban Train Development Log
 
+## 2025-01-27 - Renderer Integration with #world Group ✅
+
+### 🎯 **Seamless Integration with App Structure**
+Successfully patched the hydrology renderer to target the `#world` group instead of creating its own `.viewbox`. This provides better integration with the existing app structure, zoom behavior, and layer management.
+
+### 📋 **What Was Accomplished**
+
+#### **Flexible Container Support**
+- ✅ Updated `renderHydrology` to accept either `<svg>` or `<g>` container
+- ✅ Auto-detection logic finds `#world` or `g.viewbox` when SVG is passed
+- ✅ Error handling validates container is SVG or G element
+- ✅ Backward compatibility maintained for SVG-only calls
+
+#### **Smart Layer Management**
+- ✅ Modified `ensureLayers` to mount under provided root instead of creating new `.viewbox`
+- ✅ Configurable layer IDs via `opts.layerIds` for custom naming
+- ✅ Smart element creation: prefers existing by ID, then by class, then creates new
+- ✅ Maintains consistent layer stacking order
+
+#### **Mask Integration**
+- ✅ Added optional mask support for ocean and shallow layers
+- ✅ Default mask ID `"shape"` matches existing HTML structure
+- ✅ Conditional application only when mask exists in SVG
+- ✅ Proper mask URL generation and application
+
+#### **Application Integration**
+- ✅ Updated `main.js` to call renderer with `#world` group
+- ✅ Enhanced options include `maskId: 'shape'` and `perSegment: true`
+- ✅ Maintains all existing functionality and performance
+
+### 🔧 **Technical Details**
+
+#### **Function Signature**
+```typescript
+// Before
+export function renderHydrology(svg: SVGSVGElement, outputs: HydroOutputs, opts: RenderOptions = {})
+
+// After
+export function renderHydrology(container: SVGSVGElement | SVGGElement, outputs: HydroOutputs, opts: RenderOptions = {})
+```
+
+#### **Container Detection Logic**
+```typescript
+const root = (container.tagName === "svg"
+  ? (container.querySelector("#world") ||
+     container.querySelector("g.viewbox") ||
+     container)           // last resort: svg itself
+  : container);            // already a <g>
+```
+
+#### **Usage Examples**
+```javascript
+// Target the #world group (recommended)
+const world = document.getElementById("world");
+renderHydrology(world, outputs, {
+  maskId: 'shape',
+  perSegment: true
+});
+
+// Still works with SVG (auto-detects #world)
+const svg = document.querySelector('svg');
+renderHydrology(svg, outputs, {
+  maskId: 'shape',
+  perSegment: true
+});
+```
+
+### 🎉 **Benefits**
+- **Better Integration** - Renders directly into app's zoom root
+- **Flexible Targeting** - Works with both SVG and G containers
+- **Mask Support** - Properly applies existing masks for visual consistency
+- **Configurable IDs** - Can reuse existing layer IDs or create custom ones
+- **Backward Compatible** - Still works if called with SVG element
+- **Performance** - No duplicate layer creation, mounts under existing structure
+
+---
+
 ## 2025-01-27 - TypeScript Compilation to Browser JS ✅
 
 ### 🎯 **No-Bundler TypeScript Setup**

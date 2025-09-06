@@ -1,6 +1,15 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
-export function renderHydrology(svg, outputs, opts = {}) {
-    const { oceanFill = "#5E4FA2", islandFill = "#f9f9eb", lakeFill = "#4D83AE", lakeStroke = "#386e98", coastStroke = "black", riverStroke = "#4D83AE", riverShadow = "black", blurFilterId = null, shallowPatternId = null, hardClear = false, perSegment = true } = opts;
+export function renderHydrology(container, outputs, opts = {}) {
+    const { oceanFill = "#5E4FA2", islandFill = "#f9f9eb", lakeFill = "#4D83AE", lakeStroke = "#386e98", coastStroke = "black", riverStroke = "#4D83AE", riverShadow = "black", blurFilterId = null, shallowPatternId = null, hardClear = false, perSegment = true, maskId = null } = opts;
+    const svg = container.ownerSVGElement || (container.tagName === "svg" ? container : null);
+    if (!svg)
+        throw new Error("renderHydrology: pass an <svg> or a <g> inside an <svg>");
+    // If the caller passed the <svg>, try to use the app's zoom root first
+    const root = (container.tagName === "svg"
+        ? (container.querySelector("#world") ||
+            container.querySelector("g.viewbox") ||
+            container) // last resort: svg itself
+        : container); // already a <g>
     // 0) Optional hard clear (but keep <defs>)
     if (hardClear) {
         const defs = svg.querySelector("defs");
@@ -10,7 +19,7 @@ export function renderHydrology(svg, outputs, opts = {}) {
             svg.appendChild(defs);
     }
     // 1) Ensure layer stack exists (Azgaar order)
-    const layers = ensureLayers(svg);
+    const layers = ensureLayers(root, opts);
     // 2) Clear dynamic layers
     clearLayer(layers.oceanLayer);
     clearLayer(layers.shallow);
@@ -28,6 +37,12 @@ export function renderHydrology(svg, outputs, opts = {}) {
         fill: oceanFill
     });
     layers.oceanLayer.appendChild(oceanRect);
+    // 3.5) Apply mask if available
+    const maskIdToUse = maskId || "shape"; // your index.html already has <mask id="shape">
+    const maskUrl = svg.querySelector(`#${maskIdToUse}`) ? `url(#${maskIdToUse})` : null;
+    if (maskUrl) {
+        layers.oceanLayer.setAttribute("mask", maskUrl);
+    }
     // 4) True coastal shallows (if any)
     if (shallowPatternId && outputs.cells) {
         const polys = outputs.cells.filter(c => c.type === "shallow" && Array.isArray(c.polygon) && c.polygon.length > 2);
@@ -39,6 +54,9 @@ export function renderHydrology(svg, outputs, opts = {}) {
             layers.shallow.appendChild(el("path", {
                 d, fill: `url(#${shallowPatternId})`, opacity: "0.8", stroke: "none"
             }));
+        }
+        if (maskUrl) {
+            layers.shallow.setAttribute("mask", maskUrl);
         }
     }
     // 5) Island background (under coasts/rivers)
@@ -151,24 +169,48 @@ export function renderHydrology(svg, outputs, opts = {}) {
     }
 }
 /* -------------------- helpers -------------------- */
-function ensureLayers(svg) {
-    // Wrap everything into a single .viewbox g (keeps parity with Azgaar)
-    const root = ensureGroup(svg, "viewbox");
-    const islandBack = ensureGroup(root, "islandBack");
-    const mapCells = ensureGroup(root, "mapCells");
-    const hatching = ensureGroup(root, "hatching");
-    const riversShade = ensureGroup(root, "riversShade");
-    const rivers = ensureGroup(root, "rivers");
-    const oceanLayer = ensureGroup(root, "oceanLayer");
-    const circles = ensureGroup(root, "circles");
-    const coastline = ensureGroup(root, "coastline");
-    const shallow = ensureGroup(root, "shallow");
-    const lakecoast = ensureGroup(root, "lakecoast");
-    const grid = ensureGroup(root, "grid");
-    // Reorder to match intended stacking
-    const order = [oceanLayer, shallow, islandBack, mapCells, hatching, lakecoast, coastline, riversShade, rivers, circles, grid];
-    order.forEach(g => root.appendChild(g));
-    return { root, islandBack, mapCells, hatching, riversShade, rivers, oceanLayer, circles, coastline, shallow, lakecoast, grid };
+function ensureLayers(root, opts) {
+    // Optionally let you reuse app IDs:
+    const ids = Object.assign({
+        oceanLayer: "oceanLayer",
+        shallow: "shallow",
+        islandBack: "islandBack",
+        lakecoast: "lakecoast",
+        coastline: "coastline",
+        riversShade: "riversShade",
+        rivers: "rivers",
+        mapCells: "mapCells",
+        hatching: "hatching",
+        circles: "circles",
+        grid: "grid"
+    }, opts.layerIds || {});
+    const g = (idOrClass) => {
+        // prefer id if a group already exists, else create with that id
+        let el = root.querySelector(`#${CSS.escape(idOrClass)}`);
+        if (!el)
+            el = root.querySelector(`g.${CSS.escape(idOrClass)}`);
+        if (!el) {
+            el = document.createElementNS(root.namespaceURI, "g");
+            el.setAttribute("id", idOrClass); // ids play nicer with your CSS
+            root.appendChild(el);
+        }
+        return el;
+    };
+    const oceanLayer = g(ids.oceanLayer);
+    const shallow = g(ids.shallow);
+    const islandBack = g(ids.islandBack);
+    const mapCells = g(ids.mapCells);
+    const hatching = g(ids.hatching);
+    const lakecoast = g(ids.lakecoast);
+    const coastline = g(ids.coastline);
+    const riversShade = g(ids.riversShade);
+    const rivers = g(ids.rivers);
+    const circles = g(ids.circles);
+    const grid = g(ids.grid);
+    // keep layer order consistent with your app
+    [oceanLayer, shallow, islandBack, mapCells, hatching, lakecoast, coastline, riversShade, rivers, circles, grid]
+        .forEach(n => root.appendChild(n));
+    return { root, oceanLayer, shallow, islandBack, mapCells, hatching, lakecoast, coastline, riversShade, rivers, circles, grid };
 }
 function ensureGroup(parent, className) {
     const sel = parent.querySelector(`g.${cssEscape(className)}`);
